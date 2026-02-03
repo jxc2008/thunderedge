@@ -1,0 +1,21 @@
+# requirements.txt
+# Web framework
+flask==3.0.0
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Web scraping
+requests==2.31.0
+beautifulsoup4==4.12.2
+
+# Data processing (if needed)
+# pandas==2.1.4
+# numpy==1.26.2
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Optional (uncomment if needed)
+# selenium==4.15.0
+# webdriver-manager==4.0.1
+# schedule==1.2.0

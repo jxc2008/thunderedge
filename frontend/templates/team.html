@@ -1,0 +1,611 @@
+<!-- frontend/templates/team.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThunderEdge | Team Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #000000;
+            color: #e4e4e7;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .page-header {
+            background: linear-gradient(180deg, #0a0a0a 0%, #000000 100%);
+            border-bottom: 1px solid #27272a;
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.02em;
+            text-decoration: none;
+        }
+        
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        
+        .header-nav {
+            display: flex;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .header-nav a {
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: #a1a1aa;
+        }
+        
+        .header-nav a:hover, .header-nav a.active {
+            color: #ffffff;
+            background: #18181b;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .hero-section {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        
+        .subtitle {
+            font-size: 1.125rem;
+            color: #71717a;
+            margin-bottom: 2rem;
+        }
+        
+        .search-section {
+            margin: 2rem 0;
+        }
+        
+        .search-box {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .input-group label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #a1a1aa;
+        }
+        
+        .input-group input {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: #ffffff;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 0.875rem 2rem;
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 3rem;
+        }
+        
+        .spinner {
+            border: 3px solid #27272a;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .result {
+            display: none;
+        }
+        
+        .team-card {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .team-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #27272a;
+        }
+        
+        .team-header h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        
+        .roster {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .roster-player {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            color: #e4e4e7;
+        }
+        
+        .event-section {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+        }
+        
+        .event-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 1rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .stat-box {
+            background: #18181b;
+            border: 1px solid #27272a;
+            padding: 1rem;
+            border-radius: 8px;
+        }
+        
+        .stat-label {
+            font-size: 0.75rem;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+        
+        .pick-ban-section {
+            margin-top: 1.5rem;
+        }
+        
+        .pick-ban-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #ffffff;
+            margin-bottom: 1rem;
+        }
+        
+        .pick-ban-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        
+        .pick-ban-box {
+            background: #18181b;
+            border: 1px solid #27272a;
+            padding: 1rem;
+            border-radius: 8px;
+        }
+        
+        .pick-ban-type {
+            font-size: 0.875rem;
+            color: #71717a;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+        
+        .map-rate {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #27272a;
+        }
+        
+        .map-rate:last-child {
+            border-bottom: none;
+        }
+        
+        .map-name {
+            color: #e4e4e7;
+            font-size: 0.875rem;
+        }
+        
+        .map-percentage {
+            color: #3b82f6;
+            font-weight: 600;
+        }
+        
+        #error {
+            display: none;
+            background: #7f1d1d;
+            border: 1px solid #991b1b;
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <header class="page-header">
+        <div class="header-content">
+            <a href="/" class="logo">
+                <div class="logo-icon">TE</div>
+                <span>ThunderEdge</span>
+            </a>
+            <nav class="header-nav">
+                <a href="/">Player Analysis</a>
+                <a href="/team" class="active">Team Analysis</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="hero-section">
+            <h1>VCT Team Analysis</h1>
+            <p class="subtitle">Team statistics, fights per round, and map pick/ban rates</p>
+        </div>
+        
+        <div class="search-section">
+            <div class="search-box">
+                <div class="input-group">
+                    <label>Team Name</label>
+                    <input type="text" id="teamInput" placeholder="Sentinels, LOUD, Fnatic..." />
+                </div>
+                <div class="input-group">
+                    <label>Region (Optional)</label>
+                    <input type="text" id="regionInput" placeholder="Americas, EMEA, Pacific, China" />
+                </div>
+                <button onclick="analyzeTeam()">Analyze Team</button>
+            </div>
+        </div>
+        
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="font-weight: 600; color: #e4e4e7;">Fetching Team Data</p>
+            <p style="font-size: 0.875rem;">Scraping team statistics from VLR.gg...</p>
+        </div>
+        
+        <div id="result" class="result">
+            <!-- Results will be inserted here -->
+        </div>
+        
+        <div id="error"></div>
+    </div>
+
+    <script>
+        // Debug: Log that script loaded
+        console.log('✅ [DEBUG] team.html script loaded');
+        console.log('✅ [DEBUG] Current URL:', window.location.href);
+        
+        // Test API endpoint availability
+        fetch('http://localhost:5000/api/stats')
+            .then(r => r.json())
+            .then(data => console.log('✅ [DEBUG] API endpoint test successful:', data))
+            .catch(err => console.error('❌ [DEBUG] API endpoint test failed:', err));
+        
+        async function analyzeTeam() {
+            const teamName = document.getElementById('teamInput').value.trim();
+            const region = document.getElementById('regionInput').value.trim();
+            
+            console.log('🔍 [DEBUG] analyzeTeam() called');
+            console.log('🔍 [DEBUG] Team name:', teamName);
+            console.log('🔍 [DEBUG] Region:', region || '(none)');
+            
+            if (!teamName) {
+                console.error('❌ [DEBUG] No team name provided');
+                showError('Please enter a team name');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            
+            try {
+                const startTime = performance.now();
+                let url = `http://localhost:5000/api/team/${encodeURIComponent(teamName)}`;
+                if (region) {
+                    url += `?region=${encodeURIComponent(region)}`;
+                }
+                
+                console.log('🌐 [DEBUG] Fetching URL:', url);
+                console.log('⏱️ [DEBUG] Request started at:', new Date().toISOString());
+                
+                const response = await fetch(url);
+                
+                console.log('📡 [DEBUG] Response status:', response.status, response.statusText);
+                console.log('📡 [DEBUG] Response headers:', Object.fromEntries(response.headers.entries()));
+                
+                if (!response.ok) {
+                    console.error('❌ [DEBUG] Response not OK:', response.status, response.statusText);
+                    const errorText = await response.text();
+                    console.error('❌ [DEBUG] Error response body:', errorText);
+                    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                
+                console.log('✅ [DEBUG] Response received in', elapsed, 'seconds');
+                console.log('📦 [DEBUG] Full response data:', JSON.stringify(data, null, 2));
+                
+                if (data.error) {
+                    console.error('❌ [DEBUG] Error in response:', data.error);
+                    showError(data.error);
+                    return;
+                }
+                
+                if (!data.analysis) {
+                    console.error('❌ [DEBUG] No analysis data in response');
+                    showError('No analysis data received from server');
+                    return;
+                }
+                
+                console.log('📊 [DEBUG] Analysis data:', JSON.stringify(data.analysis, null, 2));
+                
+                // Log event details
+                if (data.analysis.events && Array.isArray(data.analysis.events)) {
+                    console.log('📅 [DEBUG] Number of events:', data.analysis.events.length);
+                    data.analysis.events.forEach((event, index) => {
+                        console.log(`📅 [DEBUG] Event ${index + 1}:`, {
+                            name: event.event_name,
+                            matches_played: event.matches_played,
+                            total_rounds: event.total_rounds,
+                            total_kills: event.total_kills,
+                            total_deaths: event.total_deaths,
+                            fights_per_round: event.fights_per_round
+                        });
+                    });
+                } else {
+                    console.warn('⚠️ [DEBUG] No events array found in analysis');
+                }
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                displayResults(data.analysis, elapsed);
+            } catch (error) {
+                console.error('❌ [DEBUG] Exception caught:', error);
+                console.error('❌ [DEBUG] Error stack:', error.stack);
+                document.getElementById('loading').style.display = 'none';
+                showError('Error connecting to server: ' + error.message);
+            }
+        }
+        
+        function displayResults(analysis, elapsed) {
+            const resultDiv = document.getElementById('result');
+            
+            if (analysis.error) {
+                showError(analysis.error);
+                return;
+            }
+            
+            let eventsHtml = '';
+            
+            for (const event of analysis.events) {
+                // Build pick/ban HTML
+                let pickBanHtml = '';
+                
+                const pickBanTypes = [
+                    { key: 'first_ban', label: 'First Ban' },
+                    { key: 'second_ban', label: 'Second Ban' },
+                    { key: 'first_pick', label: 'First Pick' },
+                    { key: 'second_pick', label: 'Second Pick' }
+                ];
+                
+                for (const pbType of pickBanTypes) {
+                    const rates = event.pick_ban_rates[pbType.key];
+                    if (Object.keys(rates).length > 0) {
+                        let mapsHtml = '';
+                        for (const [mapName, percentage] of Object.entries(rates)) {
+                            mapsHtml += `
+                                <div class="map-rate">
+                                    <span class="map-name">${mapName}</span>
+                                    <span class="map-percentage">${percentage}%</span>
+                                </div>
+                            `;
+                        }
+                        
+                        pickBanHtml += `
+                            <div class="pick-ban-box">
+                                <div class="pick-ban-type">${pbType.label}</div>
+                                ${mapsHtml}
+                            </div>
+                        `;
+                    }
+                }
+                
+                eventsHtml += `
+                    <div class="event-section">
+                        <div class="event-header">${event.event_name}</div>
+                        <div class="stats-grid">
+                            <div class="stat-box">
+                                <div class="stat-label">Fights Per Round</div>
+                                <div class="stat-value">${event.fights_per_round}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">Total Kills</div>
+                                <div class="stat-value">${event.total_kills}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">Total Deaths</div>
+                                <div class="stat-value">${event.total_deaths}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">Total Rounds</div>
+                                <div class="stat-value">${event.total_rounds}</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">Matches Played</div>
+                                <div class="stat-value">${event.matches_played}</div>
+                            </div>
+                        </div>
+                        ${pickBanHtml ? `
+                        <div class="pick-ban-section">
+                            <div class="pick-ban-title">Map Pick/Ban Rates</div>
+                            <div class="pick-ban-grid">
+                                ${pickBanHtml}
+                            </div>
+                        </div>
+                        ` : '<p style="color: #71717a; margin-top: 1rem;">No pick/ban data available</p>'}
+                    </div>
+                `;
+            }
+            
+            resultDiv.innerHTML = `
+                <div class="team-card">
+                    <div class="team-header">
+                        <div>
+                            <h2>${analysis.team_name}</h2>
+                            <div class="roster">
+                                ${analysis.roster.map(player => `<span class="roster-player">${player}</span>`).join('')}
+                            </div>
+                        </div>
+                        <div style="font-size: 0.875rem; color: #71717a;">
+                            Query Time: ${elapsed}s
+                        </div>
+                    </div>
+                    ${eventsHtml}
+                </div>
+            `;
+            
+            resultDiv.style.display = 'block';
+        }
+        
+        function showError(message) {
+            console.error('🚨 [DEBUG] showError() called with message:', message);
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        // Allow Enter key to trigger search
+        document.getElementById('teamInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                analyzeTeam();
+            }
+        });
+        
+        document.getElementById('regionInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                analyzeTeam();
+            }
+        });
+    </script>
+</body>
+</html>

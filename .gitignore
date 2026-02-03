@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+temp/
+test_output.txt
+
+# Node modules (for Next.js frontend if exists)
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Vercel
+.vercel
+
+# Python cache
+*.pyc
+__pycache__/
+
+# Setup scripts (optional - remove if you want to keep it)
+# setup-git.ps1

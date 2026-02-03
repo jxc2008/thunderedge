@@ -1,0 +1,1076 @@
+<!-- frontend/templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThunderEdge | Valorant Kill Line Analytics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #000000;
+            color: #e4e4e7;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .page-header {
+            background: linear-gradient(180deg, #0a0a0a 0%, #000000 100%);
+            border-bottom: 1px solid #27272a;
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.02em;
+        }
+        
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        
+        .header-nav {
+            display: flex;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            color: #a1a1aa;
+        }
+        
+        .header-nav span {
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .header-nav span:hover {
+            color: #ffffff;
+            background: #18181b;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .hero-section {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.02em;
+        }
+        
+        .subtitle {
+            font-size: 1.125rem;
+            color: #71717a;
+            margin-bottom: 3rem;
+            font-weight: 400;
+        }
+        
+        .search-section {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .input-group label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #a1a1aa;
+            letter-spacing: 0.01em;
+        }
+        
+        input {
+            padding: 0.875rem 1rem;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            background: #18181b;
+            color: #ffffff;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: all 0.2s;
+            outline: none;
+        }
+        
+        input:focus {
+            border-color: #3b82f6;
+            background: #18181b;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        input:hover {
+            border-color: #3f3f46;
+        }
+        
+        input[type="number"] {
+            max-width: 140px;
+        }
+        
+        button {
+            padding: 0.875rem 2rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            font-family: inherit;
+            transition: all 0.2s;
+            box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3);
+        }
+        
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 3rem;
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+        }
+        
+        .spinner {
+            border: 3px solid #27272a;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading p {
+            color: #a1a1aa;
+            margin: 0.5rem 0;
+        }
+        
+        .result {
+            display: none;
+        }
+        
+        .performance-bar {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 1rem 1.5rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .perf-item {
+            color: #71717a;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .perf-item span {
+            color: #3b82f6;
+            font-weight: 600;
+        }
+        
+        .perf-item span.live-badge {
+            color: #f59e0b;
+        }
+        
+        .player-card {
+            background: linear-gradient(135deg, #0a0a0a 0%, #18181b 100%);
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .player-info h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.25rem;
+        }
+        
+        .team-name {
+            color: #71717a;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+        
+        .over-under-box {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.03) 0%, rgba(0, 0, 0, 0) 50%, rgba(239, 68, 68, 0.03) 100%);
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2.5rem;
+            margin: 2rem 0;
+        }
+        
+        .over-under-title {
+            font-size: 0.875rem;
+            color: #71717a;
+            margin-bottom: 2rem;
+            text-align: center;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        
+        .over-under-display {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 3rem;
+            flex-wrap: wrap;
+        }
+        
+        .over-stat, .under-stat {
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 10px;
+            min-width: 160px;
+        }
+        
+        .over-stat {
+            background: rgba(34, 197, 94, 0.05);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+        
+        .under-stat {
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        
+        .over-stat .percentage {
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: #22c55e;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }
+        
+        .under-stat .percentage {
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: #ef4444;
+            line-height: 1;
+            letter-spacing: -0.02em;
+        }
+        
+        .stat-label {
+            font-size: 0.875rem;
+            color: #71717a;
+            margin-top: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+        
+        .vs-divider {
+            font-size: 1.5rem;
+            color: #3f3f46;
+            font-weight: 600;
+        }
+        
+        .map-count {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.875rem;
+            color: #71717a;
+        }
+        
+        .classification {
+            font-size: 1.5rem;
+            font-weight: 700;
+            padding: 1.5rem 2rem;
+            border-radius: 12px;
+            text-align: center;
+            margin: 2rem 0;
+            border: 1px solid;
+        }
+        
+        .recommendation {
+            font-size: 1rem;
+            margin-top: 0.75rem;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+        
+        .severely-underpriced, .moderately-underpriced, .slightly-underpriced {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+        
+        .severely-overpriced, .moderately-overpriced, .slightly-overpriced {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        
+        .well-priced {
+            background: rgba(59, 130, 246, 0.1);
+            color: #3b82f6;
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        
+        .formula-box {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 2rem;
+            border-radius: 12px;
+            margin: 2rem 0;
+            text-align: center;
+        }
+        
+        .formula-box .formula-label {
+            color: #71717a;
+            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .formula {
+            font-size: 1.25rem;
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+            color: #3b82f6;
+            margin: 1rem 0;
+            font-weight: 500;
+        }
+        
+        .formula-result {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-top: 0.5rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+        
+        .stat-box {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 1.5rem;
+            border-radius: 10px;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        
+        .stat-box:hover {
+            border-color: #3f3f46;
+            transform: translateY(-2px);
+        }
+        
+        .stat-box .stat-label {
+            font-size: 0.75rem;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-box .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-top: 0.5rem;
+            color: #ffffff;
+        }
+        
+        .events-section {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 2rem;
+            border-radius: 12px;
+            margin: 2rem 0;
+        }
+        
+        .events-section h3 {
+            margin: 0 0 1rem 0;
+            color: #ffffff;
+            font-size: 1.25rem;
+            font-weight: 600;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #27272a;
+        }
+        
+        .events-section > p {
+            color: #71717a;
+            margin-bottom: 1.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .event-card {
+            background: #18181b;
+            border: 1px solid #27272a;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            transition: all 0.2s;
+        }
+        
+        .event-card:hover {
+            border-color: #3f3f46;
+            transform: translateX(4px);
+        }
+        
+        .event-card.cached {
+            border-left: 3px solid #22c55e;
+        }
+        
+        .event-card.live {
+            border-left: 3px solid #f59e0b;
+        }
+        
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .event-name {
+            font-weight: 600;
+            color: #ffffff;
+            font-size: 1rem;
+        }
+        
+        .event-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .event-badge.cached {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        
+        .event-badge.live {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        
+        .event-stats {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            font-size: 0.875rem;
+        }
+        
+        .event-stat {
+            color: #71717a;
+        }
+        
+        .event-stat span {
+            color: #ffffff;
+            font-weight: 600;
+            margin-left: 0.25rem;
+        }
+        
+        .map-kills-display {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #27272a;
+        }
+        
+        .map-kills-label {
+            font-size: 0.75rem;
+            color: #71717a;
+            margin-bottom: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .map-kills-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .kill-chip {
+            padding: 0.375rem 0.875rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            border: 1px solid;
+        }
+        
+        .kill-chip.over {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+            border-color: rgba(34, 197, 94, 0.3);
+        }
+        
+        .kill-chip.under {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border-color: rgba(239, 68, 68, 0.3);
+        }
+        
+        #error {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            padding: 1rem 1.5rem;
+            border-radius: 10px;
+            margin-top: 1.5rem;
+            display: none;
+            font-weight: 500;
+        }
+        
+        .debug-section {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            padding: 1rem;
+            border-radius: 10px;
+            margin: 2rem 0;
+            font-size: 0.875rem;
+        }
+        
+        .debug-section summary {
+            cursor: pointer;
+            color: #71717a;
+            font-weight: 500;
+            padding: 0.5rem;
+            user-select: none;
+        }
+        
+        .debug-section summary:hover {
+            color: #a1a1aa;
+        }
+        
+        .debug-section pre {
+            background: #18181b;
+            border: 1px solid #27272a;
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            color: #e4e4e7;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            .subtitle {
+                font-size: 1rem;
+            }
+            
+            .search-box {
+                flex-direction: column;
+            }
+            
+            .input-group {
+                width: 100%;
+            }
+            
+            input[type="number"] {
+                max-width: 100%;
+            }
+            
+            button {
+                width: 100%;
+            }
+            
+            .over-under-display {
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+            
+            .player-info h2 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="page-header">
+        <div class="header-content">
+            <a href="/" class="logo" style="text-decoration: none;">
+                <div class="logo-icon">⚡</div>
+                <span>ThunderEdge</span>
+            </a>
+            <nav class="header-nav">
+                <a href="/" style="color: #ffffff; background: #18181b;">Player Analysis</a>
+                <a href="/team" style="color: #a1a1aa;">Team Analysis</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="hero-section">
+            <h1>VCT Kill Line Analytics</h1>
+            <p class="subtitle">Advanced statistical analysis for Valorant esports betting lines</p>
+        </div>
+        
+        <div class="search-section">
+            <div class="search-box">
+                <div class="input-group">
+                    <label>Player IGN</label>
+                    <input type="text" id="playerInput" placeholder="aspas, TenZ, Demon1..." />
+                </div>
+                <div class="input-group">
+                    <label>Kill Line (O/U)</label>
+                    <input type="number" id="killLine" step="0.5" value="15.5" placeholder="15.5" />
+                </div>
+                <div class="input-group">
+                    <label>Over Odds (e.g., +100, -200)</label>
+                    <input type="text" id="overOdds" placeholder="+100" />
+                </div>
+                <div class="input-group">
+                    <label>Under Odds (e.g., +100, -200)</label>
+                    <input type="text" id="underOdds" placeholder="+100" />
+                </div>
+                <button onclick="analyzePlayer()">Analyze Player</button>
+            </div>
+        </div>
+        
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p style="font-weight: 600; color: #e4e4e7;">Fetching VCT Event Data</p>
+            <p style="font-size: 0.875rem;">Scraping match statistics from VLR.gg...</p>
+        </div>
+        
+        <div id="result" class="result">
+            <!-- Results will be inserted here -->
+        </div>
+        
+        <div id="error"></div>
+    </div>
+
+    <script>
+        function calculateBreakEven(odds) {
+            // Parse odds string (e.g., "+100", "-200", "100", "-150")
+            if (!odds || odds.trim() === '') return null;
+            
+            const cleanOdds = odds.trim().replace(/[+$]/g, '');
+            const numOdds = parseInt(cleanOdds);
+            
+            if (isNaN(numOdds)) return null;
+            
+            if (numOdds > 0) {
+                // Positive odds: +100, +150, etc.
+                // Break-even = 100 / (odds + 100)
+                return (100 / (numOdds + 100)) * 100;
+            } else {
+                // Negative odds: -200, -150, etc.
+                // Break-even = |odds| / (|odds| + 100)
+                const absOdds = Math.abs(numOdds);
+                return (absOdds / (absOdds + 100)) * 100;
+            }
+        }
+        
+        async function analyzePlayer() {
+            const ign = document.getElementById('playerInput').value.trim();
+            const killLine = document.getElementById('killLine').value;
+            const overOdds = document.getElementById('overOdds').value.trim();
+            const underOdds = document.getElementById('underOdds').value.trim();
+            
+            if (!ign) {
+                showError('Please enter a player IGN');
+                return;
+            }
+            
+            if (!killLine || killLine <= 0) {
+                showError('Please enter a valid kill line');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`http://localhost:5000/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
+                const data = await response.json();
+                const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+                
+                displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds);
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showError('Error connecting to server: ' + error.message);
+            }
+        }
+        
+        function getClassificationClass(classification) {
+            return classification.toLowerCase().replace(/ /g, '-');
+        }
+        
+        function displayResults(analysis, rawEvents, elapsed, overOdds, underOdds) {
+            const resultDiv = document.getElementById('result');
+            
+            if (analysis.error) {
+                showError(analysis.error);
+                return;
+            }
+            
+            const classificationClass = getClassificationClass(analysis.classification);
+            const killLine = analysis.kill_line;
+            
+            // Count cached vs live events
+            let cachedCount = 0;
+            let liveCount = 0;
+            if (analysis.event_details) {
+                analysis.event_details.forEach(e => {
+                    if (e.cached) cachedCount++;
+                    else liveCount++;
+                });
+            }
+            
+            // Build event cards HTML with map kills
+            let eventCardsHtml = '';
+            if (analysis.event_details && analysis.event_details.length > 0) {
+                eventCardsHtml = analysis.event_details.map((event, index) => {
+                    // Build map kills chips
+                    let mapKillsHtml = '';
+                    if (event.map_kills && event.map_kills.length > 0) {
+                        const chips = event.map_kills.map(kills => {
+                            const isOver = kills > killLine;
+                            return `<span class="kill-chip ${isOver ? 'over' : 'under'}">${kills} ${isOver ? '✓' : '✗'}</span>`;
+                        }).join('');
+                        mapKillsHtml = `
+                            <div class="map-kills-display">
+                                <div class="map-kills-label">Kills per map (vs ${killLine} line):</div>
+                                <div class="map-kills-chips">${chips}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    const overUnderText = event.event_maps > 0 
+                        ? `Over: ${event.event_over}/${event.event_maps} | Under: ${event.event_under}/${event.event_maps}`
+                        : '';
+                    
+                    const isCached = event.cached;
+                    const badgeClass = isCached ? 'cached' : 'live';
+                    const badgeText = isCached ? 'CACHED' : 'LIVE';
+                    
+                    return `
+                        <div class="event-card ${badgeClass}">
+                            <div class="event-header">
+                                <div class="event-name">${event.event_name}</div>
+                                <span class="event-badge ${badgeClass}">${badgeText}</span>
+                            </div>
+                            <div class="event-stats">
+                                <div class="event-stat">KPR: <span>${event.kpr}</span></div>
+                                <div class="event-stat">Rounds: <span>${event.rounds}</span></div>
+                                <div class="event-stat">Rating: <span>${event.rating}</span></div>
+                                <div class="event-stat">ACS: <span>${event.acs}</span></div>
+                                ${overUnderText ? `<div class="event-stat">${overUnderText}</div>` : ''}
+                            </div>
+                            ${mapKillsHtml}
+                        </div>
+                    `;
+                }).join('');
+            }
+            
+            // Calculate odds analysis HTML
+            let oddsAnalysisHtml = '';
+            if (overOdds || underOdds) {
+                let overHtml = '';
+                let underHtml = '';
+                
+                if (overOdds) {
+                    const overBreakEven = calculateBreakEven(overOdds);
+                    if (overBreakEven !== null) {
+                        const overHistorical = analysis.over_percentage;
+                        const overEdge = overHistorical - overBreakEven;
+                        const overProfitable = overEdge > 0;
+                        overHtml = `
+                            <div style="background: #0a0a0a; padding: 1rem; border-radius: 8px; border: 1px solid #27272a;">
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.5rem;">OVER Bet</div>
+                                <div style="font-size: 0.875rem; color: #ffffff; margin-bottom: 0.25rem;">Odds: <strong>${overOdds}</strong></div>
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.25rem;">Break-even: <strong style="color: #ffffff;">${overBreakEven.toFixed(2)}%</strong></div>
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.25rem;">Historical: <strong style="color: #22c55e;">${overHistorical}%</strong></div>
+                                <div style="font-size: 0.875rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #27272a;">
+                                    <span style="color: #71717a;">Edge: </span>
+                                    <strong style="color: ${overProfitable ? '#22c55e' : '#ef4444'};">
+                                        ${overEdge > 0 ? '+' : ''}${overEdge.toFixed(2)}%
+                                    </strong>
+                                    <span style="color: ${overProfitable ? '#22c55e' : '#ef4444'}; margin-left: 0.5rem;">
+                                        ${overProfitable ? '✓ Profitable' : '✗ Not Profitable'}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        overHtml = `
+                            <div style="background: #0a0a0a; padding: 1rem; border-radius: 8px; border: 1px solid #27272a;">
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.5rem;">OVER Bet</div>
+                                <div style="color: #ef4444; font-size: 0.875rem;">Invalid odds format</div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                if (underOdds) {
+                    const underBreakEven = calculateBreakEven(underOdds);
+                    if (underBreakEven !== null) {
+                        const underHistorical = analysis.under_percentage;
+                        const underEdge = underHistorical - underBreakEven;
+                        const underProfitable = underEdge > 0;
+                        underHtml = `
+                            <div style="background: #0a0a0a; padding: 1rem; border-radius: 8px; border: 1px solid #27272a;">
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.5rem;">UNDER Bet</div>
+                                <div style="font-size: 0.875rem; color: #ffffff; margin-bottom: 0.25rem;">Odds: <strong>${underOdds}</strong></div>
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.25rem;">Break-even: <strong style="color: #ffffff;">${underBreakEven.toFixed(2)}%</strong></div>
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.25rem;">Historical: <strong style="color: #ef4444;">${underHistorical}%</strong></div>
+                                <div style="font-size: 0.875rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #27272a;">
+                                    <span style="color: #71717a;">Edge: </span>
+                                    <strong style="color: ${underProfitable ? '#22c55e' : '#ef4444'};">
+                                        ${underEdge > 0 ? '+' : ''}${underEdge.toFixed(2)}%
+                                    </strong>
+                                    <span style="color: ${underProfitable ? '#22c55e' : '#ef4444'}; margin-left: 0.5rem;">
+                                        ${underProfitable ? '✓ Profitable' : '✗ Not Profitable'}
+                                    </span>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        underHtml = `
+                            <div style="background: #0a0a0a; padding: 1rem; border-radius: 8px; border: 1px solid #27272a;">
+                                <div style="font-size: 0.875rem; color: #71717a; margin-bottom: 0.5rem;">UNDER Bet</div>
+                                <div style="color: #ef4444; font-size: 0.875rem;">Invalid odds format</div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                oddsAnalysisHtml = `
+                    <div class="odds-analysis-box" style="background: #18181b; border: 1px solid #27272a; padding: 1.5rem; border-radius: 12px; margin: 1.5rem 0;">
+                        <div style="font-size: 1.1rem; font-weight: 600; color: #ffffff; margin-bottom: 1rem;">Odds Analysis & Profitability</div>
+                        <div style="display: grid; grid-template-columns: ${overOdds && underOdds ? '1fr 1fr' : '1fr'}; gap: 1rem;">
+                            ${overHtml}
+                            ${underHtml}
+                        </div>
+                        <div style="font-size: 0.75rem; color: #71717a; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #27272a;">
+                            <strong>How to read:</strong> Break-even % is the win rate needed to profit. If historical % exceeds break-even, the bet is profitable.
+                        </div>
+                    </div>
+                `;
+            }
+            
+            resultDiv.innerHTML = `
+                <div class="performance-bar">
+                    <div class="perf-item">Query Time: <span>${elapsed}s</span></div>
+                    <div class="perf-item">Events: <span>${cachedCount} cached</span> / <span class="live-badge">${liveCount} live</span></div>
+                    <div class="perf-item">Maps Analyzed: <span>${analysis.total_maps}</span></div>
+                </div>
+                
+                <div class="player-card">
+                    <div class="player-header">
+                        <div class="player-info">
+                            <h2>${analysis.player_ign}</h2>
+                            <span class="team-name">${analysis.team || 'Unknown Team'}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="over-under-box">
+                        <div class="over-under-title">Historical Over/Under vs ${analysis.kill_line} Kill Line</div>
+                        <div class="over-under-display">
+                            <div class="over-stat">
+                                <div class="percentage">${analysis.over_percentage}%</div>
+                                <div class="stat-label">OVER (${analysis.over_count} maps)</div>
+                            </div>
+                            <div class="vs-divider">vs</div>
+                            <div class="under-stat">
+                                <div class="percentage">${analysis.under_percentage}%</div>
+                                <div class="stat-label">UNDER (${analysis.under_count} maps)</div>
+                            </div>
+                        </div>
+                        <div class="map-count">Based on ${analysis.total_maps} maps across ${analysis.events_analyzed} VCT events</div>
+                    </div>
+                    
+                    ${oddsAnalysisHtml}
+                    
+                    <div class="classification ${classificationClass}">
+                        ${analysis.classification}
+                        <div class="recommendation">${analysis.recommendation}</div>
+                    </div>
+                </div>
+                
+                <div class="formula-box">
+                    <div class="formula-label">Formula: Kill Line / Weighted KPR = Rounds Needed</div>
+                    <div class="formula">${analysis.kill_line} / ${analysis.weighted_kpr} = </div>
+                    <div class="formula-result">${analysis.rounds_needed} rounds</div>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <div class="stat-label">Kill Line</div>
+                        <div class="stat-value">${analysis.kill_line}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Total KPR</div>
+                        <div class="stat-value">${analysis.total_kpr || analysis.weighted_kpr}</div>
+                        <div class="stat-hint" style="font-size: 0.65rem; color: #71717a; margin-top: 0.25rem;">Weighted by rounds</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Weighted KPR</div>
+                        <div class="stat-value" style="color: #f59e0b;">${analysis.weighted_kpr}</div>
+                        <div class="stat-hint" style="font-size: 0.65rem; color: #71717a; margin-top: 0.25rem;">1.5x recent event</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Rounds Needed</div>
+                        <div class="stat-value">${analysis.rounds_needed}</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Over Rate</div>
+                        <div class="stat-value" style="color: #22c55e;">${analysis.over_percentage}%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Under Rate</div>
+                        <div class="stat-value" style="color: #ef4444;">${analysis.under_percentage}%</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Confidence</div>
+                        <div class="stat-value" style="font-size: 1rem;">${analysis.confidence}</div>
+                    </div>
+                </div>
+                
+                <div class="events-section">
+                    <h3>VCT Events Analyzed</h3>
+                    <p>
+                        Total KPR: ${analysis.total_kpr || analysis.weighted_kpr} | Weighted KPR: ${analysis.weighted_kpr} | Total Rounds: ${analysis.total_rounds}
+                    </p>
+                    ${eventCardsHtml || '<p style="color: #71717a;">No event details available</p>'}
+                </div>
+                
+                ${analysis.all_map_kills && analysis.all_map_kills.length > 0 ? `
+                <details class="debug-section">
+                    <summary>All Map Kills Data (${analysis.all_map_kills.length} maps)</summary>
+                    <pre>${JSON.stringify(analysis.all_map_kills, null, 2)}</pre>
+                </details>
+                ` : ''}
+            `;
+            
+            resultDiv.style.display = 'block';
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+        
+        // Allow Enter key to trigger search
+        document.getElementById('playerInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                analyzePlayer();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 # scraper/vlr_scraper.py
 import requests
+import ssl
 from bs4 import BeautifulSoup
 import re
 import time
@@ -34,7 +35,14 @@ class VLRScraper:
             from urllib.parse import urlencode
             url = f"{url}?{urlencode(params)}"
         req = urllib.request.Request(url, headers=self.headers)
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # Use unverified SSL context for macOS where Python may lack system certs
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=ssl_ctx)
+        )
         try:
             response = opener.open(req, timeout=30)
             return response.read()

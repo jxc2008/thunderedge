@@ -787,7 +787,7 @@
             
             try {
                 const startTime = performance.now();
-                const response = await fetch(`http://localhost:5000/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
+                const response = await fetch(`/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
                 

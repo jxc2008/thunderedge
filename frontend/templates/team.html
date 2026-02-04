@@ -394,7 +394,7 @@
         console.log('✅ [DEBUG] Current URL:', window.location.href);
         
         // Test API endpoint availability
-        fetch('http://localhost:5000/api/stats')
+        fetch('/api/stats')
             .then(r => r.json())
             .then(data => console.log('✅ [DEBUG] API endpoint test successful:', data))
             .catch(err => console.error('❌ [DEBUG] API endpoint test failed:', err));
@@ -419,7 +419,7 @@
             
             try {
                 const startTime = performance.now();
-                let url = `http://localhost:5000/api/team/${encodeURIComponent(teamName)}`;
+                let url = `/api/team/${encodeURIComponent(teamName)}`;
                 if (region) {
                     url += `?region=${encodeURIComponent(region)}`;
                 }

@@ -161,12 +161,14 @@ class VLRScraper:
             # Check if player is in this event
             stats = self._get_player_event_kpr(kickoff['url'], player_name)
             if stats:
-                # Get map kills for this event (filter by team)
-                map_kills = self._get_player_team_map_kills(kickoff['url'], player_name, team)
+                # Get map kills with scores for this event (filter by team)
+                map_data = self._get_player_team_map_kills_with_scores(kickoff['url'], player_name, team)
+                map_kills = [m['kills'] for m in map_data]
                 
                 stats['event_name'] = kickoff['name']
                 stats['event_url'] = kickoff['url']
                 stats['map_kills'] = map_kills
+                stats['map_data'] = map_data  # Include scores for win/loss analysis
                 stats['event_over'] = sum(1 for k in map_kills if k > kill_line)
                 stats['event_under'] = sum(1 for k in map_kills if k <= kill_line)
                 stats['event_maps'] = len(map_kills)
@@ -176,6 +178,57 @@ class VLRScraper:
                 return stats
         
         return None
+    
+    def _get_player_team_map_kills_with_scores(self, event_url: str, player_name: str, team: str) -> List[Dict]:
+        """Get map kills with scores for a player by filtering matches by their team"""
+        map_data = []
+        
+        # Get all matches from this event
+        matches_url = event_url.replace('/event/', '/event/matches/')
+        full_url = f"{self.base_url}{matches_url}/?series_id=all"
+        
+        try:
+            content = self._make_request(full_url)
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Find all match links
+            match_pattern = re.compile(r'/\d+/[\w-]+-vs-[\w-]+')
+            match_links = soup.find_all('a', href=match_pattern)
+            
+            seen_matches = set()
+            team_lower = team.lower().replace(' ', '-').replace('.', '')
+            
+            team_variants = [
+                team_lower,
+                team_lower.replace('-esports', ''),
+                team_lower.replace('-', ''),
+                team.lower().split()[0] if team else ''
+            ]
+            
+            for link in match_links:
+                match_url = link.get('href', '')
+                
+                if match_url in seen_matches:
+                    continue
+                
+                match_url_lower = match_url.lower()
+                team_in_match = any(t in match_url_lower for t in team_variants if t)
+                
+                if not team_in_match:
+                    continue
+                
+                seen_matches.add(match_url)
+                
+                # Get kills and scores for this match
+                match_kills, match_scores = self._get_match_map_kills_and_scores(match_url, player_name)
+                if match_kills:
+                    for kills, score in zip(match_kills, match_scores):
+                        map_data.append({'kills': kills, 'map_score': score})
+                
+        except Exception as e:
+            logger.error(f"Error fetching matches with scores from {event_url}: {e}")
+        
+        return map_data
     
     def _get_cached_event_stats(self, player_name: str, team: str, kill_line: float) -> List[Dict]:
         """
@@ -203,7 +256,9 @@ class VLRScraper:
                 # Verify this is a completed event (should only get completed from DB query)
                 event_db = self.db.get_vct_event(event_url)
                 if event_db and event_db.get('status') == 'completed':
-                    map_kills = self.db.get_player_map_kills_for_event(player_name, event_db['id'])
+                    # Get map kills with scores
+                    map_data = self.db.get_player_map_kills_with_scores_for_event(player_name, event_db['id'])
+                    map_kills = [m['kills'] for m in map_data]
                     logger.info(f"  Found {len(map_kills)} map kills for {player_name} in {db_event['event_name']}")
                     
                     # Skip events with no map kills (useless for analysis)
@@ -223,6 +278,7 @@ class VLRScraper:
                         'event_name': db_event['event_name'],
                         'event_url': event_url,
                         'map_kills': map_kills,
+                        'map_data': map_data,  # Include scores for win/loss analysis
                         'event_over': sum(1 for k in map_kills if k > kill_line),
                         'event_under': sum(1 for k in map_kills if k <= kill_line),
                         'event_maps': len(map_kills),
@@ -297,9 +353,86 @@ class VLRScraper:
         
         return map_kills
     
+    def _get_player_team_match_data(self, event_url: str, event_name: str, player_name: str, team: str) -> List[Dict]:
+        """Get match-level data for PrizePicks (returns list of matches with their map kills and scores)"""
+        match_data_list = []
+        
+        # Get all matches from this event
+        matches_url = event_url.replace('/event/', '/event/matches/')
+        full_url = f"{self.base_url}{matches_url}/?series_id=all"
+        
+        try:
+            logger.info(f"Fetching matches from: {full_url}")
+            content = self._make_request(full_url)
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Find all match links
+            match_pattern = re.compile(r'/\d+/[\w-]+-vs-[\w-]+')
+            match_links = soup.find_all('a', href=match_pattern)
+            
+            seen_matches = set()
+            team_lower = team.lower().replace(' ', '-').replace('.', '')
+            
+            # Also try common team name variations
+            team_variants = [
+                team_lower,
+                team_lower.replace('-esports', ''),
+                team_lower.replace('-', ''),
+                team.lower().split()[0] if team else ''  # First word of team name
+            ]
+            
+            for link in match_links:
+                match_url = link.get('href', '')
+                
+                if match_url in seen_matches:
+                    continue
+                
+                # Check if this match involves the player's team
+                match_url_lower = match_url.lower()
+                team_in_match = any(t in match_url_lower for t in team_variants if t)
+                
+                if not team_in_match:
+                    continue
+                
+                seen_matches.add(match_url)
+                
+                # Scrape this match for player kills and map scores
+                match_kills, map_scores = self._get_match_map_kills_and_scores(match_url, player_name)
+                if match_kills and len(match_kills) >= 1:  # Include even 1-map matches (ongoing)
+                    # Only add if at least 2 maps, or if it's an ongoing match with 1 map
+                    if len(match_kills) >= 2 or len(match_kills) == 1:
+                        match_data_list.append({
+                            'match_url': match_url,
+                            'event_name': event_name,
+                            'map_kills': match_kills,
+                            'map_scores': map_scores,
+                            'num_maps': len(match_kills)
+                        })
+                        logger.info(f"  Match {match_url}: {len(match_kills)} maps, kills = {match_kills}, scores = {map_scores}")
+                
+        except Exception as e:
+            logger.error(f"Error fetching matches from {event_url}: {e}")
+        
+        return match_data_list
+    
     def _get_match_map_kills(self, match_url: str, player_name: str) -> List[int]:
         """Get per-map kills for a player from a specific match"""
-        map_kills = []
+        kills, _ = self._get_match_map_kills_and_scores(match_url, player_name)
+        return kills
+    
+    def _get_match_map_kills_and_scores(self, match_url: str, player_name: str) -> Tuple[List[int], List[str]]:
+        """Get per-map kills and scores for a player from a specific match"""
+        full_stats = self._get_match_full_map_stats(match_url, player_name)
+        map_kills = [stats['kills'] for stats in full_stats]
+        map_scores = [stats['map_score'] for stats in full_stats]
+        return map_kills, map_scores
+    
+    def _get_match_full_map_stats(self, match_url: str, player_name: str) -> List[Dict]:
+        """
+        Get comprehensive per-map stats for a player from a specific match.
+        Returns a list of dicts with: kills, deaths, assists, map_name, map_score, agent, acs, adr, kast, first_bloods
+        """
+        map_stats = []
         full_url = f"{self.base_url}{match_url}"
         
         try:
@@ -314,6 +447,31 @@ class VLRScraper:
                 game_id = section.get('data-game-id', '')
                 if game_id == 'all':
                     continue
+                
+                # Extract map name and score from the header
+                map_name = 'Unknown'
+                score_text = 'N/A'
+                header = section.find('div', class_='map')
+                if header:
+                    # Map name
+                    map_name_div = header.find('div', style=lambda x: x and 'font-weight' in str(x) and '700' in str(x))
+                    if map_name_div:
+                        # Get text from first span
+                        first_span = map_name_div.find('span')
+                        if first_span:
+                            map_name = first_span.get_text(strip=True)
+                        else:
+                            map_name = map_name_div.get_text(strip=True)
+                        # Clean up whitespace and remove PICK/BAN keywords
+                        map_name = ' '.join(map_name.split())
+                        map_name = re.sub(r'(PICK|BAN|pick|ban)', '', map_name).strip()
+                    
+                    # Score - look for div.score elements (not span!)
+                    score_divs = section.find_all('div', class_='score')
+                    if len(score_divs) >= 2:
+                        team1_score = score_divs[0].get_text(strip=True)
+                        team2_score = score_divs[1].get_text(strip=True)
+                        score_text = f"{team1_score}-{team2_score}"
                 
                 table = section.find('table')
                 if not table:
@@ -334,30 +492,81 @@ class VLRScraper:
                     if player_name_lower not in link_text:
                         continue
                     
-                    # Found player - extract kills
+                    # Found player - extract all stats
+                    # Agent: Usually in an image tag or span near the player name
+                    agent = 'Unknown'
+                    agent_td = row.find('td', class_='mod-agents')
+                    if agent_td:
+                        agent_img = agent_td.find('img')
+                        if agent_img:
+                            agent_alt = agent_img.get('alt', '')
+                            agent_title = agent_img.get('title', '')
+                            agent = agent_title or agent_alt or 'Unknown'
+                            # Clean up agent name (sometimes has extra text)
+                            agent = agent.split()[0] if agent else 'Unknown'
+                    
+                    # Get stat cells - VLR table structure:
+                    # Rating, ACS, K, D, A, +/-, KAST, ADR, HS%, FK, FD, +/-
                     stat_cells = row.find_all('td', class_='mod-stat')
                     
-                    if len(stat_cells) >= 3:
-                        k_cell = stat_cells[2]  # K column
-                        
-                        both_span = k_cell.find('span', class_='mod-both')
-                        if both_span:
-                            kills_text = both_span.get_text(strip=True)
-                        else:
-                            kills_text = k_cell.get_text(strip=True)
-                        
-                        numbers = re.findall(r'\d+', kills_text)
-                        if numbers:
-                            total_kills = int(numbers[0])
-                            if 0 <= total_kills <= 60:
-                                map_kills.append(total_kills)
+                    stats_dict = {
+                        'map_name': map_name,
+                        'map_score': score_text,
+                        'agent': agent,
+                        'kills': 0,
+                        'deaths': 0,
+                        'assists': 0,
+                        'acs': 0,
+                        'adr': 0,
+                        'kast': 0.0,
+                        'first_bloods': 0
+                    }
                     
-                    break
+                    if len(stat_cells) >= 11:
+                        # Helper to extract stat value properly from mod-both span
+                        def extract_cell_stat(cell):
+                            both_span = cell.find('span', class_='mod-both')
+                            if both_span:
+                                return both_span.get_text(strip=True)
+                            return cell.get_text(strip=True)
+                        
+                        # Rating (0), ACS (1), K (2), D (3), A (4), +/- (5), KAST (6), ADR (7), HS% (8), FK (9), FD (10)
+                        try:
+                            # ACS
+                            stats_dict['acs'] = self._parse_number(extract_cell_stat(stat_cells[1]))
+                            
+                            # Kills
+                            stats_dict['kills'] = self._parse_number(extract_cell_stat(stat_cells[2]))
+                            
+                            # Deaths
+                            stats_dict['deaths'] = self._parse_number(extract_cell_stat(stat_cells[3]))
+                            
+                            # Assists
+                            stats_dict['assists'] = self._parse_number(extract_cell_stat(stat_cells[4]))
+                            
+                            # KAST (percentage)
+                            kast_text = extract_cell_stat(stat_cells[6]).replace('%', '')
+                            stats_dict['kast'] = self._parse_float(kast_text)
+                            
+                            # ADR
+                            stats_dict['adr'] = self._parse_number(extract_cell_stat(stat_cells[7]))
+                            
+                            # First Bloods (FK column)
+                            stats_dict['first_bloods'] = self._parse_number(extract_cell_stat(stat_cells[9]))
+                            
+                        except Exception as e:
+                            logger.warning(f"Error parsing stats for {player_name} on {map_name}: {e}")
+                    
+                    # Only add if kills are valid
+                    if 0 <= stats_dict['kills'] <= 60:
+                        map_stats.append(stats_dict)
+                    
+                    break  # Found player in this map
                     
         except Exception as e:
             logger.error(f"Error fetching match data from {match_url}: {e}")
         
-        return map_kills
+        return map_stats
     
     def _extract_player_name(self, soup: BeautifulSoup) -> str:
         """Extract player IGN from profile page"""
@@ -495,3 +704,216 @@ class VLRScraper:
         
         logger.warning(f"Player not found: {ign}")
         return {}
+    
+    def get_player_prizepicks_data(self, ign: str, kill_line: float = 30.5) -> Dict:
+        """Get player data for PrizePicks analysis (match-level data)"""
+        logger.info(f"Searching for player (PrizePicks): {ign}")
+        player_url = self.search_player(ign)
+        
+        if not player_url:
+            logger.warning(f"Player not found: {ign}")
+            return {}
+        
+        full_url = f"{self.base_url}{player_url}"
+        
+        try:
+            content = self._make_request(full_url)
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            player_name = self._extract_player_name(soup)
+            team = self._extract_current_team(soup)
+            
+            # Normalize team name for URL matching (remove accents)
+            import unicodedata
+            team_normalized = unicodedata.normalize('NFD', team)
+            team_normalized = ''.join(c for c in team_normalized if unicodedata.category(c) != 'Mn')
+            
+            logger.info(f"Player: {player_name}, Team: {team} (normalized: {team_normalized})")
+            
+            event_stats = []
+            all_match_combinations = []
+            
+            # 1. Check ongoing 2026 Kickoff events (always scrape live)
+            kickoff_match_data = self._get_ongoing_event_match_data(player_name, team_normalized)
+            if kickoff_match_data:
+                event_stats.append(kickoff_match_data['event_stats'])
+                all_match_combinations.extend(kickoff_match_data['match_data'])
+            
+            # 2. Get cached 2025 event data (all events, not just 2)
+            cached_match_data = self._get_cached_event_match_data(player_name, team_normalized)
+            for match_data in cached_match_data:  # Take ALL cached events
+                event_stats.append(match_data['event_stats'])
+                all_match_combinations.extend(match_data['match_data'])
+            
+            player_data = {
+                'ign': player_name,
+                'team': team,
+                'events': event_stats,
+                'kill_line': kill_line,
+                'match_combinations': all_match_combinations,
+                'overall_stats': {},
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            return player_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching PrizePicks data for {ign}: {e}")
+            return {}
+    
+    def _get_ongoing_event_match_data(self, player_name: str, team: str) -> Optional[Dict]:
+        """Get match-level data from ongoing 2026 Kickoff events"""
+        for kickoff in self.VCT_2026_KICKOFF_EVENTS:
+            # Check if player is in this event
+            stats = self._get_player_event_kpr(kickoff['url'], player_name)
+            if stats:
+                # Get match-level data for this event
+                match_data = self._get_player_team_match_data(kickoff['url'], kickoff['name'], player_name, team)
+                
+                event_stats = {
+                    'event_name': kickoff['name'],
+                    'event_url': kickoff['url'],
+                    'kpr': stats.get('kpr', 0),
+                    'rounds_played': stats.get('rounds_played', 0),
+                    'rating': stats.get('rating', 0),
+                    'acs': stats.get('acs', 0),
+                    'cached': False
+                }
+                
+                logger.info(f"Found player in {kickoff['name']}: {len(match_data)} matches")
+                return {
+                    'event_stats': event_stats,
+                    'match_data': match_data
+                }
+        
+        return None
+    
+    def _get_match_pick_bans(self, match_url: str) -> Dict:
+        """
+        Extract pick/ban sequence from match page (chronological order).
+        Returns: {first_ban, second_ban, first_pick, second_pick, decider}
+        """
+        full_url = f"{self.base_url}{match_url}"
+        result = {
+            'first_ban': None,
+            'second_ban': None,
+            'first_pick': None,
+            'second_pick': None,
+            'decider': None
+        }
+        
+        try:
+            content = self._make_request(full_url)
+            soup = BeautifulSoup(content, 'html.parser')
+            
+            # Find pick/ban text in header
+            candidate_texts = []
+            for cls in ['match-header-note', 'match-header-vs-note', 'match-header']:
+                for el in soup.find_all('div', class_=cls):
+                    t = el.get_text(" ", strip=True)
+                    if t and ('ban' in t.lower() or 'pick' in t.lower()):
+                        candidate_texts.append(t)
+            
+            header_text = ''
+            if candidate_texts:
+                # Pick the one with most ban/pick mentions
+                header_text = max(
+                    candidate_texts,
+                    key=lambda t: (t.lower().count('ban') + t.lower().count('pick')),
+                )
+            
+            if header_text:
+                # Extract bans and picks in order
+                action_pattern = re.compile(
+                    r'([A-Za-z0-9\s]+?)\s+(ban|bans|pick|picks)\s+([A-Za-z]+)',
+                    re.IGNORECASE,
+                )
+                
+                bans = []
+                picks = []
+                
+                matches = action_pattern.findall(header_text)
+                for team_str, action, map_name in matches:
+                    action = action.lower()
+                    map_name = map_name.strip()
+                    
+                    # Check if valid Valorant map
+                    valorant_maps = ['Bind', 'Haven', 'Split', 'Ascent', 'Icebox', 'Breeze', 
+                                    'Fracture', 'Pearl', 'Lotus', 'Sunset', 'Abyss', 'Corrode']
+                    
+                    if any(m.lower() == map_name.lower() for m in valorant_maps):
+                        if action.startswith('ban'):
+                            bans.append(map_name)
+                        else:
+                            picks.append(map_name)
+                
+                # Assign to result
+                if len(bans) >= 1:
+                    result['first_ban'] = bans[0]
+                if len(bans) >= 2:
+                    result['second_ban'] = bans[1]
+                if len(picks) >= 1:
+                    result['first_pick'] = picks[0]
+                if len(picks) >= 2:
+                    result['second_pick'] = picks[1]
+                
+                # Decider: look for "remains" keyword
+                remains_match = re.search(r'([A-Za-z]+)\s+remains', header_text, re.IGNORECASE)
+                if remains_match:
+                    result['decider'] = remains_match.group(1).strip()
+                    
+        except Exception as e:
+            logger.warning(f"Error extracting pick/bans from {match_url}: {e}")
+        
+        return result
+    
+    def _get_cached_event_match_data(self, player_name: str, team: str) -> List[Dict]:
+        """Get match-level data from cached completed events"""
+        cached_events = []
+        
+        if not self.db:
+            logger.warning("No database connection available for caching")
+            return cached_events
+        
+        logger.info(f"Checking cache for player: {player_name} (match-level data)")
+        
+        # Get all cached event stats for this player from completed events
+        db_events = self.db.get_player_all_event_stats(player_name)
+        logger.info(f"Found {len(db_events)} cached events for {player_name}")
+        
+        # Process ALL events (not just 2)
+        for db_event in db_events:
+            event_url = db_event['event_url']
+            logger.info(f"Processing event: {db_event['event_name']} ({event_url})")
+            
+            # Verify this is a completed event
+            event_db = self.db.get_vct_event(event_url)
+            if event_db and event_db.get('status') == 'completed':
+                # Get match-level data from database (not scraping!)
+                match_data = self.db.get_player_match_data_for_event(player_name, event_db['id'])
+                logger.info(f"  Found {len(match_data)} matches for {player_name} in {db_event['event_name']}")
+                
+                # Skip events with no match data
+                if len(match_data) == 0:
+                    logger.warning(f"  Skipping {db_event['event_name']} - no match data found")
+                    continue
+                
+                event_stats = {
+                    'event_name': db_event['event_name'],
+                    'event_url': event_url,
+                    'kpr': db_event['kpr'],
+                    'rounds_played': db_event['rounds_played'],
+                    'rating': db_event['rating'],
+                    'acs': db_event['acs'],
+                    'cached': True
+                }
+                
+                cached_events.append({
+                    'event_stats': event_stats,
+                    'match_data': match_data
+                })
+                logger.info(f"Loaded from cache: {db_event['event_name']} ({len(match_data)} matches)")
+            else:
+                logger.warning(f"  Event not found in database or not completed: {event_url}")
+        
+        return cached_events

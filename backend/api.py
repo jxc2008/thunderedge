@@ -1,5 +1,5 @@
 # backend/api.py
-from flask import Flask, request, jsonify, send_from_directory, render_template
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import sys
 import os
@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scraper.vlr_scraper import VLRScraper
 from scraper.player_processor import PlayerProcessor
+from scraper.prizepicks_processor import PrizePicksProcessor
 from scraper.team_scraper import TeamScraper
 from scraper.team_processor import TeamProcessor
 from backend.database import Database
@@ -30,14 +31,17 @@ team_scraper = TeamScraper(database=db)
 # Add request logging middleware (after logger is initialized)
 @app.before_request
 def log_request_info():
-    logger.info(f"🔵 REQUEST: {request.method} {request.path}")
+    logger.info(f"REQUEST: {request.method} {request.path}")
     if request.args:
-        logger.info(f"🔵 Query params: {request.args}")
+        logger.info(f"Query params: {request.args}")
 
 @app.after_request
 def log_response_info(response):
-    logger.info(f"🟢 RESPONSE: {response.status_code} for {request.path}")
+    logger.info(f"RESPONSE: {response.status_code} for {request.path}")
     return response
+
+# Add error handler for 404 to debug (must be after routes are defined)
+
 
 @app.route('/')
 def index():
@@ -68,10 +72,16 @@ def get_player_analysis(ign):
         # Perform analysis
         analysis = processor.evaluate_betting_line(player_data)
         
+        # Add agent and map aggregations
+        agent_stats = db.get_player_agent_aggregation(ign)
+        map_stats = db.get_player_map_aggregation(ign)
+        
         # Return response
         return jsonify({
             'success': True,
             'analysis': analysis,
+            'agent_stats': agent_stats,
+            'map_stats': map_stats,
             'player_info': {
                 'ign': player_data['ign'],
                 'team': player_data.get('team', 'Unknown'),
@@ -140,18 +150,12 @@ def get_cache_status():
 @app.route('/team')
 def team_page():
     """Serve the team analysis page"""
-    logger.info("team_page() called - attempting to serve team.html")
-    try:
-        result = render_template('team.html')
-        logger.info("Successfully rendered team.html")
-        return result
-    except Exception as e:
-        logger.error(f"Error rendering team.html: {e}", exc_info=True)
-        # Fallback to send_from_directory
-        import os
-        template_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'frontend', 'templates')
-        logger.info(f"Trying send_from_directory with: {template_dir}")
-        return send_from_directory(template_dir, 'team.html')
+    return send_from_directory('../frontend/templates', 'team.html')
+
+@app.route('/prizepicks')
+def prizepicks_page():
+    """Serve the PrizePicks analysis page"""
+    return send_from_directory('../frontend/templates', 'prizepicks.html')
 
 @app.route('/api/team/<team_name>', methods=['GET'])
 def get_team_analysis(team_name):
@@ -197,6 +201,48 @@ def get_team_analysis(team_name):
     except Exception as e:
         logger.error(f"Error processing team {team_name}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prizepicks/<ign>', methods=['GET'])
+def get_prizepicks_analysis(ign):
+    """Get PrizePicks analysis for a specific player"""
+    try:
+        # Get kill line from query params (default to 30.5 for combined maps 1+2)
+        kill_line = float(request.args.get('line', 30.5))
+        
+        # Create processor with specified kill line
+        processor = PrizePicksProcessor(kill_line=kill_line)
+        
+        logger.info(f"Scraping PrizePicks data for player: {ign} with kill line: {kill_line}")
+        
+        # Scrape match-level data from VLR.gg
+        player_data = scraper.get_player_prizepicks_data(ign, kill_line=kill_line)
+        
+        if not player_data or not player_data.get('ign'):
+            return jsonify({'error': 'Player not found'}), 404
+        
+        # Perform analysis
+        analysis = processor.evaluate_prizepicks_line(player_data)
+        
+        # Return response
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'player_info': {
+                'ign': player_data['ign'],
+                'team': player_data.get('team', 'Unknown'),
+                'matches_count': len(player_data.get('match_combinations', []))
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error processing PrizePicks for {ign}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+# Add error handler for 404 to debug (at end of file, after all routes)
+@app.errorhandler(404)
+def handle_404(e):
+    logger.error(f"404 Not Found: {request.path}")
+    return jsonify({'error': 'Not Found', 'path': request.path}), 404
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

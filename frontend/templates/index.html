@@ -648,6 +648,40 @@
             margin-top: 0.5rem;
         }
         
+        /* Agent & Map Stats Tables */
+        .analysis-section table tbody tr {
+            border-bottom: 1px solid #27272a;
+            transition: background-color 0.2s ease;
+        }
+        
+        .analysis-section table tbody tr:hover {
+            background-color: #27272a;
+        }
+        
+        .analysis-section table tbody tr:last-child {
+            border-bottom: none;
+        }
+        
+        .analysis-section table tbody td {
+            padding: 1rem;
+            color: #a1a1aa;
+        }
+        
+        .analysis-section table thead th {
+            position: relative;
+        }
+        
+        .analysis-section table thead th:hover {
+            background-color: #3f3f46 !important;
+        }
+        
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 padding: 1rem;
@@ -685,6 +719,15 @@
             .player-info h2 {
                 font-size: 1.5rem;
             }
+            
+            .analysis-section table {
+                font-size: 0.875rem;
+            }
+            
+            .analysis-section table th,
+            .analysis-section table td {
+                padding: 0.75rem 0.5rem;
+            }
         }
     </style>
 </head>
@@ -698,6 +741,7 @@
             <nav class="header-nav">
                 <a href="/" style="color: #ffffff; background: #18181b;">Player Analysis</a>
                 <a href="/team" style="color: #a1a1aa;">Team Analysis</a>
+                <a href="/prizepicks" style="color: #a1a1aa;">PrizePicks</a>
             </nav>
         </div>
     </header>
@@ -787,7 +831,7 @@
             
             try {
                 const startTime = performance.now();
-                const response = await fetch(`http://localhost:5000/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
+                const response = await fetch(`/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
                 
@@ -798,7 +842,7 @@
                     return;
                 }
                 
-                displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds);
+                displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds, data.agent_stats, data.map_stats);
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
                 showError('Error connecting to server: ' + error.message);
@@ -809,7 +853,7 @@
             return classification.toLowerCase().replace(/ /g, '-');
         }
         
-        function displayResults(analysis, rawEvents, elapsed, overOdds, underOdds) {
+        function displayResults(analysis, rawEvents, elapsed, overOdds, underOdds, agentStats, mapStats) {
             const resultDiv = document.getElementById('result');
             
             if (analysis.error) {
@@ -993,6 +1037,8 @@
                         <div class="map-count">Based on ${analysis.total_maps} maps across ${analysis.events_analyzed} VCT events</div>
                     </div>
                     
+                    ${renderMarginStats(analysis.margin_stats, analysis.kill_line)}
+                    
                     ${oddsAnalysisHtml}
                     
                     <div class="classification ${classificationClass}">
@@ -1054,9 +1100,351 @@
                     <pre>${JSON.stringify(analysis.all_map_kills, null, 2)}</pre>
                 </details>
                 ` : ''}
+                
+                ${renderAgentStats(agentStats, analysis.kill_line)}
+                ${renderMapStats(mapStats, analysis.kill_line)}
             `;
             
             resultDiv.style.display = 'block';
+        }
+        
+        function renderMarginStats(marginStats, killLine) {
+            if (!marginStats || marginStats.total_maps === 0) {
+                return '';
+            }
+            
+            return `
+                <div class="over-under-box" style="margin-top: 2rem;">
+                    <div class="over-under-title">Performance Breakdown: Win/Loss & Margin Analysis</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem;">
+                        <!-- Wins Column -->
+                        <div style="background: rgba(34, 197, 94, 0.05); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 10px; padding: 2rem;">
+                            <div style="text-align: center; margin-bottom: 1.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 700; color: #22c55e; text-transform: uppercase; letter-spacing: 0.05em;">Won Maps</div>
+                                <div style="color: #71717a; font-size: 0.875rem; margin-top: 0.25rem;">${marginStats.total_wins} maps</div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                                <div style="display: flex; justify-content: space-around; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2.5rem; font-weight: 700; color: #22c55e; line-height: 1;">${marginStats.wins_over_pct}%</div>
+                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Over</div>
+                                    </div>
+                                    <div style="color: #3f3f46; font-size: 1.5rem; font-weight: 700; align-self: center;">vs</div>
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2.5rem; font-weight: 700; color: #ef4444; line-height: 1;">${marginStats.wins_under_pct}%</div>
+                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Under</div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                    ${renderMarginRow('Close (2-3 rds)', marginStats.wins.close)}
+                                    ${renderMarginRow('Regular (4-6 rds)', marginStats.wins.regular)}
+                                    ${renderMarginRow('Blowout (7+ rds)', marginStats.wins.blowout)}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Losses Column -->
+                        <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px; padding: 2rem;">
+                            <div style="text-align: center; margin-bottom: 1.5rem;">
+                                <div style="font-size: 1.25rem; font-weight: 700; color: #ef4444; text-transform: uppercase; letter-spacing: 0.05em;">Lost Maps</div>
+                                <div style="color: #71717a; font-size: 0.875rem; margin-top: 0.25rem;">${marginStats.total_losses} maps</div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                                <div style="display: flex; justify-content: space-around; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2.5rem; font-weight: 700; color: #22c55e; line-height: 1;">${marginStats.losses_over_pct}%</div>
+                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Over</div>
+                                    </div>
+                                    <div style="color: #3f3f46; font-size: 1.5rem; font-weight: 700; align-self: center;">vs</div>
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 2.5rem; font-weight: 700; color: #ef4444; line-height: 1;">${marginStats.losses_under_pct}%</div>
+                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Under</div>
+                                    </div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                    ${renderMarginRow('Close (2-3 rds)', marginStats.losses.close)}
+                                    ${renderMarginRow('Regular (4-6 rds)', marginStats.losses.regular)}
+                                    ${renderMarginRow('Blowout (7+ rds)', marginStats.losses.blowout)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="map-count" style="margin-top: 1.5rem;">Analyzing ${marginStats.total_maps} maps with score data (${marginStats.total_wins} wins, ${marginStats.total_losses} losses)</div>
+                </div>
+            `;
+        }
+        
+        function renderMarginRow(label, data) {
+            if (data.total === 0) {
+                return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: rgba(0,0,0,0.1); border-radius: 6px; opacity: 0.5;">
+                        <span style="color: #71717a; font-size: 0.875rem;">${label}</span>
+                        <span style="color: #71717a; font-size: 0.75rem;">No data</span>
+                    </div>
+                `;
+            }
+            
+            return `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: rgba(0,0,0,0.1); border-radius: 6px;">
+                    <span style="color: #e4e4e7; font-size: 0.875rem; font-weight: 500;">${label}</span>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <span style="color: #22c55e; font-weight: 600; font-size: 0.875rem;">${data.over_pct}% Over</span>
+                        <span style="color: #3f3f46;">•</span>
+                        <span style="color: #ef4444; font-weight: 600; font-size: 0.875rem;">${data.under_pct}% Under</span>
+                        <span style="color: #71717a; font-size: 0.75rem; margin-left: 0.25rem;">(${data.total})</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderAgentStats(agentData, killLine) {
+            if (!agentData || agentData.length === 0) {
+                return '';
+            }
+            
+            // Store data globally for sorting
+            window.agentStatsData = agentData.map(agent => ({
+                ...agent,
+                avgKillsPerMap: (agent.total_kills / agent.maps_played).toFixed(1)
+            }));
+            window.agentKillLine = killLine;
+            
+            const tableId = 'agentStatsTable';
+            const agentRows = renderAgentRows(window.agentStatsData, killLine);
+            
+            return `
+                <div class="analysis-section" style="margin-top: 2rem;">
+                    <h3 class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">🎮</span>
+                        Agent Performance Statistics
+                    </h3>
+                    <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">
+                        Detailed breakdown of performance by agent across all events • Click column headers to sort
+                    </p>
+                    <div style="overflow-x: auto;">
+                        <table id="${tableId}" style="width: 100%; border-collapse: collapse; background: #18181b; border-radius: 8px; overflow: hidden;">
+                            <thead>
+                                <tr style="background: #27272a; color: #a1a1aa; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                                    <th onclick="sortAgentTable('agent')" style="padding: 1rem; text-align: left; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Agent <span id="agent-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('maps_played')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Maps <span id="maps_played-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('avgKillsPerMap')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Avg K/Map <span id="avgKillsPerMap-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('kd_ratio')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        K/D <span id="kd_ratio-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('avg_acs')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        ACS <span id="avg_acs-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('avg_adr')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        ADR <span id="avg_adr-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortAgentTable('avg_kast')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        KAST% <span id="avg_kast-sort-indicator"></span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="${tableId}Body">
+                                ${agentRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderAgentRows(agentData, killLine) {
+            return agentData.map(agent => {
+                const kd = agent.kd_ratio;
+                const kdColor = kd >= 1.2 ? '#22c55e' : kd >= 1.0 ? '#f59e0b' : '#ef4444';
+                const avgKillsPerMap = agent.avgKillsPerMap;
+                const isOverLine = avgKillsPerMap > killLine;
+                
+                return `
+                    <tr>
+                        <td style="font-weight: 600; color: #e4e4e7;">${agent.agent}</td>
+                        <td style="text-align: center;">${agent.maps_played}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${isOverLine ? '#22c55e' : '#ef4444'};">${avgKillsPerMap}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${kdColor};">${kd}</td>
+                        <td style="text-align: center;">${agent.avg_acs}</td>
+                        <td style="text-align: center;">${agent.avg_adr}</td>
+                        <td style="text-align: center;">${agent.avg_kast}%</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        let agentSortColumn = 'maps_played';
+        let agentSortDirection = 'desc';
+        
+        function sortAgentTable(column) {
+            // Toggle direction if same column, otherwise default to desc
+            if (agentSortColumn === column) {
+                agentSortDirection = agentSortDirection === 'desc' ? 'asc' : 'desc';
+            } else {
+                agentSortColumn = column;
+                agentSortDirection = 'desc';
+            }
+            
+            // Sort the data
+            const sortedData = [...window.agentStatsData].sort((a, b) => {
+                let aVal = a[column];
+                let bVal = b[column];
+                
+                // Handle string comparison for agent names
+                if (column === 'agent') {
+                    return agentSortDirection === 'desc' 
+                        ? bVal.localeCompare(aVal)
+                        : aVal.localeCompare(bVal);
+                }
+                
+                // Numeric comparison
+                aVal = parseFloat(aVal) || 0;
+                bVal = parseFloat(bVal) || 0;
+                
+                return agentSortDirection === 'desc' ? bVal - aVal : aVal - bVal;
+            });
+            
+            // Update table
+            document.getElementById('agentStatsTableBody').innerHTML = renderAgentRows(sortedData, window.agentKillLine);
+            
+            // Update sort indicators
+            document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => el.textContent = '');
+            const indicator = document.getElementById(`${column}-sort-indicator`);
+            if (indicator) {
+                indicator.textContent = agentSortDirection === 'desc' ? ' ↓' : ' ↑';
+            }
+        }
+        
+        function renderMapStats(mapData, killLine) {
+            if (!mapData || mapData.length === 0) {
+                return '';
+            }
+            
+            // Store data globally for sorting
+            window.mapStatsData = mapData;
+            window.mapKillLine = killLine;
+            
+            const tableId = 'mapStatsTable';
+            const mapRows = renderMapRows(window.mapStatsData, killLine);
+            
+            return `
+                <div class="analysis-section" style="margin-top: 2rem;">
+                    <h3 class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">🗺️</span>
+                        Map Performance Statistics
+                    </h3>
+                    <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">
+                        Detailed breakdown of performance by map across all events • Click column headers to sort
+                    </p>
+                    <div style="overflow-x: auto;">
+                        <table id="${tableId}" style="width: 100%; border-collapse: collapse; background: #18181b; border-radius: 8px; overflow: hidden;">
+                            <thead>
+                                <tr style="background: #27272a; color: #a1a1aa; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                                    <th onclick="sortMapTable('map_name')" style="padding: 1rem; text-align: left; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Map <span id="map_name-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('times_played')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Times Played <span id="times_played-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('avg_kills_per_map')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        Avg K/Map <span id="avg_kills_per_map-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('kd_ratio')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        K/D <span id="kd_ratio-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('avg_acs')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        ACS <span id="avg_acs-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('avg_adr')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        ADR <span id="avg_adr-sort-indicator"></span>
+                                    </th>
+                                    <th onclick="sortMapTable('avg_kast')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
+                                        KAST% <span id="avg_kast-sort-indicator"></span>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="${tableId}Body">
+                                ${mapRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderMapRows(mapData, killLine) {
+            return mapData.map(mapInfo => {
+                const kd = mapInfo.kd_ratio;
+                const kdColor = kd >= 1.2 ? '#22c55e' : kd >= 1.0 ? '#f59e0b' : '#ef4444';
+                const isOverLine = mapInfo.avg_kills_per_map > killLine;
+                
+                return `
+                    <tr>
+                        <td style="font-weight: 600; color: #e4e4e7;">${mapInfo.map_name}</td>
+                        <td style="text-align: center;">${mapInfo.times_played}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${isOverLine ? '#22c55e' : '#ef4444'};">${mapInfo.avg_kills_per_map}</td>
+                        <td style="text-align: center; font-weight: 600; color: ${kdColor};">${kd}</td>
+                        <td style="text-align: center;">${mapInfo.avg_acs}</td>
+                        <td style="text-align: center;">${mapInfo.avg_adr}</td>
+                        <td style="text-align: center;">${mapInfo.avg_kast}%</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        let mapSortColumn = 'times_played';
+        let mapSortDirection = 'desc';
+        
+        function sortMapTable(column) {
+            // Toggle direction if same column, otherwise default to desc
+            if (mapSortColumn === column) {
+                mapSortDirection = mapSortDirection === 'desc' ? 'asc' : 'desc';
+            } else {
+                mapSortColumn = column;
+                mapSortDirection = 'desc';
+            }
+            
+            // Sort the data
+            const sortedData = [...window.mapStatsData].sort((a, b) => {
+                let aVal = a[column];
+                let bVal = b[column];
+                
+                // Handle string comparison for map names
+                if (column === 'map_name') {
+                    return mapSortDirection === 'desc' 
+                        ? bVal.localeCompare(aVal)
+                        : aVal.localeCompare(bVal);
+                }
+                
+                // Numeric comparison
+                aVal = parseFloat(aVal) || 0;
+                bVal = parseFloat(bVal) || 0;
+                
+                return mapSortDirection === 'desc' ? bVal - aVal : aVal - bVal;
+            });
+            
+            // Update table
+            document.getElementById('mapStatsTableBody').innerHTML = renderMapRows(sortedData, window.mapKillLine);
+            
+            // Update sort indicators (clear all map indicators first)
+            document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => {
+                if (el.id.includes('map_name') || el.id.includes('times_played') || 
+                    el.id.includes('avg_kills_per_map') || (el.id.includes('kd_ratio') && el.id !== 'kd_ratio-sort-indicator') ||
+                    (el.id.includes('avg_acs') && el.id !== 'avg_acs-sort-indicator') || 
+                    (el.id.includes('avg_adr') && el.id !== 'avg_adr-sort-indicator') ||
+                    (el.id.includes('avg_kast') && el.id !== 'avg_kast-sort-indicator')) {
+                    el.textContent = '';
+                }
+            });
+            const indicator = document.getElementById(`${column}-sort-indicator`);
+            if (indicator) {
+                indicator.textContent = mapSortDirection === 'desc' ? ' ↓' : ' ↑';
+            }
         }
         
         function showError(message) {

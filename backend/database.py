@@ -61,18 +61,40 @@ class Database:
             )
         ''')
         
-        # Player map stats - per-map kills for each player
+        # Player map stats - per-map performance for each player
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS player_map_stats (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 match_id INTEGER,
                 player_name TEXT NOT NULL,
                 map_number INTEGER,
+                map_name TEXT,
+                agent TEXT,
                 kills INTEGER,
                 deaths INTEGER,
                 assists INTEGER,
+                acs INTEGER,
+                adr INTEGER,
+                kast REAL,
+                first_bloods INTEGER,
+                map_score TEXT,
                 FOREIGN KEY (match_id) REFERENCES matches (id),
                 UNIQUE(match_id, player_name, map_number)
+            )
+        ''')
+        
+        # Match pick/bans
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS match_pick_bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id INTEGER,
+                first_ban TEXT,
+                second_ban TEXT,
+                first_pick TEXT,
+                second_pick TEXT,
+                decider TEXT,
+                FOREIGN KEY (match_id) REFERENCES matches (id),
+                UNIQUE(match_id)
             )
         ''')
         
@@ -262,6 +284,27 @@ class Database:
         finally:
             conn.close()
     
+    def save_match_pick_bans(self, match_id: int, first_ban: str = None, second_ban: str = None,
+                             first_pick: str = None, second_pick: str = None, decider: str = None):
+        """Save match pick/ban sequence"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO match_pick_bans 
+                (match_id, first_ban, second_ban, first_pick, second_pick, decider)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (match_id, first_ban, second_ban, first_pick, second_pick, decider))
+            
+            conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Error saving match pick/bans: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+    
     def get_match(self, match_url: str) -> Optional[Dict]:
         """Get a match by URL"""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -291,17 +334,22 @@ class Database:
     # ==================== Player Map Stats ====================
     
     def save_player_map_stat(self, match_id: int, player_name: str, map_number: int,
-                             kills: int, deaths: int = 0, assists: int = 0):
-        """Save a player's stats for a specific map"""
+                             kills: int, deaths: int = 0, assists: int = 0,
+                             map_name: str = None, agent: str = None,
+                             acs: int = 0, adr: int = 0, kast: float = 0.0,
+                             first_bloods: int = 0, map_score: str = None):
+        """Save comprehensive per-map stats for a player"""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
         try:
             cursor.execute('''
                 INSERT OR REPLACE INTO player_map_stats 
-                (match_id, player_name, map_number, kills, deaths, assists)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (match_id, player_name.lower(), map_number, kills, deaths, assists))
+                (match_id, player_name, map_number, kills, deaths, assists, 
+                 map_name, agent, acs, adr, kast, first_bloods, map_score)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (match_id, player_name.lower(), map_number, kills, deaths, assists,
+                  map_name, agent, acs, adr, kast, first_bloods, map_score))
             
             conn.commit()
             
@@ -318,7 +366,7 @@ class Database:
         
         try:
             cursor.execute('''
-                SELECT pms.kills 
+                SELECT pms.kills
                 FROM player_map_stats pms
                 JOIN matches m ON pms.match_id = m.id
                 WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
@@ -329,6 +377,86 @@ class Database:
             
         except Exception as e:
             logger.error(f"Error getting player map kills: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_player_map_kills_with_scores_for_event(self, player_name: str, event_id: int) -> List[Dict]:
+        """Get map kills with scores for win/loss analysis"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT pms.kills, pms.map_score
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
+                ORDER BY m.id, pms.map_number
+            ''', (player_name, event_id))
+            
+            return [{'kills': row[0], 'map_score': row[1]} for row in cursor.fetchall()]
+            
+        except Exception as e:
+            logger.error(f"Error getting player map kills with scores: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_player_match_data_for_event(self, player_name: str, event_id: int) -> List[Dict]:
+        """Get comprehensive match-level data (grouped by match) for a player in a specific event"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT m.match_url, e.event_name, pms.map_number, pms.kills, pms.map_score,
+                       pms.map_name, pms.agent, pms.acs, pms.adr, pms.kast, pms.first_bloods
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events e ON m.event_id = e.id
+                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
+                ORDER BY m.id, pms.map_number
+            ''', (player_name, event_id))
+            
+            rows = cursor.fetchall()
+            
+            # Group by match
+            matches = {}
+            for match_url, event_name, map_number, kills, map_score, map_name, agent, acs, adr, kast, first_bloods in rows:
+                if match_url not in matches:
+                    matches[match_url] = {
+                        'match_url': match_url,
+                        'event_name': event_name,
+                        'map_kills': [],
+                        'map_scores': [],
+                        'map_names': [],
+                        'agents': [],
+                        'acs_list': [],
+                        'adr_list': [],
+                        'kast_list': [],
+                        'first_bloods_list': []
+                    }
+                matches[match_url]['map_kills'].append(kills)
+                matches[match_url]['map_scores'].append(map_score if map_score else 'N/A')
+                matches[match_url]['map_names'].append(map_name if map_name else 'Unknown')
+                matches[match_url]['agents'].append(agent if agent else 'Unknown')
+                matches[match_url]['acs_list'].append(acs if acs else 0)
+                matches[match_url]['adr_list'].append(adr if adr else 0)
+                matches[match_url]['kast_list'].append(kast if kast else 0.0)
+                matches[match_url]['first_bloods_list'].append(first_bloods if first_bloods else 0)
+            
+            # Convert to list and set num_maps based on actual map count
+            match_list = []
+            for match in matches.values():
+                if len(match['map_kills']) >= 2:
+                    match['num_maps'] = len(match['map_kills'])
+                    match_list.append(match)
+            
+            return match_list
+            
+        except Exception as e:
+            logger.error(f"Error getting player match data: {e}")
             return []
         finally:
             conn.close()
@@ -363,6 +491,107 @@ class Database:
         except Exception as e:
             logger.error(f"Error getting player cached kills: {e}")
             return {}
+        finally:
+            conn.close()
+    
+    def get_player_agent_aggregation(self, player_name: str) -> List[Dict]:
+        """Get aggregated stats per agent for a player across all events"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT 
+                    pms.agent,
+                    COUNT(DISTINCT pms.match_id) as matches_played,
+                    COUNT(*) as maps_played,
+                    SUM(pms.kills) as total_kills,
+                    SUM(pms.deaths) as total_deaths,
+                    SUM(pms.assists) as total_assists,
+                    AVG(pms.acs) as avg_acs,
+                    AVG(pms.adr) as avg_adr,
+                    AVG(pms.kast) as avg_kast,
+                    SUM(pms.first_bloods) as total_first_bloods
+                FROM player_map_stats pms
+                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL
+                GROUP BY pms.agent
+                ORDER BY maps_played DESC
+            ''', (player_name,))
+            
+            rows = cursor.fetchall()
+            
+            agents = []
+            for row in rows:
+                agents.append({
+                    'agent': row[0],
+                    'matches_played': row[1],
+                    'maps_played': row[2],
+                    'total_kills': row[3],
+                    'total_deaths': row[4],
+                    'total_assists': row[5],
+                    'avg_acs': round(row[6], 1) if row[6] else 0,
+                    'avg_adr': round(row[7], 1) if row[7] else 0,
+                    'avg_kast': round(row[8], 1) if row[8] else 0,
+                    'total_first_bloods': row[9],
+                    'kd_ratio': round(row[3] / row[4], 2) if row[4] > 0 else 0
+                })
+            
+            return agents
+            
+        except Exception as e:
+            logger.error(f"Error getting agent aggregation: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_player_map_aggregation(self, player_name: str) -> List[Dict]:
+        """Get aggregated stats per map for a player across all events"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute('''
+                SELECT 
+                    pms.map_name,
+                    COUNT(DISTINCT pms.match_id) as matches_played,
+                    COUNT(*) as times_played,
+                    SUM(pms.kills) as total_kills,
+                    SUM(pms.deaths) as total_deaths,
+                    SUM(pms.assists) as total_assists,
+                    AVG(pms.acs) as avg_acs,
+                    AVG(pms.adr) as avg_adr,
+                    AVG(pms.kast) as avg_kast,
+                    SUM(pms.first_bloods) as total_first_bloods
+                FROM player_map_stats pms
+                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL
+                GROUP BY pms.map_name
+                ORDER BY times_played DESC
+            ''', (player_name,))
+            
+            rows = cursor.fetchall()
+            
+            maps = []
+            for row in rows:
+                maps.append({
+                    'map_name': row[0],
+                    'matches_played': row[1],
+                    'times_played': row[2],
+                    'total_kills': row[3],
+                    'total_deaths': row[4],
+                    'total_assists': row[5],
+                    'avg_acs': round(row[6], 1) if row[6] else 0,
+                    'avg_adr': round(row[7], 1) if row[7] else 0,
+                    'avg_kast': round(row[8], 1) if row[8] else 0,
+                    'total_first_bloods': row[9],
+                    'kd_ratio': round(row[3] / row[4], 2) if row[4] > 0 else 0,
+                    'avg_kills_per_map': round(row[3] / row[2], 1) if row[2] > 0 else 0
+                })
+            
+            return maps
+            
+        except Exception as e:
+            logger.error(f"Error getting map aggregation: {e}")
+            return []
         finally:
             conn.close()
     

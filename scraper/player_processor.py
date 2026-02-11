@@ -13,6 +13,150 @@ class PlayerProcessor:
             kill_line: The over/under kill line from the sportsbook (e.g., 15.5 kills)
         """
         self.kill_line = kill_line
+    
+    def _parse_map_score(self, map_score: str) -> tuple:
+        """Parse map score to determine win/loss and margin"""
+        if not map_score or map_score == 'N/A':
+            return None, None
+        
+        try:
+            # Parse score like "13-6" or "16-14"
+            parts = map_score.split('-')
+            if len(parts) != 2:
+                return None, None
+            
+            score1 = int(parts[0].strip())
+            score2 = int(parts[1].strip())
+            
+            # Determine if player's team won (assuming first score is player's team)
+            # In Valorant, winning team has higher score
+            is_win = score1 > score2
+            margin = abs(score1 - score2)
+            
+            return is_win, margin
+        except:
+            return None, None
+    
+    def _classify_margin(self, margin: int) -> str:
+        """Classify margin as close/regular/blowout"""
+        if 2 <= margin <= 3:
+            return 'close'  # 2-3 rounds
+        elif 4 <= margin <= 6:
+            return 'regular'  # 4-6 rounds
+        elif margin >= 7:
+            return 'blowout'  # 7+ rounds
+        else:
+            # Margin of 0-1 (very rare) - don't count in analysis
+            return None
+    
+    def _calculate_margin_stats(self, events: List[Dict], kill_line: float) -> Dict:
+        """Calculate over/under percentages broken down by win/loss and margin"""
+        stats = {
+            'wins': {'close': {'over': 0, 'under': 0}, 'regular': {'over': 0, 'under': 0}, 'blowout': {'over': 0, 'under': 0}},
+            'losses': {'close': {'over': 0, 'under': 0}, 'regular': {'over': 0, 'under': 0}, 'blowout': {'over': 0, 'under': 0}},
+            'total_wins': 0,
+            'total_losses': 0,
+            'total_maps': 0
+        }
+        
+        for event in events:
+            map_data = event.get('map_data', [])
+            
+            for map_info in map_data:
+                kills = map_info.get('kills', 0)
+                map_score = map_info.get('map_score', 'N/A')
+                
+                is_win, margin = self._parse_map_score(map_score)
+                
+                # Skip if we can't parse the score
+                if is_win is None or margin is None:
+                    continue
+                
+                margin_type = self._classify_margin(margin)
+                
+                # Skip margins that don't fit classification (0-1 rounds)
+                if margin_type is None:
+                    continue
+                
+                stats['total_maps'] += 1
+                
+                # Determine if over or under
+                is_over = kills > kill_line
+                result_key = 'over' if is_over else 'under'
+                
+                if is_win:
+                    stats['total_wins'] += 1
+                    stats['wins'][margin_type][result_key] += 1
+                else:
+                    stats['total_losses'] += 1
+                    stats['losses'][margin_type][result_key] += 1
+        
+        # Calculate percentages
+        result = {
+            'wins': {},
+            'losses': {},
+            'total_wins': stats['total_wins'],
+            'total_losses': stats['total_losses'],
+            'total_maps': stats['total_maps']
+        }
+        
+        # Calculate win percentages
+        if stats['total_wins'] > 0:
+            result['wins_over_pct'] = round(100 * sum(stats['wins'][m]['over'] for m in ['close', 'regular', 'blowout']) / stats['total_wins'], 1)
+            result['wins_under_pct'] = round(100 * sum(stats['wins'][m]['under'] for m in ['close', 'regular', 'blowout']) / stats['total_wins'], 1)
+        else:
+            result['wins_over_pct'] = 0
+            result['wins_under_pct'] = 0
+        
+        # Calculate loss percentages
+        if stats['total_losses'] > 0:
+            result['losses_over_pct'] = round(100 * sum(stats['losses'][m]['over'] for m in ['close', 'regular', 'blowout']) / stats['total_losses'], 1)
+            result['losses_under_pct'] = round(100 * sum(stats['losses'][m]['under'] for m in ['close', 'regular', 'blowout']) / stats['total_losses'], 1)
+        else:
+            result['losses_over_pct'] = 0
+            result['losses_under_pct'] = 0
+        
+        # Calculate margin breakdowns for wins
+        for margin_type in ['close', 'regular', 'blowout']:
+            total = stats['wins'][margin_type]['over'] + stats['wins'][margin_type]['under']
+            if total > 0:
+                result['wins'][margin_type] = {
+                    'over': stats['wins'][margin_type]['over'],
+                    'under': stats['wins'][margin_type]['under'],
+                    'total': total,
+                    'over_pct': round(100 * stats['wins'][margin_type]['over'] / total, 1),
+                    'under_pct': round(100 * stats['wins'][margin_type]['under'] / total, 1)
+                }
+            else:
+                result['wins'][margin_type] = {
+                    'over': 0,
+                    'under': 0,
+                    'total': 0,
+                    'over_pct': 0,
+                    'under_pct': 0
+                }
+        
+        # Calculate margin breakdowns for losses
+        for margin_type in ['close', 'regular', 'blowout']:
+            total = stats['losses'][margin_type]['over'] + stats['losses'][margin_type]['under']
+            if total > 0:
+                result['losses'][margin_type] = {
+                    'over': stats['losses'][margin_type]['over'],
+                    'under': stats['losses'][margin_type]['under'],
+                    'total': total,
+                    'over_pct': round(100 * stats['losses'][margin_type]['over'] / total, 1),
+                    'under_pct': round(100 * stats['losses'][margin_type]['under'] / total, 1)
+                }
+            else:
+                result['losses'][margin_type] = {
+                    'over': 0,
+                    'under': 0,
+                    'total': 0,
+                    'over_pct': 0,
+                    'under_pct': 0
+                }
+        
+        return result
         
     def _is_most_recent_event(self, event_name: str) -> bool:
         """
@@ -171,6 +315,9 @@ class PlayerProcessor:
         over_percentage = player_data.get('over_percentage', 0)
         under_percentage = player_data.get('under_percentage', 0)
         
+        # Calculate win/loss margin statistics
+        margin_stats = self._calculate_margin_stats(events, self.kill_line)
+        
         # Determine confidence based on over/under percentage
         if over_percentage >= 70:
             confidence = "HIGH (Strong Over)"
@@ -203,5 +350,7 @@ class PlayerProcessor:
             'under_count': under_count,
             'total_maps': total_maps,
             'over_percentage': over_percentage,
-            'under_percentage': under_percentage
+            'under_percentage': under_percentage,
+            # Win/Loss margin stats
+            'margin_stats': margin_stats
         }

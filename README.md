@@ -1,105 +1,184 @@
-# Valorant KPR Betting Analysis Tool
+# ThunderEdge – Valorant Betting Analytics
 
-A web scraping tool that analyzes Valorant player statistics from VLR.gg to evaluate betting lines for Kills Per Round (KPR).
+A comprehensive web application that analyzes Valorant player and team statistics from [VLR.gg](https://www.vlr.gg) to evaluate betting lines for kills, KPR (Kills Per Round), and PrizePicks-style combined-map props.
+
+## Features
+
+| Feature | Description |
+|--------|-------------|
+| **Player Kill Analysis** | Per-map kill lines with over/under evaluation, win/loss breakdown, and margin classification (close/regular/blowout) |
+| **PrizePicks Analysis** | Combined kills for maps 1+2 (or any 2-map combo in 3-map matches) with match outcome context (2-0 vs 2-1) |
+| **Team Analysis** | Fights per round, pick/ban percentages, and team-level stats from VCT events |
+| **Agent & Map Stats** | Per-agent and per-map aggregations (ACS, ADR, KAST, first bloods) |
+| **Database Caching** | SQLite cache of 12 VCT 2025 events (~428 matches, 21k+ map stats) for fast lookups |
 
 ## Project Structure
 
 ```
-valorant-kpr-tracker/
-├── scraper/
-│   ├── __init__.py
-│   ├── vlr_scraper.py      # Web scraper for VLR.gg
-│   └── player_processor.py  # KPR analysis and predictions
+thunderedge/
 ├── backend/
-│   ├── __init__.py
-│   ├── api.py              # Flask REST API
-│   ├── calculator.py       # Advanced KPR calculations
-│   └── database.py         # SQLite database handler
+│   ├── api.py              # Flask REST API & routes
+│   ├── calculator.py        # KPR calculations (weighted avg, exponential smoothing)
+│   └── database.py         # SQLite schema & queries
+├── scraper/
+│   ├── vlr_scraper.py      # VLR.gg web scraper
+│   ├── player_processor.py # Player kill line analysis
+│   ├── prizepicks_processor.py  # PrizePicks combined-map analysis
+│   ├── team_scraper.py     # Team event scraper
+│   └── team_processor.py   # Team stats processing
 ├── frontend/
-│   ├── app.py              # Alternative frontend entry
+│   ├── app.py              # Alternative entry (port 5001)
 │   └── templates/
-│       └── index.html      # Web interface
-├── data/                   # Database storage
-├── config.py               # Configuration settings
-├── requirements.txt        # Python dependencies
-├── run.py                  # Main application entry
-└── README.md
+│       ├── index.html      # Player analysis UI
+│       ├── prizepicks.html # PrizePicks analysis UI
+│       └── team.html       # Team analysis UI
+├── scripts/
+│   └── populate_database.py  # Database population script
+├── data/                   # SQLite database (valorant_stats.db)
+├── config.py               # Configuration
+├── run.py                  # Main entry point
+├── repopulate.py           # Quick repopulate (no confirmation)
+├── migrate_database.py     # Schema migration for new columns
+└── requirements.txt
 ```
 
 ## Installation
 
-1. Install Python dependencies:
+### 1. Clone and install
+
 ```bash
+git clone https://github.com/jxc2008/thunderedge.git
+cd thunderedge
 pip install -r requirements.txt
 ```
 
-2. Run the application:
+### 2. Populate the database (recommended)
+
+Populate the cache with all 12 VCT 2025 events (~10–15 min):
+
+```bash
+python repopulate.py
+```
+
+For interactive mode with confirmation:
+
+```bash
+python scripts/populate_database.py
+```
+
+To repopulate only Americas & EMEA:
+
+```bash
+python repopulate_americas_emea.py
+```
+
+### 3. Run the application
+
 ```bash
 python run.py
 ```
 
-3. Open your browser to http://localhost:5000
+Open http://localhost:5000
 
 ## API Endpoints
 
-### GET /api/player/{IGN}
-Analyze a single player's KPR statistics.
+### Player Analysis
 
-**Query Parameters:**
-- `line` (optional): Betting line KPR (default: 0.70)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/player/<IGN>` | Player kill analysis. Query: `?line=15.5` (default kill line) |
+| POST | `/api/batch` | Batch player analysis. Body: `{"players": ["TenZ", "aspas"], "line": 15.5}` |
 
-**Example:**
-```
-GET /api/player/TenZ?line=0.75
-```
+### PrizePicks Analysis
 
-### POST /api/batch
-Analyze multiple players at once.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/prizepicks/<IGN>` | Combined kills for maps 1+2. Query: `?line=30.5` (default) |
 
-**Request Body:**
-```json
-{
-    "players": ["TenZ", "aspas", "demon1"],
-    "line": 0.70
-}
-```
+### Team Analysis
 
-### GET /api/stats
-Get system statistics (tracked players, events recorded).
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/team/<team_name>` | Team stats (fights/round, pick/bans). Query: `?region=Americas` |
+
+### System
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/stats` | Database stats (events, matches, map stats) |
+| GET | `/api/cache/status` | Cache status and cached events |
+
+### Web Pages
+
+| Route | Description |
+|-------|-------------|
+| `/` | Player analysis page |
+| `/prizepicks` | PrizePicks analysis page |
+| `/team` | Team analysis page |
 
 ## How It Works
 
-1. **Web Scraping**: The tool scrapes player statistics from VLR.gg in real-time
-2. **Data Processing**: Historical KPR data is analyzed for trends and patterns
-3. **Prediction**: A weighted algorithm predicts expected KPR
-4. **Evaluation**: The prediction is compared against the betting line
-5. **Classification**: Results are classified as UNDERPRICED, OVERPRICED, or FAIR VALUE
+### Data flow
 
-## Prediction Formula
+1. **Scraping** – VLR.gg is scraped for player stats, matches, and team data.
+2. **Caching** – Completed VCT events are stored in SQLite. Ongoing events are scraped live.
+3. **Processing** – Processors (Player, PrizePicks, Team) compute aggregations and evaluate lines.
+4. **Output** – API returns predictions, over/under breakdowns, and classifications.
 
-```
-predicted_kpr = (0.6 * average_kpr) + (0.4 * recent_kpr) + (0.1 * trend)
-```
+### Player kill analysis
 
-## Classification Thresholds
+- **Per-map kills** – Each map is evaluated against the kill line (e.g., 15.5).
+- **Margin classification**:
+  - **Close**: 2–3 round margin
+  - **Regular**: 4–6 round margin
+  - **Blowout**: 7+ round margin
+- **Win/loss breakdown** – Over/under rates by match outcome and margin.
 
-- **UNDERPRICED HIGH**: Predicted KPR is 10%+ above the line
-- **UNDERPRICED MEDIUM**: Predicted KPR is 5-10% above the line
-- **OVERPRICED HIGH**: Predicted KPR is 10%+ below the line
-- **OVERPRICED MEDIUM**: Predicted KPR is 5-10% below the line
-- **FAIR VALUE**: Within 5% of the betting line
+### PrizePicks analysis
+
+- **Combined kills** – Sum of kills from maps 1 and 2 (or 2-map combos in 3-map matches).
+- **Match outcome** – 2-0 (blowout) vs 2-1 (close).
+- **Win/loss context** – Over/under rates by match result and margin.
+
+### Database schema (key tables)
+
+- **vct_events** – Event metadata (name, region, status).
+- **matches** – Match URLs, teams, event.
+- **player_map_stats** – Per-map stats (kills, deaths, assists, ACS, ADR, KAST, agent, map_name).
+- **match_pick_bans** – Pick/ban sequence per match.
+- **player_event_stats** – Aggregate KPR, rounds, rating per player per event.
+
+## Configuration
+
+In `config.py`:
+
+- `DEFAULT_KILL_LINE` – Default per-map kill line (15.5).
+- `DATABASE_PATH` – Override via `DATABASE_PATH` env var.
+- `ROUNDS_THRESHOLDS` – Rounds-based classification thresholds.
+
+## Deployment
+
+- **Heroku**: See `DEPLOYMENT.md` and `Procfile`.
+- **Vercel**: See `VERCEL_DEPLOYMENT.md` and `vercel.json`.
+
+## Documentation
+
+- `CALCULATION_EXPLANATION.md` – Team fights/round and pick/ban logic.
+- `GITHUB_SETUP.md` – GitHub setup notes.
 
 ## Important Notes
 
-### Web Scraping Ethics
-- Check VLR.gg's robots.txt and terms of service
-- The scraper includes delays between requests
-- Results are cached to avoid excessive requests
+### Web scraping
 
-### Legal Disclaimer
-- This tool is for educational/prototyping purposes only
-- Not financial or betting advice
-- Check local laws regarding sports betting data
+- Respect VLR.gg robots.txt and terms of service.
+- Built-in delays and caching reduce request volume.
+- Proxy env vars are disabled to avoid request issues on some systems.
+
+### Disclaimer
+
+- For educational and prototyping only.
+- Not financial or betting advice.
+- Check local laws related to sports betting data.
 
 ## License
 

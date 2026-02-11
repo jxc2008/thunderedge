@@ -8,9 +8,9 @@ gunicorn==21.2.0
 requests==2.31.0
 beautifulsoup4==4.12.2
 
-# Data processing (if needed)
-# pandas==2.1.4
-# numpy==1.26.2
+# Data processing (required for mathematical backtesting)
+numpy==1.26.2
+scipy==1.11.4
 
 # Environment variables
 python-dotenv==1.0.0

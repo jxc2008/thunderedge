@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mathematical Edge Analysis | ThunderEdge</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: #000000;
+            color: #e4e4e7;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .page-header {
+            background: linear-gradient(180deg, #0a0a0a 0%, #000000 100%);
+            border-bottom: 1px solid #27272a;
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.02em;
+            text-decoration: none;
+        }
+        
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+        }
+        
+        .header-nav {
+            display: flex;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .header-nav a {
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #a1a1aa;
+            text-decoration: none;
+        }
+        
+        .header-nav a:hover {
+            color: #ffffff;
+            background: #18181b;
+        }
+
+        .header-nav a.active {
+            color: #ffffff;
+            background: #18181b;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .hero-section {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        
+        h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        
+        .subtitle {
+            color: #71717a;
+            font-size: 1rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .input-section {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+
+        .input-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #a1a1aa;
+        }
+
+        input {
+            padding: 0.75rem;
+            background: #09090b;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            color: #e4e4e7;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .analyze-btn {
+            padding: 0.875rem 2rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .analyze-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .analyze-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results-section {
+            display: none;
+            margin-top: 2rem;
+        }
+
+        .results-section.visible {
+            display: block;
+        }
+
+        .recommendation-card {
+            background: #18181b;
+            border: 2px solid;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .recommendation-card.bet-over {
+            border-color: #22c55e;
+            background: linear-gradient(180deg, #18181b 0%, rgba(34, 197, 94, 0.05) 100%);
+        }
+
+        .recommendation-card.bet-under {
+            border-color: #ef4444;
+            background: linear-gradient(180deg, #18181b 0%, rgba(239, 68, 68, 0.05) 100%);
+        }
+
+        .recommendation-card.no-bet {
+            border-color: #71717a;
+            background: linear-gradient(180deg, #18181b 0%, rgba(113, 113, 122, 0.05) 100%);
+        }
+
+        .recommendation-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .recommendation-card.bet-over .recommendation-title {
+            color: #22c55e;
+        }
+
+        .recommendation-card.bet-under .recommendation-title {
+            color: #ef4444;
+        }
+
+        .recommendation-card.no-bet .recommendation-title {
+            color: #71717a;
+        }
+
+        .ev-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 1rem 0;
+        }
+
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .confidence-high {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .confidence-med {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+        }
+
+        .confidence-low {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: #71717a;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #e4e4e7;
+        }
+
+        .stat-detail {
+            font-size: 0.75rem;
+            color: #a1a1aa;
+            margin-top: 0.25rem;
+        }
+
+        .chart-section {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .chart-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 2rem;
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #27272a;
+        }
+
+        .comparison-table th {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .comparison-table td {
+            font-size: 1rem;
+        }
+
+        .positive {
+            color: #22c55e;
+        }
+
+        .negative {
+            color: #ef4444;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #71717a;
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 1rem;
+            color: #ef4444;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <header class="page-header">
+        <div class="header-content">
+            <a href="/" class="logo">
+                <div class="logo-icon">⚡</div>
+                <span>ThunderEdge</span>
+            </a>
+            <nav class="header-nav">
+                <a href="/">Players</a>
+                <a href="/prizepicks">PrizePicks</a>
+                <a href="/edge" class="active">Edge Analysis</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="hero-section">
+            <h1>Mathematical Edge Analysis</h1>
+            <p class="subtitle">
+                Compare your model's probability distribution against market odds to find profitable betting edges
+            </p>
+        </div>
+
+        <div class="input-section">
+            <div class="input-grid">
+                <div class="input-group">
+                    <label for="player">Player IGN</label>
+                    <input type="text" id="player" placeholder="e.g., yay" value="yay">
+                </div>
+                <div class="input-group">
+                    <label for="line">Kill Line</label>
+                    <input type="number" id="line" step="0.5" placeholder="e.g., 18.5" value="18.5">
+                </div>
+                <div class="input-group">
+                    <label for="over-odds">Over Odds</label>
+                    <input type="number" id="over-odds" placeholder="e.g., -110" value="-110">
+                </div>
+                <div class="input-group">
+                    <label for="under-odds">Under Odds</label>
+                    <input type="number" id="under-odds" placeholder="e.g., -110" value="-110">
+                </div>
+            </div>
+            <button class="analyze-btn" onclick="analyzeEdge()">Analyze Edge</button>
+            <div id="error" class="error-message" style="display: none;"></div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Analyzing...
+        </div>
+
+        <div id="results" class="results-section">
+            <div id="recommendation-card" class="recommendation-card">
+                <div class="recommendation-title" id="rec-title">BET OVER</div>
+                <div class="ev-display" id="ev-display">+15.2% ROI</div>
+                <div>
+                    <span class="confidence-badge" id="confidence-badge">HIGH CONFIDENCE</span>
+                </div>
+                <p style="margin-top: 1rem; color: #a1a1aa;" id="rec-description">
+                    Your model suggests stronger edge on this side
+                </p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Model Mean</div>
+                    <div class="stat-value" id="model-mean">16.8</div>
+                    <div class="stat-detail" id="model-dist">Negative Binomial</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Market Implied Mean</div>
+                    <div class="stat-value" id="market-mean">19.0</div>
+                    <div class="stat-detail" id="market-vig">4.76% vig</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Sample Size</div>
+                    <div class="stat-value" id="sample-size">38</div>
+                    <div class="stat-detail" id="sample-detail">maps analyzed</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Best EV</div>
+                    <div class="stat-value" id="best-ev">+23.3%</div>
+                    <div class="stat-detail" id="best-side">UNDER</div>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <div class="chart-title">Kill Distribution: Model vs Market</div>
+                <div class="chart-container">
+                    <canvas id="distributionChart"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <div class="chart-title">Probability Comparison</div>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Side</th>
+                            <th>Model P(Win)</th>
+                            <th>Market P(Win)</th>
+                            <th>Prob Edge</th>
+                            <th>EV per $1</th>
+                            <th>ROI %</th>
+                        </tr>
+                    </thead>
+                    <tbody id="comparison-tbody">
+                        <!-- Will be populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+
+        async function analyzeEdge() {
+            const player = document.getElementById('player').value.trim();
+            const line = parseFloat(document.getElementById('line').value);
+            const overOdds = parseFloat(document.getElementById('over-odds').value);
+            const underOdds = parseFloat(document.getElementById('under-odds').value);
+
+            // Validation
+            if (!player || isNaN(line) || isNaN(overOdds) || isNaN(underOdds)) {
+                showError('Please fill in all fields with valid values');
+                return;
+            }
+
+            // Hide error
+            document.getElementById('error').style.display = 'none';
+            
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').classList.remove('visible');
+
+            try {
+                const response = await fetch(
+                    `/api/edge/${encodeURIComponent(player)}?line=${line}&over_odds=${overOdds}&under_odds=${underOdds}`
+                );
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to fetch analysis');
+                }
+
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function displayResults(data) {
+            // Show results section
+            document.getElementById('results').classList.add('visible');
+
+            // Update recommendation card
+            const recCard = document.getElementById('recommendation-card');
+            const recommended = data.edge.recommended;
+            
+            recCard.className = 'recommendation-card';
+            if (recommended === 'OVER') {
+                recCard.classList.add('bet-over');
+            } else if (recommended === 'UNDER') {
+                recCard.classList.add('bet-under');
+            } else {
+                recCard.classList.add('no-bet');
+            }
+
+            document.getElementById('rec-title').textContent = 
+                recommended === 'NO BET' ? 'NO BET RECOMMENDED' : `BET ${recommended}`;
+            
+            const evPct = recommended === 'OVER' ? data.edge.roi_over_pct : data.edge.roi_under_pct;
+            document.getElementById('ev-display').textContent = 
+                (evPct >= 0 ? '+' : '') + evPct.toFixed(2) + '% ROI';
+
+            // Confidence badge
+            const confidence = data.player.confidence;
+            const badge = document.getElementById('confidence-badge');
+            badge.className = 'confidence-badge confidence-' + confidence.toLowerCase();
+            badge.textContent = confidence + ' CONFIDENCE';
+
+            // Description
+            const meanDiff = data.model.mu - data.market.mu_implied;
+            let description = '';
+            if (Math.abs(meanDiff) < 0.5) {
+                description = 'Model and market roughly agree on player performance';
+            } else if (meanDiff > 0) {
+                description = 'Model is more bullish than market → OVER has better value';
+            } else {
+                description = 'Model is less bullish than market → UNDER has better value';
+            }
+            document.getElementById('rec-description').textContent = description;
+
+            // Stats cards
+            document.getElementById('model-mean').textContent = data.model.mu.toFixed(1);
+            document.getElementById('model-dist').textContent = 
+                data.model.dist === 'poisson' ? 'Poisson Distribution' : 'Negative Binomial';
+            
+            document.getElementById('market-mean').textContent = data.market.mu_implied.toFixed(1);
+            document.getElementById('market-vig').textContent = data.market.vig_percentage.toFixed(2) + '% vig';
+            
+            document.getElementById('sample-size').textContent = data.player.sample_size;
+            document.getElementById('sample-detail').textContent = 'maps analyzed';
+            
+            const bestEV = Math.max(data.edge.ev_over, data.edge.ev_under);
+            const bestSide = data.edge.ev_over > data.edge.ev_under ? 'OVER' : 'UNDER';
+            document.getElementById('best-ev').textContent = 
+                (bestEV >= 0 ? '+' : '') + (bestEV * 100).toFixed(1) + '%';
+            document.getElementById('best-side').textContent = bestSide;
+
+            // Comparison table
+            const tbody = document.getElementById('comparison-tbody');
+            tbody.innerHTML = `
+                <tr>
+                    <td><strong>OVER</strong></td>
+                    <td>${(data.model.p_over * 100).toFixed(2)}%</td>
+                    <td>${(data.market.p_over_vigfree * 100).toFixed(2)}%</td>
+                    <td class="${data.edge.prob_edge_over >= 0 ? 'positive' : 'negative'}">
+                        ${(data.edge.prob_edge_over >= 0 ? '+' : '')}${(data.edge.prob_edge_over * 100).toFixed(2)}%
+                    </td>
+                    <td class="${data.edge.ev_over >= 0 ? 'positive' : 'negative'}">
+                        $${data.edge.ev_over.toFixed(4)}
+                    </td>
+                    <td class="${data.edge.roi_over_pct >= 0 ? 'positive' : 'negative'}">
+                        ${(data.edge.roi_over_pct >= 0 ? '+' : '')}${data.edge.roi_over_pct.toFixed(2)}%
+                    </td>
+                </tr>
+                <tr>
+                    <td><strong>UNDER</strong></td>
+                    <td>${(data.model.p_under * 100).toFixed(2)}%</td>
+                    <td>${(data.market.p_under_vigfree * 100).toFixed(2)}%</td>
+                    <td class="${data.edge.prob_edge_under >= 0 ? 'positive' : 'negative'}">
+                        ${(data.edge.prob_edge_under >= 0 ? '+' : '')}${(data.edge.prob_edge_under * 100).toFixed(2)}%
+                    </td>
+                    <td class="${data.edge.ev_under >= 0 ? 'positive' : 'negative'}">
+                        $${data.edge.ev_under.toFixed(4)}
+                    </td>
+                    <td class="${data.edge.roi_under_pct >= 0 ? 'positive' : 'negative'}">
+                        ${(data.edge.roi_under_pct >= 0 ? '+' : '')}${data.edge.roi_under_pct.toFixed(2)}%
+                    </td>
+                </tr>
+            `;
+
+            // Update chart
+            updateChart(data);
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('distributionChart');
+            
+            if (chart) {
+                chart.destroy();
+            }
+
+            const lineValue = data.line;
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.visualization.x,
+                    datasets: [
+                        {
+                            label: 'Your Model',
+                            data: data.visualization.model_pmf,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Market Implied',
+                            data: data.visualization.market_pmf,
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#e4e4e7',
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + 
+                                           (context.parsed.y * 100).toFixed(2) + '%';
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                line1: {
+                                    type: 'line',
+                                    xMin: lineValue,
+                                    xMax: lineValue,
+                                    borderColor: '#22c55e',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5],
+                                    label: {
+                                        content: 'Line: ' + lineValue,
+                                        enabled: true,
+                                        position: 'top',
+                                        color: '#22c55e'
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Kills',
+                                color: '#a1a1aa'
+                            },
+                            grid: {
+                                color: '#27272a'
+                            },
+                            ticks: {
+                                color: '#a1a1aa'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Probability',
+                                color: '#a1a1aa'
+                            },
+                            grid: {
+                                color: '#27272a'
+                            },
+                            ticks: {
+                                color: '#a1a1aa',
+                                callback: function(value) {
+                                    return (value * 100).toFixed(1) + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        // Allow Enter key to submit
+        document.addEventListener('DOMContentLoaded', function() {
+            const inputs = document.querySelectorAll('input');
+            inputs.forEach(input => {
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        analyzeEdge();
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

@@ -10,10 +10,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scraper.vlr_scraper import VLRScraper
 from scraper.player_processor import PlayerProcessor
 from scraper.prizepicks_processor import PrizePicksProcessor
+from scraper.prizepicks_api import fetch_valorant_projections
 from scraper.team_scraper import TeamScraper
 from scraper.team_processor import TeamProcessor
 from backend.database import Database
-from backend.model_params import get_player_distribution
+from backend.model_params import get_player_distribution, compute_distribution_params
 from backend.prop_prob import compute_prop_probabilities, generate_pmf
 from backend.market_implied import compute_market_parameters
 from backend.odds_utils import expected_value_per_1
@@ -380,6 +381,415 @@ def get_prizepicks_analysis(ign):
     except Exception as e:
         logger.error(f"Error processing PrizePicks for {ign}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prizepicks/edge/<ign>', methods=['GET'])
+def get_prizepicks_edge_analysis(ign):
+    """
+    Get mathematical edge analysis for PrizePicks 2-map combined props.
+
+    Query params:
+        line: Combined kill line (maps 1+2 style)
+        over_odds: American odds for Over
+        under_odds: American odds for Under
+    """
+    try:
+        line = float(request.args.get('line', 30.5))
+        over_odds = float(request.args.get('over_odds', -110))
+        under_odds = float(request.args.get('under_odds', -110))
+
+        logger.info(f"PrizePicks edge analysis for {ign}: line={line}, over={over_odds}, under={under_odds}")
+
+        # Use PrizePicks match-level data and convert to 2-map combo samples
+        player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
+        if not player_data or not player_data.get('ign'):
+            return jsonify({'error': 'Player not found'}), 404
+
+        pp_processor = PrizePicksProcessor(kill_line=line)
+        combo_samples = []
+
+        for match_data in player_data.get('match_combinations', []):
+            map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+            if len(map_kills) < 2:
+                continue
+            combos = pp_processor.process_match_combinations(map_kills)
+            combo_samples.extend([c['combined_kills'] for c in combos])
+
+        if len(combo_samples) < 3:
+            return jsonify({'error': 'Insufficient 2-map combination samples for edge analysis'}), 400
+
+        # Model distribution from combined 2-map kills
+        dist_params = compute_distribution_params(combo_samples)
+        dist_params['samples'] = combo_samples
+
+        # Probabilities from model
+        model_probs = compute_prop_probabilities(dist_params, line)
+
+        # Market implied probabilities/mean
+        market_params = compute_market_parameters(
+            line=line,
+            over_odds=over_odds,
+            under_odds=under_odds,
+            model_dist_type=dist_params['dist'],
+            model_dispersion=dist_params.get('k', None)
+        )
+
+        p_over_model = model_probs['p_over']
+        p_under_model = model_probs['p_under']
+        p_over_market = market_params['p_over_vigfree']
+        p_under_market = market_params['p_under_vigfree']
+
+        prob_edge_over = p_over_model - p_over_market
+        prob_edge_under = p_under_model - p_under_market
+
+        ev_over = expected_value_per_1(p_over_model, over_odds)
+        ev_under = expected_value_per_1(p_under_model, under_odds)
+
+        if ev_over > 0 and ev_over > ev_under:
+            recommended = 'OVER'
+            best_ev = ev_over
+        elif ev_under > 0 and ev_under > ev_over:
+            recommended = 'UNDER'
+            best_ev = ev_under
+        else:
+            recommended = 'NO BET'
+            best_ev = max(ev_over, ev_under)
+
+        # Visualization PMFs around combined-kill mean
+        mu = dist_params['mu']
+        x_min = max(0, int(mu - 25))
+        x_max = int(mu + 25)
+        model_pmf = generate_pmf(dist_params, (x_min, x_max))
+
+        market_dist_params = {
+            'dist': dist_params['dist'],
+            'mu': market_params['mu_market'],
+            'lambda': market_params['mu_market'],
+        }
+        if dist_params['dist'] == 'nbinom':
+            k = dist_params.get('k', 1.0)
+            market_dist_params['k'] = k
+            market_dist_params['p'] = k / (k + market_params['mu_market'])
+        market_pmf = generate_pmf(market_dist_params, (x_min, x_max))
+
+        return jsonify({
+            'success': True,
+            'scope': 'prizepicks_2map_combo',
+            'player': {
+                'ign': ign,
+                'sample_size': len(combo_samples),
+                'confidence': dist_params['confidence']
+            },
+            'line': line,
+            'model': {
+                'dist': dist_params['dist'],
+                'mu': dist_params['mu'],
+                'var': dist_params['var'],
+                'p_over': p_over_model,
+                'p_under': p_under_model
+            },
+            'market': {
+                'over_odds': over_odds,
+                'under_odds': under_odds,
+                'p_over_vigfree': p_over_market,
+                'p_under_vigfree': p_under_market,
+                'vig_percentage': market_params['vig_percentage'],
+                'mu_implied': market_params['mu_market']
+            },
+            'edge': {
+                'prob_edge_over': prob_edge_over,
+                'prob_edge_under': prob_edge_under,
+                'ev_over': ev_over,
+                'ev_under': ev_under,
+                'recommended': recommended,
+                'best_ev': best_ev,
+                'roi_over_pct': ev_over * 100,
+                'roi_under_pct': ev_under * 100
+            },
+            'visualization': {
+                'x': model_pmf['x'],
+                'model_pmf': model_pmf['pmf'],
+                'market_pmf': market_pmf['pmf'],
+                'line_position': line
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error in PrizePicks edge analysis for {ign}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/prizepicks/parlay', methods=['POST'])
+def get_prizepicks_parlay_analysis():
+    """
+    Simulate PrizePicks parlay hit rate and EV.
+
+    Payload:
+    {
+      "legs": [
+        {"ign":"aspas","line":30.5,"side":"over"},
+        {"ign":"TenZ","line":28.5,"side":"under"}
+      ]
+    }
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        legs = payload.get('legs', [])
+
+        if not isinstance(legs, list) or len(legs) < 2 or len(legs) > 6:
+            return jsonify({'error': 'Parlay must contain 2 to 6 legs'}), 400
+
+        payout_map = {2: 3.0, 3: 6.0, 4: 10.0, 5: 20.0, 6: 37.5}
+        payout_multiplier = payout_map[len(legs)]
+
+        leg_results = []
+        parlay_hit_prob = 1.0
+
+        for i, leg in enumerate(legs):
+            ign = str(leg.get('ign', '')).strip()
+            side = str(leg.get('side', '')).strip().lower()
+            line = float(leg.get('line', 0))
+
+            if not ign:
+                return jsonify({'error': f'Leg {i+1}: missing player name'}), 400
+            if side not in ('over', 'under'):
+                return jsonify({'error': f'Leg {i+1}: side must be "over" or "under"'}), 400
+            if line <= 0:
+                return jsonify({'error': f'Leg {i+1}: line must be positive'}), 400
+
+            # Build PrizePicks 2-map combo samples for this player
+            player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
+            if not player_data or not player_data.get('ign'):
+                return jsonify({'error': f'Leg {i+1}: player not found ({ign})'}), 404
+
+            pp_processor = PrizePicksProcessor(kill_line=line)
+            combo_samples = []
+            for match_data in player_data.get('match_combinations', []):
+                map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+                if len(map_kills) < 2:
+                    continue
+                combos = pp_processor.process_match_combinations(map_kills)
+                combo_samples.extend([c['combined_kills'] for c in combos])
+
+            if len(combo_samples) < 3:
+                return jsonify({'error': f'Leg {i+1}: insufficient sample size for {ign}'}), 400
+
+            dist_params = compute_distribution_params(combo_samples)
+            probs = compute_prop_probabilities(dist_params, line)
+
+            p_over = probs['p_over']
+            p_under = probs['p_under']
+            leg_hit_prob = p_over if side == 'over' else p_under
+            parlay_hit_prob *= leg_hit_prob
+
+            leg_results.append({
+                'ign': player_data.get('ign', ign),
+                'team': player_data.get('team', 'Unknown'),
+                'line': line,
+                'side': side,
+                'p_hit': leg_hit_prob,
+                'p_over': p_over,
+                'p_under': p_under,
+                'sample_size': len(combo_samples),
+                'mu': dist_params.get('mu', 0.0),
+                'var': dist_params.get('var', 0.0),
+                'dist': dist_params.get('dist', 'poisson')
+            })
+
+        expected_return_per_1 = parlay_hit_prob * payout_multiplier
+        ev_per_1 = expected_return_per_1 - 1.0
+        roi_pct = ev_per_1 * 100
+
+        return jsonify({
+            'success': True,
+            'legs_count': len(legs),
+            'payout_multiplier': payout_multiplier,
+            'parlay_hit_probability': parlay_hit_prob,
+            'expected_return_per_1': expected_return_per_1,
+            'ev_per_1': ev_per_1,
+            'roi_pct': roi_pct,
+            'legs': leg_results,
+            'assumption': 'Leg outcomes are treated as independent for parlay probability.'
+        })
+
+    except Exception as e:
+        logger.error(f"Error in PrizePicks parlay analysis: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+def _build_leaderboard_from_projections(projections: list) -> tuple:
+    """Shared logic: take list of {player_name, line}, fetch VLR data (or use cache), compute ranks.
+    Returns (results, skipped) where skipped is list of {player_name, line, reason}."""
+    player_cache = {}
+    results = []
+    skipped = []
+    for proj in projections:
+        pp_name = proj.get('player_name', '').strip()
+        line = proj.get('line')
+        if not pp_name or line is None:
+            continue
+        if pp_name not in player_cache:
+            player_data = db.get_cached_player_data(pp_name)
+            if not player_data:
+                player_data = scraper.get_player_prizepicks_data(pp_name, kill_line=line)
+                if player_data:
+                    db.save_player_data_cache(pp_name, player_data)
+            player_cache[pp_name] = player_data
+        else:
+            player_data = player_cache[pp_name]
+        if not player_data or not player_data.get('ign'):
+            skipped.append({'player_name': pp_name, 'line': line, 'reason': 'Player not found on VLR'})
+            continue
+        pp_processor = PrizePicksProcessor(kill_line=line)
+        combo_samples = db.get_cached_combo_samples(pp_name)
+        if combo_samples is None:
+            combo_samples = []
+            for match_data in player_data.get('match_combinations', []):
+                map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+                if len(map_kills) < 2:
+                    continue
+                combos = pp_processor.process_match_combinations(map_kills)
+                combo_samples.extend([c['combined_kills'] for c in combos])
+            if combo_samples:
+                db.save_combo_cache(pp_name, combo_samples)
+        if len(combo_samples) < 3:
+            skipped.append({'player_name': pp_name, 'line': line, 'reason': f'Insufficient data ({len(combo_samples)} combo samples)'})
+            continue
+        dist_params = compute_distribution_params(combo_samples)
+        probs = compute_prop_probabilities(dist_params, line)
+        p_over, p_under = probs['p_over'], probs['p_under']
+        best_side = 'over' if p_over >= p_under else 'under'
+        p_hit = p_over if best_side == 'over' else p_under
+        results.append({
+            'rank': 0,
+            'player_name': pp_name,
+            'vlr_ign': player_data.get('ign', pp_name),
+            'team': player_data.get('team', 'Unknown'),
+            'line': line,
+            'best_side': best_side,
+            'p_hit': round(p_hit, 4),
+            'p_over': round(p_over, 4),
+            'p_under': round(p_under, 4),
+            'sample_size': len(combo_samples),
+            'mu': round(dist_params.get('mu', 0), 2),
+        })
+    results.sort(key=lambda x: x['p_hit'], reverse=True)
+    for i, r in enumerate(results, 1):
+        r['rank'] = i
+    return results, skipped
+
+
+@app.route('/api/prizepicks/leaderboard', methods=['GET'])
+def get_prizepicks_leaderboard():
+    """
+    Fetch Valorant lines from PrizePicks API and rank by hit probability (best to worst).
+    Each line is evaluated with our model; best side (Over/Under) is chosen.
+    """
+    try:
+        try:
+            projections = fetch_valorant_projections(stat_filter=['kill'])
+        except Exception as fetch_err:
+            status = getattr(getattr(fetch_err, 'response', None), 'status_code', None)
+            if status == 403:
+                return jsonify({
+                    'success': True,
+                    'leaderboard': [],
+                    'message': 'PrizePicks API is blocking automated access (403 – Cloudflare protection). Try using a VPN or different network; or enter lines manually in the search below.'
+                })
+            raise
+        if not projections:
+            return jsonify({
+                'success': True,
+                'leaderboard': [],
+                'message': 'No Valorant kill lines available from PrizePicks (may be off-season or API unavailable).'
+            })
+
+        results, skipped = _build_leaderboard_from_projections(projections)
+        if results:
+            db.save_leaderboard_snapshot('api', results, parsed_count=len(projections))
+        return jsonify({
+            'success': True,
+            'leaderboard': results,
+            'skipped': skipped,
+            'fetched_at': projections[0].get('description', '') if projections else '',
+        })
+
+    except Exception as e:
+        logger.error(f"Error building PrizePicks leaderboard: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prizepicks/leaderboard/upload', methods=['POST'])
+def upload_leaderboard_image():
+    """
+    Upload a PrizePicks screenshot; OCR parses player names and lines, then ranks by hit probability.
+    """
+    try:
+        try:
+            from scraper.image_parser import parse_prizepicks_image
+        except ImportError as ie:
+            return jsonify({'error': f'OCR not available: {ie}. Install pytesseract + Tesseract (see https://github.com/UB-Mannheim/tesseract/wiki) or easyocr.'}), 500
+
+        if 'image' not in request.files and 'file' not in request.files:
+            return jsonify({'error': 'No image file provided'}), 400
+        f = request.files.get('image') or request.files.get('file')
+        if not f or f.filename == '':
+            return jsonify({'error': 'No image file selected'}), 400
+        image_bytes = f.read()
+        if len(image_bytes) < 100:
+            return jsonify({'error': 'File appears empty or too small'}), 400
+
+        projections = parse_prizepicks_image(image_bytes)
+        if not projections:
+            return jsonify({
+                'success': True,
+                'leaderboard': [],
+                'message': 'Could not parse any lines from the image. Ensure it shows PrizePicks MAPS 1-2 Kills cards.'
+            })
+
+        results, skipped = _build_leaderboard_from_projections(projections)
+        if results:
+            db.save_leaderboard_snapshot('upload', results, parsed_count=len(projections))
+        skip_msg = ''
+        if skipped:
+            skip_msg = f' {len(skipped)} skipped: ' + '; '.join(s[:50] for s in [f"{s['player_name']} ({s['reason']})" for s in skipped[:5]])
+            if len(skipped) > 5:
+                skip_msg += f' ...'
+        return jsonify({
+            'success': True,
+            'leaderboard': results,
+            'skipped': skipped,
+            'parsed_count': len(projections),
+            'message': f'Parsed {len(projections)} lines from image; ranked {len(results)} with sufficient data. Saved to history.{skip_msg}'
+        })
+    except Exception as e:
+        logger.error(f"Error processing leaderboard image: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prizepicks/leaderboard/history', methods=['GET'])
+def get_leaderboard_history():
+    """List recent leaderboard snapshots."""
+    try:
+        limit = int(request.args.get('limit', 50))
+        limit = min(limit, 200)
+        snapshots = db.get_leaderboard_snapshots(limit=limit)
+        return jsonify({'success': True, 'snapshots': snapshots})
+    except Exception as e:
+        logger.error(f"Error getting leaderboard history: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prizepicks/leaderboard/<int:snapshot_id>', methods=['GET'])
+def get_leaderboard_history_item(snapshot_id):
+    """Get a specific leaderboard snapshot by ID."""
+    try:
+        snapshot = db.get_leaderboard_snapshot(snapshot_id)
+        if not snapshot:
+            return jsonify({'error': 'Snapshot not found'}), 404
+        return jsonify({'success': True, **snapshot})
+    except Exception as e:
+        logger.error(f"Error getting leaderboard snapshot: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 
 # Add error handler for 404 to debug (at end of file, after all routes)
 @app.errorhandler(404)

@@ -45,8 +45,21 @@ class VLRScraper:
         """Set the database for caching"""
         self.db = database
     
+    def _try_search(self, soup, query: str) -> Optional[str]:
+        """Try to find player in search results by matching query to link text."""
+        player_links = soup.find_all('a', href=re.compile(r'/player/\d+/'))
+        query_lower = query.lower()
+        for link in player_links:
+            link_text = link.get_text(strip=True).lower()
+            if query_lower in link_text or link_text in query_lower:
+                return link['href']
+        # Don't use first-result fallback for placeholder names (OCR failed to match)
+        if player_links and len(query) >= 2 and not query_lower.startswith('player_'):
+            return player_links[0]['href']
+        return None
+
     def search_player(self, player_name: str) -> Optional[str]:
-        """Search for a player and return their profile URL"""
+        """Search for a player and return their profile URL. Tries OCR-style alt spellings if needed."""
         search_url = f"{self.base_url}/search"
         params = {'q': player_name}
         
@@ -54,15 +67,34 @@ class VLRScraper:
             content = self._make_request(search_url, params=params)
             soup = BeautifulSoup(content, 'html.parser')
             
-            player_links = soup.find_all('a', href=re.compile(r'/player/\d+/'))
+            url = self._try_search(soup, player_name)
+            if url:
+                return url
             
-            for link in player_links:
-                link_text = link.get_text(strip=True).lower()
-                if player_name.lower() in link_text:
-                    return link['href']
+            # OCR often confuses: 1/l/I, 0/O, 4/A. Try alternates when search fails
+            alternates = []
+            if '1' in player_name:
+                alternates.append(player_name.replace('1', 'l'))
+            if 'l' in player_name:
+                alternates.append(player_name.replace('l', '1', 1))
+            if '0' in player_name:
+                alternates.append(player_name.replace('0', 'o'))
+            if 'o' in player_name and '0' not in player_name:
+                alternates.append(player_name.replace('o', '0', 1))
+            if '4' in player_name:
+                alternates.append(player_name.replace('4', 'a'))
+            if 'a' in player_name and '4' not in player_name:
+                alternates.append(player_name.replace('a', '4', 1))
             
-            if player_links:
-                return player_links[0]['href']
+            for alt in alternates:
+                if alt == player_name:
+                    continue
+                params = {'q': alt}
+                content = self._make_request(search_url, params=params)
+                soup = BeautifulSoup(content, 'html.parser')
+                url = self._try_search(soup, alt)
+                if url:
+                    return url
                     
         except Exception as e:
             logger.error(f"Error searching for player {player_name}: {e}")
@@ -396,8 +428,12 @@ class VLRScraper:
                 
                 seen_matches.add(match_url)
                 
-                # Scrape this match for player kills and map scores
+                # Scrape this match for player kills and map scores (0-kill maps = unplayed, excluded in _get_match_full_map_stats)
                 match_kills, map_scores = self._get_match_map_kills_and_scores(match_url, player_name)
+                # Filter out any 0-kill maps that might slip through (unplayed)
+                filtered = [(k, s) for k, s in zip(match_kills, map_scores) if k is not None and k > 0]
+                match_kills = [x[0] for x in filtered]
+                map_scores = [x[1] for x in filtered]
                 if match_kills and len(match_kills) >= 1:  # Include even 1-map matches (ongoing)
                     # Only add if at least 2 maps, or if it's an ongoing match with 1 map
                     if len(match_kills) >= 2 or len(match_kills) == 1:
@@ -557,8 +593,8 @@ class VLRScraper:
                         except Exception as e:
                             logger.warning(f"Error parsing stats for {player_name} on {map_name}: {e}")
                     
-                    # Only add if kills are valid
-                    if 0 <= stats_dict['kills'] <= 60:
+                    # Only add if kills are valid (exclude 0 = unplayed maps)
+                    if stats_dict['kills'] > 0 and stats_dict['kills'] <= 60:
                         map_stats.append(stats_dict)
                     
                     break  # Found player in this map

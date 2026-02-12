@@ -162,10 +162,60 @@ class Database:
             )
         ''')
         
+        # Leaderboard snapshots (daily leaderboards from API or image upload)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS leaderboard_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                source TEXT NOT NULL,
+                parsed_count INTEGER DEFAULT 0,
+                ranked_count INTEGER DEFAULT 0
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS leaderboard_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER NOT NULL,
+                rank INTEGER NOT NULL,
+                player_name TEXT NOT NULL,
+                vlr_ign TEXT,
+                team TEXT,
+                line REAL NOT NULL,
+                best_side TEXT NOT NULL,
+                p_hit REAL NOT NULL,
+                p_over REAL NOT NULL,
+                p_under REAL NOT NULL,
+                sample_size INTEGER NOT NULL,
+                mu REAL,
+                FOREIGN KEY (snapshot_id) REFERENCES leaderboard_snapshots (id)
+            )
+        ''')
+        # Player combo cache: store 2-map combo samples per player to avoid re-scraping VLR
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_combo_cache (
+                player_name TEXT PRIMARY KEY,
+                combo_samples TEXT NOT NULL,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # Player data cache: store full player_data (team, ign, match_combinations) to avoid VLR scrape
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_data_cache (
+                player_name TEXT PRIMARY KEY,
+                ign TEXT,
+                team TEXT,
+                match_combinations TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Create indexes for faster lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_name ON player_map_stats(player_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_match_event ON matches(event_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_event_status ON vct_events(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot ON leaderboard_entries(snapshot_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_snapshots_created ON leaderboard_snapshots(created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_combo_name ON player_combo_cache(player_name)')
         
         conn.commit()
         conn.close()
@@ -369,7 +419,7 @@ class Database:
                 SELECT pms.kills
                 FROM player_map_stats pms
                 JOIN matches m ON pms.match_id = m.id
-                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
+                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ? AND pms.kills > 0
                 ORDER BY m.id, pms.map_number
             ''', (player_name, event_id))
             
@@ -391,7 +441,7 @@ class Database:
                 SELECT pms.kills, pms.map_score
                 FROM player_map_stats pms
                 JOIN matches m ON pms.match_id = m.id
-                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
+                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ? AND pms.kills > 0
                 ORDER BY m.id, pms.map_number
             ''', (player_name, event_id))
             
@@ -415,7 +465,7 @@ class Database:
                 FROM player_map_stats pms
                 JOIN matches m ON pms.match_id = m.id
                 JOIN vct_events e ON m.event_id = e.id
-                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ?
+                WHERE LOWER(pms.player_name) = LOWER(?) AND m.event_id = ? AND pms.kills > 0
                 ORDER BY m.id, pms.map_number
             ''', (player_name, event_id))
             
@@ -472,7 +522,7 @@ class Database:
                 FROM player_map_stats pms
                 JOIN matches m ON pms.match_id = m.id
                 JOIN vct_events ve ON m.event_id = ve.id
-                WHERE LOWER(pms.player_name) = LOWER(?) AND ve.status = 'completed'
+                WHERE LOWER(pms.player_name) = LOWER(?) AND ve.status = 'completed' AND pms.kills > 0
                 ORDER BY ve.year DESC, m.id, pms.map_number
             ''', (player_name,))
             
@@ -481,7 +531,8 @@ class Database:
                 event_url = row[0]
                 event_name = row[1]
                 kills = row[2]
-                
+                if kills is None or kills <= 0:
+                    continue
                 if event_url not in results:
                     results[event_url] = {'event_name': event_name, 'kills': []}
                 results[event_url]['kills'].append(kills)
@@ -513,7 +564,7 @@ class Database:
                     AVG(pms.kast) as avg_kast,
                     SUM(pms.first_bloods) as total_first_bloods
                 FROM player_map_stats pms
-                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL
+                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0
                 GROUP BY pms.agent
                 ORDER BY maps_played DESC
             ''', (player_name,))
@@ -563,7 +614,7 @@ class Database:
                     AVG(pms.kast) as avg_kast,
                     SUM(pms.first_bloods) as total_first_bloods
                 FROM player_map_stats pms
-                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL
+                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL AND pms.kills > 0
                 GROUP BY pms.map_name
                 ORDER BY times_played DESC
             ''', (player_name,))
@@ -690,7 +741,171 @@ class Database:
             return []
         finally:
             conn.close()
-    
+
+    # ==================== Leaderboard & Player Combo Cache ====================
+
+    CACHE_TTL_DAYS = 7  # Re-scrape player if cache older than this
+
+    def get_cached_combo_samples(self, player_name: str) -> Optional[List[int]]:
+        """Get cached 2-map combo samples for a player if not stale."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT combo_samples, last_updated FROM player_combo_cache
+                WHERE LOWER(player_name) = LOWER(?)
+            ''', (player_name,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            samples_json, last_updated = row[0], row[1]
+            if last_updated:
+                try:
+                    from datetime import datetime, timedelta
+                    last = datetime.fromisoformat(last_updated.replace('Z', '').split('+')[0].split('.')[0])
+                    if (datetime.now() - last).days > self.CACHE_TTL_DAYS:
+                        return None
+                except Exception:
+                    pass
+            return json.loads(samples_json) if samples_json else None
+        except Exception as e:
+            logger.error(f"Error getting combo cache: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def save_combo_cache(self, player_name: str, combo_samples: List[int]) -> None:
+        """Save or update combo samples for a player."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO player_combo_cache (player_name, combo_samples, last_updated)
+                VALUES (?, ?, datetime('now'))
+            ''', (player_name.lower(), json.dumps(combo_samples)))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving combo cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_cached_player_data(self, player_name: str) -> Optional[Dict]:
+        """Get cached player_data (ign, team, match_combinations) if not stale."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT ign, team, match_combinations, last_updated FROM player_data_cache
+                WHERE LOWER(player_name) = LOWER(?)
+            ''', (player_name,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            ign, team, mc_json, last_updated = row[0], row[1], row[2], row[3]
+            if last_updated:
+                try:
+                    from datetime import datetime
+                    last = datetime.fromisoformat(last_updated.replace('Z', '').split('+')[0].split('.')[0])
+                    if (datetime.now() - last).days > self.CACHE_TTL_DAYS:
+                        return None
+                except Exception:
+                    pass
+            return {
+                'ign': ign or player_name,
+                'team': team or 'Unknown',
+                'match_combinations': json.loads(mc_json) if mc_json else []
+            }
+        except Exception as e:
+            logger.error(f"Error getting player data cache: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def save_player_data_cache(self, player_name: str, player_data: Dict) -> None:
+        """Save player_data (ign, team, match_combinations) to cache."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            mc = player_data.get('match_combinations', [])
+            cursor.execute('''
+                INSERT OR REPLACE INTO player_data_cache (player_name, ign, team, match_combinations, last_updated)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            ''', (player_name.lower(), player_data.get('ign'), player_data.get('team', 'Unknown'), json.dumps(mc)))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving player data cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def save_leaderboard_snapshot(self, source: str, results: List[Dict], parsed_count: int = 0) -> Optional[int]:
+        """Save a leaderboard snapshot. Returns snapshot_id."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO leaderboard_snapshots (source, parsed_count, ranked_count)
+                VALUES (?, ?, ?)
+            ''', (source, parsed_count, len(results)))
+            snapshot_id = cursor.lastrowid
+            for r in results:
+                cursor.execute('''
+                    INSERT INTO leaderboard_entries (snapshot_id, rank, player_name, vlr_ign, team, line, best_side, p_hit, p_over, p_under, sample_size, mu)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (snapshot_id, r['rank'], r['player_name'], r.get('vlr_ign'), r.get('team'), r['line'], r['best_side'], r['p_hit'], r['p_over'], r['p_under'], r['sample_size'], r.get('mu')))
+            conn.commit()
+            return snapshot_id
+        except Exception as e:
+            logger.error(f"Error saving leaderboard snapshot: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+
+    def get_leaderboard_snapshots(self, limit: int = 50) -> List[Dict]:
+        """List recent leaderboard snapshots."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT id, created_at, source, parsed_count, ranked_count
+                FROM leaderboard_snapshots
+                ORDER BY created_at DESC
+                LIMIT ?
+            ''', (limit,))
+            return [{'id': r[0], 'created_at': r[1], 'source': r[2], 'parsed_count': r[3], 'ranked_count': r[4]} for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting snapshots: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_leaderboard_snapshot(self, snapshot_id: int) -> Optional[Dict]:
+        """Get full leaderboard by snapshot ID."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT id, created_at, source, parsed_count, ranked_count FROM leaderboard_snapshots WHERE id = ?', (snapshot_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            meta = {'id': row[0], 'created_at': row[1], 'source': row[2], 'parsed_count': row[3], 'ranked_count': row[4]}
+            cursor.execute('''
+                SELECT rank, player_name, vlr_ign, team, line, best_side, p_hit, p_over, p_under, sample_size, mu
+                FROM leaderboard_entries WHERE snapshot_id = ? ORDER BY rank
+            ''', (snapshot_id,))
+            meta['leaderboard'] = [{
+                'rank': r[0], 'player_name': r[1], 'vlr_ign': r[2], 'team': r[3], 'line': r[4],
+                'best_side': r[5], 'p_hit': r[6], 'p_over': r[7], 'p_under': r[8], 'sample_size': r[9], 'mu': r[10]
+            } for r in cursor.fetchall()]
+            return meta
+        except Exception as e:
+            logger.error(f"Error getting snapshot: {e}")
+            return None
+        finally:
+            conn.close()
+
     # ==================== Legacy Methods ====================
     
     def save_player_data(self, player_data: Dict) -> int:
@@ -741,12 +956,20 @@ class Database:
             cursor.execute("SELECT COUNT(*) FROM vct_events WHERE status = 'completed'")
             completed_events = cursor.fetchone()[0]
             
+            cursor.execute("SELECT COUNT(*) FROM leaderboard_snapshots")
+            leaderboard_snapshots = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM player_combo_cache")
+            player_combo_cached = cursor.fetchone()[0]
+            
             return {
                 'players_tracked': player_count,
                 'vct_events': event_count,
                 'completed_events': completed_events,
                 'matches_cached': match_count,
-                'map_stats_cached': map_stats_count
+                'map_stats_cached': map_stats_count,
+                'leaderboard_snapshots': leaderboard_snapshots,
+                'players_combo_cached': player_combo_cached
             }
         except Exception as e:
             logger.error(f"Error getting stats: {e}")

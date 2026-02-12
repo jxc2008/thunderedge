@@ -44,7 +44,7 @@ def extract_kill_samples(
             SELECT pms.kills, m.id as match_id, pms.map_name
             FROM player_map_stats pms
             JOIN matches m ON pms.match_id = m.id
-            WHERE LOWER(pms.player_name) = LOWER(?)
+            WHERE LOWER(pms.player_name) = LOWER(?) AND pms.kills > 0
         """
         params = [player_name]
         
@@ -69,7 +69,7 @@ def extract_kill_samples(
         cursor.execute(query, params)
         rows = cursor.fetchall()
         
-        kills = [row[0] for row in rows if row[0] is not None]
+        kills = [row[0] for row in rows if row[0] is not None and row[0] > 0]
         
         return kills
         

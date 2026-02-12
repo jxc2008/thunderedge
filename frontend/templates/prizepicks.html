@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -680,6 +681,31 @@
             <h1>PrizePicks Kill Line Analytics</h1>
             <p class="subtitle">Analyze combined kills for Maps 1 & 2 (or all 2-map combinations)</p>
         </div>
+
+        <div class="search-section">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                <h3 style="margin: 0; color: #fff;">Daily Leaderboard</h3>
+                <p style="margin: 0; font-size: 0.875rem; color: #71717a;">PrizePicks lines ranked by model hit probability (best first)</p>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" onclick="refreshLeaderboard()" id="leaderboardRefreshBtn" style="background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);">Refresh (API)</button>
+                    <label style="cursor: pointer; padding: 0.5rem 1rem; background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); border-radius: 8px; font-size: 0.875rem; font-weight: 600;">
+                        Upload Screenshot
+                        <input type="file" id="leaderboardImageInput" accept="image/*" style="display: none;" onchange="uploadLeaderboardImage(this)">
+                    </label>
+                </div>
+            </div>
+            <div id="leaderboardLoading" style="display:none; text-align:center; padding:2rem;">
+                <div class="spinner" style="margin:0 auto 1rem;"></div>
+                <p style="color:#71717a;">Fetching PrizePicks lines & computing rankings...</p>
+            </div>
+            <div id="leaderboardResult" style="min-height: 80px;">
+                <p style="color:#71717a; font-size:0.875rem;">Click "Refresh Leaderboard" to load today's PrizePicks Valorant lines ranked by hit probability.</p>
+            </div>
+            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #27272a;">
+                <button type="button" onclick="loadLeaderboardHistory()" style="background:#27272a; font-size:0.875rem;">View History</button>
+                <div id="leaderboardHistory" style="margin-top:0.75rem; display:none;"></div>
+            </div>
+        </div>
         
         <div class="search-section">
             <div class="search-box">
@@ -691,8 +717,26 @@
                     <label>PrizePicks Line (Maps 1+2 Combined)</label>
                     <input type="number" id="killLine" step="0.5" value="30.5" placeholder="30.5" />
                 </div>
+                <div class="input-group">
+                    <label>Over Odds (optional)</label>
+                    <input type="number" id="overOdds" placeholder="-110" />
+                </div>
+                <div class="input-group">
+                    <label>Under Odds (optional)</label>
+                    <input type="number" id="underOdds" placeholder="-110" />
+                </div>
                 <button onclick="analyzePrizePicks()">Analyze PrizePicks Line</button>
             </div>
+        </div>
+
+        <div class="search-section">
+            <h3 style="margin-bottom: 1rem; color: #fff;">PrizePicks Parlay Simulator (2-6 legs)</h3>
+            <div id="parlayLegs" style="display: grid; gap: 0.75rem;"></div>
+            <div style="display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;">
+                <button type="button" onclick="addParlayLeg()">+ Add Leg</button>
+                <button type="button" onclick="simulateParlay()" style="background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); box-shadow: 0 4px 6px -1px rgba(34, 197, 94, 0.3);">Simulate Parlay</button>
+            </div>
+            <div id="parlayResult" style="display:none; margin-top: 1rem;"></div>
         </div>
         
         <div id="loading" class="loading">
@@ -709,9 +753,326 @@
     </div>
 
     <script>
+        let ppDistributionChart = null;
+
+        function createParlayLegRow(index, leg = {}) {
+            const lineValue = leg.line ?? 30.5;
+            const sideValue = leg.side ?? 'over';
+            const ignValue = leg.ign ?? '';
+            return `
+                <div class="parlay-leg-row" data-leg-index="${index}" style="display:grid; grid-template-columns: minmax(160px,1fr) 120px 120px auto; gap:0.75rem; align-items:end;">
+                    <div class="input-group" style="min-width:0;">
+                        <label>Player IGN</label>
+                        <input type="text" class="parlay-ign" placeholder="aspas" value="${ignValue}" />
+                    </div>
+                    <div class="input-group">
+                        <label>Line</label>
+                        <input type="number" class="parlay-line" step="0.5" value="${lineValue}" />
+                    </div>
+                    <div class="input-group">
+                        <label>Side</label>
+                        <select class="parlay-side" style="padding: 0.875rem 1rem; border: 1px solid #27272a; border-radius: 8px; background: #18181b; color: #fff;">
+                            <option value="over" ${sideValue === 'over' ? 'selected' : ''}>Over</option>
+                            <option value="under" ${sideValue === 'under' ? 'selected' : ''}>Under</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="removeParlayLeg(this)" style="padding: 0.875rem 1rem; background:#3f3f46;">Remove</button>
+                </div>
+            `;
+        }
+
+        function getParlayLegCount() {
+            return document.querySelectorAll('#parlayLegs .parlay-leg-row').length;
+        }
+
+        function reindexParlayLegs() {
+            const rows = document.querySelectorAll('#parlayLegs .parlay-leg-row');
+            rows.forEach((row, i) => row.setAttribute('data-leg-index', String(i)));
+        }
+
+        function addParlayLeg(prefill = null) {
+            const container = document.getElementById('parlayLegs');
+            const count = getParlayLegCount();
+            if (count >= 6) return;
+            container.insertAdjacentHTML('beforeend', createParlayLegRow(count, prefill || {}));
+        }
+
+        function removeParlayLeg(btn) {
+            const container = document.getElementById('parlayLegs');
+            if (getParlayLegCount() <= 2) return;
+            const row = btn.closest('.parlay-leg-row');
+            if (row) row.remove();
+            reindexParlayLegs();
+        }
+
+        async function uploadLeaderboardImage(inputEl) {
+            const file = inputEl?.files?.[0];
+            if (!file) return;
+            const loadingEl = document.getElementById('leaderboardLoading');
+            const resultEl = document.getElementById('leaderboardResult');
+            const btn = document.getElementById('leaderboardRefreshBtn');
+            loadingEl.style.display = 'block';
+            resultEl.innerHTML = '';
+            if (btn) btn.disabled = true;
+            inputEl.value = '';
+
+            try {
+                const formData = new FormData();
+                formData.append('image', file);
+                const resp = await fetch('/api/prizepicks/leaderboard/upload', { method: 'POST', body: formData });
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    resultEl.innerHTML = `<p style="color:#ef4444;">${data.error || 'Upload failed.'}</p>`;
+                    return;
+                }
+                renderLeaderboardResults(data);
+            } catch (err) {
+                resultEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
+            } finally {
+                loadingEl.style.display = 'none';
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function renderLeaderboardResults(data) {
+            const resultEl = document.getElementById('leaderboardResult');
+            const lb = data.leaderboard || [];
+            if (lb.length === 0) {
+                resultEl.innerHTML = `<p style="color:#71717a;">${data.message || 'No lines to display.'}</p>`;
+                return;
+            }
+            let msg = data.message || '';
+            if (data.created_at && !msg) {
+                msg = `Loaded from history – ${new Date(data.created_at).toLocaleString()}`;
+            }
+            const rows = lb.map((r, i) => `
+                <tr style="border-bottom:1px solid #27272a;">
+                    <td style="padding:0.75rem; font-weight:600; color:#a1a1aa;">${r.rank}</td>
+                    <td style="padding:0.75rem;"><a href="#" class="leaderboard-player-link" data-ign="${(r.vlr_ign || r.player_name || '').replace(/"/g, '&quot;')}" data-line="${r.line}" style="color:#3b82f6; text-decoration:none; font-weight:600;">${r.player_name}</a></td>
+                    <td style="padding:0.75rem; color:#71717a;">${r.team}</td>
+                    <td style="padding:0.75rem;">${r.line}</td>
+                    <td style="padding:0.75rem;"><span style="text-transform:uppercase; color:${r.best_side === 'over' ? '#22c55e' : '#ef4444'};">${r.best_side}</span></td>
+                    <td style="padding:0.75rem; font-weight:700; color:#22c55e;">${(r.p_hit * 100).toFixed(1)}%</td>
+                    <td style="padding:0.75rem; color:#71717a;">${r.sample_size}</td>
+                    <td style="padding:0.75rem; color:#71717a;">${r.mu}</td>
+                </tr>
+            `).join('');
+                resultEl.innerHTML = `
+                ${msg ? `<p style="color:#71717a; font-size:0.875rem; margin-bottom:0.75rem;">${msg}</p>` : ''}
+                <div style="overflow-x:auto;">
+                    <table style="width:100%; border-collapse:collapse; background:#18181b; border:1px solid #27272a; border-radius:8px;">
+                        <thead>
+                            <tr style="background:#27272a; color:#a1a1aa; font-size:0.75rem; text-transform:uppercase;">
+                                <th style="padding:0.75rem; text-align:left;">#</th>
+                                <th style="padding:0.75rem; text-align:left;">Player</th>
+                                <th style="padding:0.75rem; text-align:left;">Team</th>
+                                <th style="padding:0.75rem;">Line</th>
+                                <th style="padding:0.75rem;">Best</th>
+                                <th style="padding:0.75rem;">Hit Prob</th>
+                                <th style="padding:0.75rem;">Samples</th>
+                                <th style="padding:0.75rem;">μ</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+            resultEl.querySelectorAll('.leaderboard-player-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    prefillAnalyze(link.dataset.ign, parseFloat(link.dataset.line));
+                });
+            });
+        }
+
+        async function refreshLeaderboard() {
+            const loadingEl = document.getElementById('leaderboardLoading');
+            const resultEl = document.getElementById('leaderboardResult');
+            const btn = document.getElementById('leaderboardRefreshBtn');
+            loadingEl.style.display = 'block';
+            resultEl.innerHTML = '';
+            if (btn) btn.disabled = true;
+
+            try {
+                const resp = await fetch('/api/prizepicks/leaderboard');
+                const data = await resp.json();
+
+                if (!resp.ok || data.error) {
+                    resultEl.innerHTML = `<p style="color:#ef4444;">${data.error || 'Failed to load leaderboard.'}</p>`;
+                    return;
+                }
+
+                const lb = data.leaderboard || [];
+                if (lb.length === 0) {
+                    resultEl.innerHTML = `<p style="color:#71717a;">${data.message || 'No Valorant lines available.'}</p>`;
+                    return;
+                }
+
+                renderLeaderboardResults(data);
+            } catch (err) {
+                resultEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
+            } finally {
+                loadingEl.style.display = 'none';
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function loadLeaderboardHistory() {
+            const histEl = document.getElementById('leaderboardHistory');
+            histEl.style.display = 'block';
+            histEl.innerHTML = '<p style="color:#71717a;">Loading...</p>';
+            try {
+                const resp = await fetch('/api/prizepicks/leaderboard/history?limit=30');
+                const data = await resp.json();
+                if (!data.success || !data.snapshots?.length) {
+                    histEl.innerHTML = '<p style="color:#71717a;">No history yet. Upload or refresh a leaderboard first.</p>';
+                    return;
+                }
+                const rows = data.snapshots.map(s => {
+                    const d = s.created_at ? new Date(s.created_at).toLocaleString() : 'Unknown';
+                    return `<div style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0; border-bottom:1px solid #27272a;">
+                        <span style="color:#71717a; font-size:0.875rem;">${d}</span>
+                        <span style="color:#a1a1aa; font-size:0.8rem;">${s.source} - ${s.ranked_count} ranked</span>
+                        <button type="button" onclick="loadSnapshot(${s.id})" style="padding:0.25rem 0.5rem; font-size:0.75rem; background:#3b82f6;">Load</button>
+                    </div>`;
+                }).join('');
+                histEl.innerHTML = `<div style="max-height:200px; overflow-y:auto;">${rows}</div>`;
+            } catch (err) {
+                histEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
+            }
+        }
+
+        async function loadSnapshot(id) {
+            const resultEl = document.getElementById('leaderboardResult');
+            resultEl.innerHTML = '<p style="color:#71717a;">Loading snapshot...</p>';
+            try {
+                const resp = await fetch(`/api/prizepicks/leaderboard/${id}`);
+                const data = await resp.json();
+                if (!data.success || !data.leaderboard?.length) {
+                    resultEl.innerHTML = '<p style="color:#71717a;">Snapshot empty or not found.</p>';
+                    return;
+                }
+                renderLeaderboardResults(data);
+            } catch (err) {
+                resultEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
+            }
+        }
+
+        function prefillAnalyze(ign, line) {
+            const ignInput = document.getElementById('playerInput');
+            const lineInput = document.getElementById('killLine');
+            if (ignInput) ignInput.value = ign;
+            if (lineInput) lineInput.value = line;
+            if (ignInput) ignInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        function readParlayLegsFromUI() {
+            const rows = document.querySelectorAll('#parlayLegs .parlay-leg-row');
+            return Array.from(rows).map((row) => ({
+                ign: row.querySelector('.parlay-ign').value.trim(),
+                line: parseFloat(row.querySelector('.parlay-line').value),
+                side: row.querySelector('.parlay-side').value
+            }));
+        }
+
+        async function simulateParlay() {
+            const legs = readParlayLegsFromUI();
+            if (legs.length < 2 || legs.length > 6) {
+                showError('Parlay must have 2 to 6 legs.');
+                return;
+            }
+            for (let i = 0; i < legs.length; i++) {
+                if (!legs[i].ign) {
+                    showError(`Leg ${i + 1}: please enter player IGN.`);
+                    return;
+                }
+                if (!legs[i].line || legs[i].line <= 0) {
+                    showError(`Leg ${i + 1}: please enter a valid line.`);
+                    return;
+                }
+            }
+
+            document.getElementById('error').style.display = 'none';
+            const resultBox = document.getElementById('parlayResult');
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = '<div style="color:#a1a1aa;">Simulating parlay...</div>';
+
+            try {
+                const resp = await fetch('/api/prizepicks/parlay', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ legs })
+                });
+                const data = await resp.json();
+                if (!resp.ok || data.error) {
+                    showError(data.error || 'Failed to simulate parlay.');
+                    resultBox.style.display = 'none';
+                    return;
+                }
+
+                const hitPct = (data.parlay_hit_probability * 100).toFixed(2);
+                const legsRows = data.legs.map((l, idx) => `
+                    <tr>
+                        <td style="padding:0.75rem;">${idx + 1}</td>
+                        <td style="padding:0.75rem;">${l.ign}</td>
+                        <td style="padding:0.75rem; text-transform:uppercase;">${l.side}</td>
+                        <td style="padding:0.75rem;">${l.line}</td>
+                        <td style="padding:0.75rem; color:#22c55e;">${(l.p_hit * 100).toFixed(2)}%</td>
+                        <td style="padding:0.75rem; color:#71717a;">${l.sample_size}</td>
+                    </tr>
+                `).join('');
+
+                resultBox.innerHTML = `
+                    <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:12px; padding:1rem;">
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap:0.75rem;">
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.75rem; color:#71717a;">Parlay Hit Rate</div>
+                                <div style="font-size:1.4rem; font-weight:700; color:#22c55e;">${hitPct}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.75rem; color:#71717a;">Payout Multiplier</div>
+                                <div style="font-size:1.4rem; font-weight:700;">${data.payout_multiplier.toFixed(1)}x</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.75rem; color:#71717a;">Expected Return / $1</div>
+                                <div style="font-size:1.4rem; font-weight:700;">${data.expected_return_per_1.toFixed(3)}</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.75rem; color:#71717a;">ROI</div>
+                                <div style="font-size:1.4rem; font-weight:700; color:${data.roi_pct >= 0 ? '#22c55e' : '#ef4444'};">${data.roi_pct >= 0 ? '+' : ''}${data.roi_pct.toFixed(2)}%</div>
+                            </div>
+                        </div>
+                        <div style="margin-top:0.75rem; overflow-x:auto;">
+                            <table style="width:100%; border-collapse:collapse; background:#18181b; border-radius:8px; overflow:hidden;">
+                                <thead>
+                                    <tr style="background:#27272a; color:#a1a1aa; font-size:0.8rem; text-transform:uppercase;">
+                                        <th style="padding:0.75rem; text-align:left;">Leg</th>
+                                        <th style="padding:0.75rem; text-align:left;">Player</th>
+                                        <th style="padding:0.75rem; text-align:left;">Side</th>
+                                        <th style="padding:0.75rem; text-align:left;">Line</th>
+                                        <th style="padding:0.75rem; text-align:left;">Hit Prob</th>
+                                        <th style="padding:0.75rem; text-align:left;">Samples</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${legsRows}</tbody>
+                            </table>
+                        </div>
+                        <div style="margin-top:0.75rem; font-size:0.75rem; color:#71717a;">
+                            ${data.assumption}
+                        </div>
+                    </div>
+                `;
+            } catch (err) {
+                showError('Parlay simulation failed: ' + err.message);
+                resultBox.style.display = 'none';
+            }
+        }
+
         async function analyzePrizePicks() {
             const ign = document.getElementById('playerInput').value.trim();
             const killLine = document.getElementById('killLine').value;
+            const overOdds = document.getElementById('overOdds').value.trim();
+            const underOdds = document.getElementById('underOdds').value.trim();
             
             if (!ign) {
                 showError('Please enter a player IGN');
@@ -740,7 +1101,26 @@
                     return;
                 }
                 
-                displayResults(data.analysis, elapsed);
+                // Optional mathematical edge analysis when both odds are provided
+                let edgeData = null;
+                if (overOdds && underOdds) {
+                    const parsedOver = parseFloat(overOdds);
+                    const parsedUnder = parseFloat(underOdds);
+                    if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
+                        try {
+                            const edgeResponse = await fetch(
+                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                            );
+                            if (edgeResponse.ok) {
+                                edgeData = await edgeResponse.json();
+                            }
+                        } catch (err) {
+                            console.error('PrizePicks edge analysis failed:', err);
+                        }
+                    }
+                }
+                
+                displayResults(data.analysis, elapsed, edgeData);
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
                 showError('Error connecting to server: ' + error.message);
@@ -751,7 +1131,7 @@
             return classification.toLowerCase().replace(/ /g, '-');
         }
         
-        function displayResults(analysis, elapsed) {
+        function displayResults(analysis, elapsed, edgeData = null) {
             const resultDiv = document.getElementById('result');
             
             if (analysis.error) {
@@ -952,10 +1332,15 @@
                 
                 ${renderMapAnalysis(analysis.map_analysis, analysis.kill_line)}
                 
-                ${renderPPMarginStats(analysis.margin_stats, analysis.kill_line)}
+                ${renderPPOutcomeComboStats(analysis.two_map_outcome_stats, analysis.kill_line)}
+                
+                ${renderPPEdgeAnalysis(edgeData)}
             `;
             
             resultDiv.style.display = 'block';
+            if (edgeData && edgeData.visualization) {
+                setTimeout(() => renderPPDistributionChart(edgeData), 100);
+            }
         }
         
         function renderAgentAnalysis(agentData, killLine) {
@@ -1168,94 +1553,223 @@
             }
         }
         
-        function renderPPMarginStats(marginStats, killLine) {
-            if (!marginStats || marginStats.total_matches === 0) {
+        function renderPPOutcomeComboStats(outcomeStats, killLine) {
+            if (!outcomeStats || outcomeStats.total_combinations === 0) {
                 return '';
             }
             
             return `
                 <div class="over-under-box" style="margin-top: 2rem;">
-                    <div class="over-under-title">Performance Breakdown: Match Win/Loss & Margin Analysis</div>
+                    <div class="over-under-title">2-Map Outcome Breakdown (for each analyzed combo)</div>
                     <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">
-                        Analyzing how player performs in won vs. lost matches • Match margins: Close (2-1) vs. Blowout (2-0)
+                        Over/Under rates by outcome composition: both wins (W+W), split (W+L), both losses (L+L)
                     </p>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2rem;">
-                        <!-- Wins Column -->
-                        <div style="background: rgba(34, 197, 94, 0.05); border: 1px solid rgba(34, 197, 94, 0.2); border-radius: 10px; padding: 2rem;">
-                            <div style="text-align: center; margin-bottom: 1.5rem;">
-                                <div style="font-size: 1.25rem; font-weight: 700; color: #22c55e; text-transform: uppercase; letter-spacing: 0.05em;">Won Matches</div>
-                                <div style="color: #71717a; font-size: 0.875rem; margin-top: 0.25rem;">${marginStats.total_wins} matches</div>
-                            </div>
-                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-                                <div style="display: flex; justify-content: space-around; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2.5rem; font-weight: 700; color: #22c55e; line-height: 1;">${marginStats.wins_over_pct}%</div>
-                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Over</div>
-                                    </div>
-                                    <div style="color: #3f3f46; font-size: 1.5rem; font-weight: 700; align-self: center;">vs</div>
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2.5rem; font-weight: 700; color: #ef4444; line-height: 1;">${marginStats.wins_under_pct}%</div>
-                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Under</div>
-                                    </div>
-                                </div>
-                                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                                    ${renderPPMarginRow('Close (2-1)', marginStats.wins.close)}
-                                    ${renderPPMarginRow('Blowout (2-0)', marginStats.wins.blowout)}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Losses Column -->
-                        <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px; padding: 2rem;">
-                            <div style="text-align: center; margin-bottom: 1.5rem;">
-                                <div style="font-size: 1.25rem; font-weight: 700; color: #ef4444; text-transform: uppercase; letter-spacing: 0.05em;">Lost Matches</div>
-                                <div style="color: #71717a; font-size: 0.875rem; margin-top: 0.25rem;">${marginStats.total_losses} matches</div>
-                            </div>
-                            <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-                                <div style="display: flex; justify-content: space-around; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2.5rem; font-weight: 700; color: #22c55e; line-height: 1;">${marginStats.losses_over_pct}%</div>
-                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Over</div>
-                                    </div>
-                                    <div style="color: #3f3f46; font-size: 1.5rem; font-weight: 700; align-self: center;">vs</div>
-                                    <div style="text-align: center;">
-                                        <div style="font-size: 2.5rem; font-weight: 700; color: #ef4444; line-height: 1;">${marginStats.losses_under_pct}%</div>
-                                        <div style="color: #a1a1aa; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.5rem; letter-spacing: 0.05em;">Under</div>
-                                    </div>
-                                </div>
-                                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                                    ${renderPPMarginRow('Close (2-1)', marginStats.losses.close)}
-                                    ${renderPPMarginRow('Blowout (2-0)', marginStats.losses.blowout)}
-                                </div>
-                            </div>
-                        </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+                        ${renderPPOutcomeCard('#22c55e', outcomeStats.both_wins)}
+                        ${renderPPOutcomeCard('#f59e0b', outcomeStats.split)}
+                        ${renderPPOutcomeCard('#ef4444', outcomeStats.both_losses)}
                     </div>
-                    <div class="map-count" style="margin-top: 1.5rem;">Analyzing ${marginStats.total_matches} matches with score data (${marginStats.total_wins} wins, ${marginStats.total_losses} losses)</div>
+                    <div class="map-count" style="margin-top: 1.25rem;">Analyzing ${outcomeStats.total_combinations} 2-map combinations (line: ${killLine})</div>
                 </div>
             `;
         }
         
-        function renderPPMarginRow(label, data) {
-            if (data.total === 0) {
-                return `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: rgba(0,0,0,0.1); border-radius: 6px; opacity: 0.5;">
-                        <span style="color: #71717a; font-size: 0.875rem;">${label}</span>
-                        <span style="color: #71717a; font-size: 0.75rem;">No data</span>
-                    </div>
-                `;
-            }
-            
+        function renderPPOutcomeCard(accentColor, data) {
+            if (!data) return '';
             return `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: rgba(0,0,0,0.1); border-radius: 6px;">
-                    <span style="color: #e4e4e7; font-size: 0.875rem; font-weight: 500;">${label}</span>
-                    <div style="display: flex; gap: 1rem; align-items: center;">
-                        <span style="color: #22c55e; font-weight: 600; font-size: 0.875rem;">${data.over_pct}% Over</span>
-                        <span style="color: #3f3f46;">•</span>
-                        <span style="color: #ef4444; font-weight: 600; font-size: 0.875rem;">${data.under_pct}% Under</span>
-                        <span style="color: #71717a; font-size: 0.75rem; margin-left: 0.25rem;">(${data.total})</span>
+                <div style="background: rgba(0,0,0,0.25); border: 1px solid #27272a; border-radius: 10px; padding: 1rem;">
+                    <div style="font-size: 0.9rem; color: ${accentColor}; font-weight: 700; margin-bottom: 0.75rem; letter-spacing: 0.03em;">
+                        ${data.label}
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                        <div style="text-align: left;">
+                            <div style="font-size: 1.4rem; color: #22c55e; font-weight: 700;">${data.over_pct}%</div>
+                            <div style="font-size: 0.75rem; color: #a1a1aa;">Over</div>
+                        </div>
+                        <div style="color: #3f3f46; font-weight: 700;">vs</div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 1.4rem; color: #ef4444; font-weight: 700;">${data.under_pct}%</div>
+                            <div style="font-size: 0.75rem; color: #a1a1aa;">Under</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #71717a;">${data.total} combos</div>
+                </div>
+            `;
+        }
+
+        function renderPPEdgeAnalysis(edgeData) {
+            if (!edgeData || !edgeData.success) {
+                return '';
+            }
+
+            const recommended = edgeData.edge.recommended;
+            const bestEV = Math.max(edgeData.edge.ev_over, edgeData.edge.ev_under);
+            const bestSide = edgeData.edge.ev_over > edgeData.edge.ev_under ? 'OVER' : 'UNDER';
+            const variancePct = edgeData.model.mu > 0
+                ? (Math.sqrt(edgeData.model.var) / edgeData.model.mu) * 100
+                : 0;
+
+            let recColor = '#71717a';
+            if (recommended === 'OVER') recColor = '#22c55e';
+            else if (recommended === 'UNDER') recColor = '#ef4444';
+
+            return `
+                <div class="analysis-section" style="margin-top: 2rem;">
+                    <h3 class="section-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span style="font-size: 1.5rem;">📊</span>
+                        PrizePicks Mathematical Edge (2-Map Combo Model)
+                    </h3>
+                    <div style="background: #0a0a0a; border: 1px solid #27272a; border-radius: 12px; padding: 1.25rem; margin-top: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="font-weight: 700; color: ${recColor}; font-size: 1.1rem;">
+                                ${recommended === 'NO BET' ? 'NO BET RECOMMENDED' : `BET ${recommended}`}
+                            </div>
+                            <div style="font-size: 0.875rem; color: #a1a1aa;">
+                                Best EV: <span style="color: ${bestEV >= 0 ? '#22c55e' : '#ef4444'}; font-weight: 700;">${bestEV >= 0 ? '+' : ''}${(bestEV * 100).toFixed(2)}%</span> (${bestSide})
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-top: 1rem;">
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Model Mean</div>
+                                <div style="font-size:1.15rem; font-weight:700;">${edgeData.model.mu.toFixed(1)}</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Market Mean</div>
+                                <div style="font-size:1.15rem; font-weight:700;">${edgeData.market.mu_implied.toFixed(1)}</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Variance %</div>
+                                <div style="font-size:1.15rem; font-weight:700;">${variancePct.toFixed(1)}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Sample Size</div>
+                                <div style="font-size:1.15rem; font-weight:700;">${edgeData.player.sample_size}</div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 1rem; background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
+                            <div style="font-size:0.9rem; color:#e4e4e7; margin-bottom:0.5rem;">Combined Kills Distribution: Model vs Market</div>
+                            <div style="height: 260px;">
+                                <canvas id="ppDistributionChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div style="overflow-x:auto; margin-top: 1rem;">
+                            <table style="width:100%; border-collapse: collapse; background:#18181b; border-radius:8px; overflow:hidden;">
+                                <thead>
+                                    <tr style="background:#27272a; color:#a1a1aa; font-size:0.8rem; text-transform:uppercase;">
+                                        <th style="padding:0.75rem; text-align:left;">Side</th>
+                                        <th style="padding:0.75rem; text-align:center;">Model P</th>
+                                        <th style="padding:0.75rem; text-align:center;">Market P</th>
+                                        <th style="padding:0.75rem; text-align:center;">Prob Edge</th>
+                                        <th style="padding:0.75rem; text-align:center;">EV/$1</th>
+                                        <th style="padding:0.75rem; text-align:center;">ROI</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td style="padding:0.75rem; font-weight:600;">OVER</td>
+                                        <td style="padding:0.75rem; text-align:center;">${(edgeData.model.p_over * 100).toFixed(2)}%</td>
+                                        <td style="padding:0.75rem; text-align:center;">${(edgeData.market.p_over_vigfree * 100).toFixed(2)}%</td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.prob_edge_over >= 0 ? '#22c55e' : '#ef4444'};">
+                                            ${edgeData.edge.prob_edge_over >= 0 ? '+' : ''}${(edgeData.edge.prob_edge_over * 100).toFixed(2)}%
+                                        </td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.ev_over >= 0 ? '#22c55e' : '#ef4444'};">
+                                            $${edgeData.edge.ev_over.toFixed(4)}
+                                        </td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.roi_over_pct >= 0 ? '#22c55e' : '#ef4444'};">
+                                            ${edgeData.edge.roi_over_pct >= 0 ? '+' : ''}${edgeData.edge.roi_over_pct.toFixed(2)}%
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:0.75rem; font-weight:600;">UNDER</td>
+                                        <td style="padding:0.75rem; text-align:center;">${(edgeData.model.p_under * 100).toFixed(2)}%</td>
+                                        <td style="padding:0.75rem; text-align:center;">${(edgeData.market.p_under_vigfree * 100).toFixed(2)}%</td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.prob_edge_under >= 0 ? '#22c55e' : '#ef4444'};">
+                                            ${edgeData.edge.prob_edge_under >= 0 ? '+' : ''}${(edgeData.edge.prob_edge_under * 100).toFixed(2)}%
+                                        </td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.ev_under >= 0 ? '#22c55e' : '#ef4444'};">
+                                            $${edgeData.edge.ev_under.toFixed(4)}
+                                        </td>
+                                        <td style="padding:0.75rem; text-align:center; color:${edgeData.edge.roi_under_pct >= 0 ? '#22c55e' : '#ef4444'};">
+                                            ${edgeData.edge.roi_under_pct >= 0 ? '+' : ''}${edgeData.edge.roi_under_pct.toFixed(2)}%
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             `;
+        }
+
+        function renderPPDistributionChart(edgeData) {
+            if (!edgeData || !edgeData.visualization) return;
+            const canvas = document.getElementById('ppDistributionChart');
+            if (!canvas || typeof Chart === 'undefined') return;
+
+            if (ppDistributionChart) {
+                ppDistributionChart.destroy();
+            }
+
+            ppDistributionChart = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: edgeData.visualization.x,
+                    datasets: [
+                        {
+                            label: 'Your Model',
+                            data: edgeData.visualization.model_pmf,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.35
+                        },
+                        {
+                            label: 'Market Implied',
+                            data: edgeData.visualization.market_pmf,
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.12)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.35
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#e4e4e7' }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    return `${ctx.dataset.label}: ${(ctx.parsed.y * 100).toFixed(2)}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Combined Kills', color: '#a1a1aa' },
+                            ticks: { color: '#a1a1aa' },
+                            grid: { color: '#27272a' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Probability', color: '#a1a1aa' },
+                            ticks: {
+                                color: '#a1a1aa',
+                                callback: function(v) { return (v * 100).toFixed(0) + '%'; }
+                            },
+                            grid: { color: '#27272a' }
+                        }
+                    }
+                }
+            });
         }
         
         function showError(message) {
@@ -1276,6 +1790,10 @@
                 analyzePrizePicks();
             }
         });
+
+        // Initialize default 2-leg parlay rows
+        addParlayLeg({ line: 30.5, side: 'over' });
+        addParlayLeg({ line: 30.5, side: 'under' });
     </script>
 </body>
 </html>

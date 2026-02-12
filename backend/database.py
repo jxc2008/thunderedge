@@ -190,14 +190,35 @@ class Database:
                 FOREIGN KEY (snapshot_id) REFERENCES leaderboard_snapshots (id)
             )
         ''')
-        # Player combo cache: store 2-map combo samples per player to avoid re-scraping VLR
+        # Player combo cache: store 2-map or 3-map combo samples per player
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS player_combo_cache (
-                player_name TEXT PRIMARY KEY,
+                player_name TEXT NOT NULL,
+                combo_maps INTEGER NOT NULL DEFAULT 2,
                 combo_samples TEXT NOT NULL,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (player_name, combo_maps)
             )
         ''')
+        # Migration: if old table has no combo_maps column, migrate
+        cursor.execute("PRAGMA table_info(player_combo_cache)")
+        cols = [row[1] for row in cursor.fetchall()]
+        if 'combo_maps' not in cols and cols:
+            cursor.execute('''
+                CREATE TABLE player_combo_cache_new (
+                    player_name TEXT NOT NULL,
+                    combo_maps INTEGER NOT NULL DEFAULT 2,
+                    combo_samples TEXT NOT NULL,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (player_name, combo_maps)
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO player_combo_cache_new (player_name, combo_maps, combo_samples, last_updated)
+                SELECT player_name, 2, combo_samples, last_updated FROM player_combo_cache
+            ''')
+            cursor.execute('DROP TABLE player_combo_cache')
+            cursor.execute('ALTER TABLE player_combo_cache_new RENAME TO player_combo_cache')
         # Player data cache: store full player_data (team, ign, match_combinations) to avoid VLR scrape
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS player_data_cache (
@@ -746,15 +767,15 @@ class Database:
 
     CACHE_TTL_DAYS = 7  # Re-scrape player if cache older than this
 
-    def get_cached_combo_samples(self, player_name: str) -> Optional[List[int]]:
-        """Get cached 2-map combo samples for a player if not stale."""
+    def get_cached_combo_samples(self, player_name: str, combo_maps: int = 2) -> Optional[List[int]]:
+        """Get cached combo samples for a player if not stale. combo_maps: 2 or 3."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         try:
             cursor.execute('''
                 SELECT combo_samples, last_updated FROM player_combo_cache
-                WHERE LOWER(player_name) = LOWER(?)
-            ''', (player_name,))
+                WHERE LOWER(player_name) = LOWER(?) AND combo_maps = ?
+            ''', (player_name, combo_maps))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -774,15 +795,15 @@ class Database:
         finally:
             conn.close()
 
-    def save_combo_cache(self, player_name: str, combo_samples: List[int]) -> None:
-        """Save or update combo samples for a player."""
+    def save_combo_cache(self, player_name: str, combo_samples: List[int], combo_maps: int = 2) -> None:
+        """Save or update combo samples for a player. combo_maps: 2 or 3."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                INSERT OR REPLACE INTO player_combo_cache (player_name, combo_samples, last_updated)
-                VALUES (?, ?, datetime('now'))
-            ''', (player_name.lower(), json.dumps(combo_samples)))
+                INSERT OR REPLACE INTO player_combo_cache (player_name, combo_maps, combo_samples, last_updated)
+                VALUES (?, ?, ?, datetime('now'))
+            ''', (player_name.lower(), combo_maps, json.dumps(combo_samples)))
             conn.commit()
         except Exception as e:
             logger.error(f"Error saving combo cache: {e}")

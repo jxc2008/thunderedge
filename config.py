@@ -41,3 +41,25 @@ class Config:
     
     # Cache settings
     CACHE_DURATION = timedelta(hours=6)
+    
+    # OCR: Team name fragments to never treat as player IGNs.
+    # Add any team names (or fragments) that OCR might misread as player names.
+    # VLR-scraped teams from 2026 Kickoff are merged at runtime (see image_parser).
+    OCR_TEAM_BLACKLIST = frozenset([
+        # Pacific/Asia
+        'rex', 'regum', 'qeon', 'nongshim', 'redforce', 'gentle', 'mates',
+        'paper', 'canids', 'drx', 'prx', 'zeta', 'bleed', 'talon', 'geng',
+        'secret', 'boom', 'onic', 'rrq', 'xerxia', 'kru', 'bbl',
+        # Americas
+        'liquid', 'sentinels', 'loud', 'optic', 'leviatan', 'cloud9', 'c9',
+        'furia', 'academy', 'heretics', 'mibr', '100t', 'nrg', 'eg',
+        'evi', 'complexity', 'col', 'g2', 'kru',
+        # EMEA
+        'fnatic', 'vitality', 'karmine', 'koi', 'g2', 'navi', 'fpx',
+        # UI labels
+        'player', 'team', 'line', 'best', 'samples', 'prob', 'hit',
+        'maps', 'kills', 'vs', 'am', 'pm', 'over', 'under',
+        'thu', 'fri', 'sat', 'sun', 'mon', 'tue', 'wed',
+        'valorant', 'vct', 'esports', 'game', 'view', 'history',
+        'versus', 'match',
+    ])

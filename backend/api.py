@@ -348,13 +348,15 @@ def get_team_analysis(team_name):
 
 @app.route('/api/prizepicks/<ign>', methods=['GET'])
 def get_prizepicks_analysis(ign):
-    """Get PrizePicks analysis for a specific player"""
+    """Get PrizePicks analysis for a specific player.
+    Query: line, combo_maps (2=Bo3 Maps 1+2, 3=Bo5 Maps 1+2+3)
+    """
     try:
-        # Get kill line from query params (default to 30.5 for combined maps 1+2)
         kill_line = float(request.args.get('line', 30.5))
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
         
-        # Create processor with specified kill line
-        processor = PrizePicksProcessor(kill_line=kill_line)
+        processor = PrizePicksProcessor(kill_line=kill_line, combo_maps=combo_maps)
         
         logger.info(f"Scraping PrizePicks data for player: {ign} with kill line: {kill_line}")
         
@@ -385,26 +387,23 @@ def get_prizepicks_analysis(ign):
 @app.route('/api/prizepicks/edge/<ign>', methods=['GET'])
 def get_prizepicks_edge_analysis(ign):
     """
-    Get mathematical edge analysis for PrizePicks 2-map combined props.
-
-    Query params:
-        line: Combined kill line (maps 1+2 style)
-        over_odds: American odds for Over
-        under_odds: American odds for Under
+    Get mathematical edge analysis for PrizePicks combined props.
+    Query: line, combo_maps (2 or 3), over_odds, under_odds
     """
     try:
         line = float(request.args.get('line', 30.5))
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
         over_odds = float(request.args.get('over_odds', -110))
         under_odds = float(request.args.get('under_odds', -110))
 
-        logger.info(f"PrizePicks edge analysis for {ign}: line={line}, over={over_odds}, under={under_odds}")
+        logger.info(f"PrizePicks edge analysis for {ign}: line={line}, combo_maps={combo_maps}")
 
-        # Use PrizePicks match-level data and convert to 2-map combo samples
         player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found'}), 404
 
-        pp_processor = PrizePicksProcessor(kill_line=line)
+        pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
         combo_samples = []
 
         for match_data in player_data.get('match_combinations', []):
@@ -415,7 +414,7 @@ def get_prizepicks_edge_analysis(ign):
             combo_samples.extend([c['combined_kills'] for c in combos])
 
         if len(combo_samples) < 3:
-            return jsonify({'error': 'Insufficient 2-map combination samples for edge analysis'}), 400
+            return jsonify({'error': f'Insufficient {combo_maps}-map combination samples for edge analysis'}), 400
 
         # Model distribution from combined 2-map kills
         dist_params = compute_distribution_params(combo_samples)
@@ -473,7 +472,7 @@ def get_prizepicks_edge_analysis(ign):
 
         return jsonify({
             'success': True,
-            'scope': 'prizepicks_2map_combo',
+            'scope': f'prizepicks_{combo_maps}map_combo',
             'player': {
                 'ign': ign,
                 'sample_size': len(combo_samples),
@@ -521,18 +520,13 @@ def get_prizepicks_edge_analysis(ign):
 def get_prizepicks_parlay_analysis():
     """
     Simulate PrizePicks parlay hit rate and EV.
-
-    Payload:
-    {
-      "legs": [
-        {"ign":"aspas","line":30.5,"side":"over"},
-        {"ign":"TenZ","line":28.5,"side":"under"}
-      ]
-    }
+    Payload: legs: [...], combo_maps: 2 or 3 (optional, default 2)
     """
     try:
         payload = request.get_json(silent=True) or {}
         legs = payload.get('legs', [])
+        combo_maps = int(payload.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
 
         if not isinstance(legs, list) or len(legs) < 2 or len(legs) > 6:
             return jsonify({'error': 'Parlay must contain 2 to 6 legs'}), 400
@@ -555,12 +549,11 @@ def get_prizepicks_parlay_analysis():
             if line <= 0:
                 return jsonify({'error': f'Leg {i+1}: line must be positive'}), 400
 
-            # Build PrizePicks 2-map combo samples for this player
             player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
             if not player_data or not player_data.get('ign'):
                 return jsonify({'error': f'Leg {i+1}: player not found ({ign})'}), 404
 
-            pp_processor = PrizePicksProcessor(kill_line=line)
+            pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
             combo_samples = []
             for match_data in player_data.get('match_combinations', []):
                 map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
@@ -615,9 +608,9 @@ def get_prizepicks_parlay_analysis():
         return jsonify({'error': str(e)}), 500
 
 
-def _build_leaderboard_from_projections(projections: list) -> tuple:
+def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2) -> tuple:
     """Shared logic: take list of {player_name, line}, fetch VLR data (or use cache), compute ranks.
-    Returns (results, skipped) where skipped is list of {player_name, line, reason}."""
+    combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)"""
     player_cache = {}
     results = []
     skipped = []
@@ -638,8 +631,8 @@ def _build_leaderboard_from_projections(projections: list) -> tuple:
         if not player_data or not player_data.get('ign'):
             skipped.append({'player_name': pp_name, 'line': line, 'reason': 'Player not found on VLR'})
             continue
-        pp_processor = PrizePicksProcessor(kill_line=line)
-        combo_samples = db.get_cached_combo_samples(pp_name)
+        pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
+        combo_samples = db.get_cached_combo_samples(pp_name, combo_maps=combo_maps)
         if combo_samples is None:
             combo_samples = []
             for match_data in player_data.get('match_combinations', []):
@@ -649,7 +642,7 @@ def _build_leaderboard_from_projections(projections: list) -> tuple:
                 combos = pp_processor.process_match_combinations(map_kills)
                 combo_samples.extend([c['combined_kills'] for c in combos])
             if combo_samples:
-                db.save_combo_cache(pp_name, combo_samples)
+                db.save_combo_cache(pp_name, combo_samples, combo_maps=combo_maps)
         if len(combo_samples) < 3:
             skipped.append({'player_name': pp_name, 'line': line, 'reason': f'Insufficient data ({len(combo_samples)} combo samples)'})
             continue
@@ -764,41 +757,65 @@ def upload_leaderboard_image():
         if not image_bytes_list:
             return jsonify({'error': 'No valid image files provided'}), 400
         
-        # Parse images
+        # Parse images (returns projections + detected combo_maps from MAPS 1-2 vs MAPS 1-3)
         if len(image_bytes_list) == 1:
-            projections = parse_prizepicks_image(image_bytes_list[0], use_preprocessing, multi_engine)
+            projections, combo_maps = parse_prizepicks_image(image_bytes_list[0], use_preprocessing, multi_engine)
         else:
-            projections = parse_prizepicks_images_batch(image_bytes_list, use_preprocessing, multi_engine)
+            projections, combo_maps = parse_prizepicks_images_batch(image_bytes_list, use_preprocessing, multi_engine)
         
         if not projections:
             return jsonify({
                 'success': True,
                 'leaderboard': [],
                 'images_processed': len(image_bytes_list),
-                'message': 'Could not parse any lines from the image(s). Ensure they show PrizePicks MAPS 1-2 Kills cards.'
+                'message': 'Could not parse any lines from the image(s). Ensure they show PrizePicks MAPS 1-2 or MAPS 1-3 Kills cards.'
             })
 
-        results, skipped = _build_leaderboard_from_projections(projections)
+        results, skipped = _build_leaderboard_from_projections(projections, combo_maps=combo_maps)
         if results:
             source = 'batch_upload' if len(image_bytes_list) > 1 else 'upload'
             db.save_leaderboard_snapshot(source, results, parsed_count=len(projections))
+        
+        # Include skipped entries in leaderboard with N/A values so user can see all detected lines
+        skipped_entries = [
+            {
+                'rank': 0,
+                'player_name': s['player_name'],
+                'vlr_ign': s['player_name'],
+                'team': 'N/A',
+                'line': s['line'],
+                'best_side': 'N/A',
+                'p_hit': None,
+                'p_over': None,
+                'p_under': None,
+                'sample_size': None,
+                'mu': None,
+                'incomplete': True,
+                'reason': s['reason'],
+            }
+            for s in skipped
+        ]
+        combined_leaderboard = results + skipped_entries
+        
         skip_msg = ''
         if skipped:
-            skip_msg = f' {len(skipped)} skipped: ' + '; '.join(s[:50] for s in [f"{s['player_name']} ({s['reason']})" for s in skipped[:5]])
+            skip_msg = f' {len(skipped)} without data (shown as N/A): ' + '; '.join(s[:50] for s in [f"{s['player_name']} ({s['reason']})" for s in skipped[:5]])
             if len(skipped) > 5:
                 skip_msg += f' ...'
         
         batch_info = f' from {len(image_bytes_list)} image(s)' if len(image_bytes_list) > 1 else ''
+        combo_label = 'Maps 1+2+3 (Bo5)' if combo_maps == 3 else 'Maps 1+2 (Bo3)'
         
         return jsonify({
             'success': True,
-            'leaderboard': results,
+            'leaderboard': combined_leaderboard,
             'skipped': skipped,
+            'combo_maps': combo_maps,
             'images_processed': len(image_bytes_list),
             'parsed_count': len(projections),
             'preprocessing_used': use_preprocessing,
             'multi_engine_used': multi_engine,
-            'message': f'Parsed {len(projections)} lines{batch_info}; ranked {len(results)} with sufficient data. Saved to history.{skip_msg}'
+            'message': f'Parsed {len(projections)} lines ({combo_label}){batch_info}; ranked {len(results)} with sufficient data. All {len(combined_leaderboard)} shown.' + (f' {skip_msg}' if skip_msg else '')
         })
     except Exception as e:
         logger.error(f"Error processing leaderboard image: {e}", exc_info=True)

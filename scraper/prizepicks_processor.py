@@ -5,19 +5,22 @@ from scraper.player_processor import PlayerProcessor
 
 class PrizePicksProcessor(PlayerProcessor):
     """
-    Processor for PrizePicks lines that combine kills from maps 1 AND 2.
-    For 2-map matches: combines kills from both maps
-    For 3-map matches: shows all combinations of 2 maps (3 choose 2 = 3 combinations)
+    Processor for PrizePicks lines that combine kills across maps.
+    
+    combo_maps=2 (Bo3): Maps 1+2 combined. For 3-map matches: (1,2), (1,3), (2,3).
+    combo_maps=3 (Bo5): Maps 1+2+3 combined. For 4-map matches: (1,2,3), (1,2,4), etc.
     """
     
-    def __init__(self, kill_line: float = 30.5):
+    def __init__(self, kill_line: float = 30.5, combo_maps: int = 2):
         """
         Initialize processor with PrizePicks kill line.
         
         Args:
-            kill_line: The combined kill line for maps 1 AND 2 (e.g., 30.5 kills)
+            kill_line: The combined kill line (e.g., 30.5 for 2 maps, 45.5 for 3 maps)
+            combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)
         """
         super().__init__(kill_line=kill_line)
+        self.combo_maps = max(2, min(3, int(combo_maps)))
     
     def _determine_match_outcome(self, map_scores: List[str]) -> Tuple[bool, int]:
         """
@@ -71,7 +74,7 @@ class PrizePicksProcessor(PlayerProcessor):
             map_kills = [p[0] for p in filtered]
             map_scores = [p[1] for p in filtered]
             
-            if len(map_kills) < 2:
+            if len(map_kills) < self.combo_maps:
                 continue
             
             # Determine match outcome
@@ -86,10 +89,10 @@ class PrizePicksProcessor(PlayerProcessor):
             else:
                 margin_type = 'close'  # 2-1 or 3-1
             
-            # For PrizePicks, we analyze the first 2 maps combination
-            # (most common scenario for 2-map matches)
-            if len(map_kills) >= 2:
-                combined_kills = map_kills[0] + map_kills[1]
+            # For PrizePicks, we analyze the first n maps (2 or 3)
+            n = min(self.combo_maps, len(map_kills))
+            if n >= self.combo_maps:
+                combined_kills = sum(map_kills[:n])
                 is_over = combined_kills > kill_line
                 result_key = 'over' if is_over else 'under'
                 
@@ -169,20 +172,26 @@ class PrizePicksProcessor(PlayerProcessor):
         
         return result
 
-    def _calculate_two_map_outcome_stats(self, match_results: List[Dict], kill_line: float) -> Dict:
+    def _calculate_outcome_stats(self, match_results: List[Dict], kill_line: float) -> Dict:
         """
-        Calculate OVER/UNDER rates by 2-map outcome composition:
-        - both_wins (WW)
-        - split (WL/LW)
-        - both_losses (LL)
-
-        Uses each analyzed 2-map combination, including 3-map match combos.
+        Calculate OVER/UNDER rates by map outcome composition.
+        For 2-map: both_wins (WW), split (WL/LW), both_losses (LL)
+        For 3-map: all_wins (WWW), two_wins (WWL/WLW/LWW), one_win (WLL/LWL/LLW), all_losses (LLL)
         """
-        buckets = {
-            'both_wins': {'label': 'Both Maps Won (W+W)', 'over': 0, 'under': 0, 'total': 0},
-            'split': {'label': 'One Win, One Loss (W+L)', 'over': 0, 'under': 0, 'total': 0},
-            'both_losses': {'label': 'Both Maps Lost (L+L)', 'over': 0, 'under': 0, 'total': 0}
-        }
+        n = self.combo_maps
+        if n == 2:
+            buckets = {
+                'both_wins': {'label': 'Both Maps Won (W+W)', 'over': 0, 'under': 0, 'total': 0},
+                'split': {'label': 'One Win, One Loss (W+L)', 'over': 0, 'under': 0, 'total': 0},
+                'both_losses': {'label': 'Both Maps Lost (L+L)', 'over': 0, 'under': 0, 'total': 0}
+            }
+        else:
+            buckets = {
+                'all_wins': {'label': 'All 3 Maps Won (W+W+W)', 'over': 0, 'under': 0, 'total': 0},
+                'two_wins': {'label': 'Two Wins, One Loss (2W+1L)', 'over': 0, 'under': 0, 'total': 0},
+                'one_win': {'label': 'One Win, Two Losses (1W+2L)', 'over': 0, 'under': 0, 'total': 0},
+                'all_losses': {'label': 'All 3 Maps Lost (L+L+L)', 'over': 0, 'under': 0, 'total': 0}
+            }
 
         for match in match_results:
             map_scores = match.get('map_scores', [])
@@ -191,7 +200,6 @@ class PrizePicksProcessor(PlayerProcessor):
             if not map_scores or not combinations:
                 continue
 
-            # Map-level outcome (True = won map, False = lost map, None = unknown)
             map_outcomes = []
             for score in map_scores:
                 is_win, _ = self._parse_map_score(score)
@@ -199,32 +207,39 @@ class PrizePicksProcessor(PlayerProcessor):
 
             for combo in combinations:
                 maps = combo.get('maps', [])
-                if len(maps) != 2:
+                if len(maps) != n:
                     continue
 
-                # combo maps are 1-indexed in UI payload
-                idx_a = maps[0] - 1
-                idx_b = maps[1] - 1
-                if idx_a < 0 or idx_b < 0 or idx_a >= len(map_outcomes) or idx_b >= len(map_outcomes):
+                indices = [m - 1 for m in maps]
+                if any(i < 0 or i >= len(map_outcomes) for i in indices):
                     continue
 
-                outcome_a = map_outcomes[idx_a]
-                outcome_b = map_outcomes[idx_b]
-                if outcome_a is None or outcome_b is None:
+                outcomes = [map_outcomes[i] for i in indices]
+                if any(o is None for o in outcomes):
                     continue
 
-                if outcome_a and outcome_b:
-                    bucket_key = 'both_wins'
-                elif (outcome_a and not outcome_b) or (not outcome_a and outcome_b):
-                    bucket_key = 'split'
+                wins = sum(1 for o in outcomes if o)
+                if n == 2:
+                    if wins == 2:
+                        bucket_key = 'both_wins'
+                    elif wins == 1:
+                        bucket_key = 'split'
+                    else:
+                        bucket_key = 'both_losses'
                 else:
-                    bucket_key = 'both_losses'
+                    if wins == 3:
+                        bucket_key = 'all_wins'
+                    elif wins == 2:
+                        bucket_key = 'two_wins'
+                    elif wins == 1:
+                        bucket_key = 'one_win'
+                    else:
+                        bucket_key = 'all_losses'
 
                 result_key = 'over' if combo.get('hit', False) else 'under'
                 buckets[bucket_key][result_key] += 1
                 buckets[bucket_key]['total'] += 1
 
-        # Add percentages
         for bucket in buckets.values():
             if bucket['total'] > 0:
                 bucket['over_pct'] = round((bucket['over'] / bucket['total']) * 100, 1)
@@ -234,42 +249,30 @@ class PrizePicksProcessor(PlayerProcessor):
                 bucket['under_pct'] = 0
 
         return {
-            'both_wins': buckets['both_wins'],
-            'split': buckets['split'],
-            'both_losses': buckets['both_losses'],
-            'total_combinations': sum(b['total'] for b in buckets.values())
+            **buckets,
+            'total_combinations': sum(b['total'] for b in buckets.values()),
+            'combo_maps': n
         }
     
     def classify_line(self, rounds_needed: float) -> tuple:
         """
-        Classify the betting line based on rounds needed for 2-map combinations.
-        
-        Classification thresholds (doubled for 2 maps):
-        - < 38 rounds: Severely underpriced (easy to hit over)
-        - 38-40 rounds: Moderately underpriced
-        - 40-41 rounds: Slightly underpriced
-        - 41-47 rounds: Well priced (fair value)
-        - 47-48 rounds: Slightly overpriced
-        - 48-50 rounds: Moderately overpriced
-        - > 50 rounds: Severely overpriced
-        
-        Args:
-            rounds_needed: Expected rounds needed to hit the kill line
-            
-        Returns:
-            Tuple of (classification, recommendation)
+        Classify the betting line based on rounds needed.
+        Thresholds scaled for combo_maps: 2-map uses 38-50, 3-map uses 57-75 (1.5x).
         """
-        if rounds_needed < 38:
+        # Bo5 (3 maps): scale thresholds by 1.5 since we need ~1.5x more rounds
+        scale = 1.5 if self.combo_maps == 3 else 1.0
+        t = lambda x: x * scale  # threshold helper
+        if rounds_needed < t(38):
             return ("SEVERELY UNDERPRICED", "STRONG OVER")
-        elif rounds_needed < 40:
+        elif rounds_needed < t(40):
             return ("MODERATELY UNDERPRICED", "OVER")
-        elif rounds_needed < 41:
+        elif rounds_needed < t(41):
             return ("SLIGHTLY UNDERPRICED", "LEAN OVER")
-        elif rounds_needed < 47:
+        elif rounds_needed < t(47):
             return ("WELL PRICED", "NO EDGE")
-        elif rounds_needed < 48:
+        elif rounds_needed < t(48):
             return ("SLIGHTLY OVERPRICED", "LEAN UNDER")
-        elif rounds_needed < 50:
+        elif rounds_needed < t(50):
             return ("MODERATELY OVERPRICED", "UNDER")
         else:
             return ("SEVERELY OVERPRICED", "STRONG UNDER")
@@ -279,46 +282,50 @@ class PrizePicksProcessor(PlayerProcessor):
         Process a match's map kills into combinations.
         Excludes 0-kill maps (unplayed) from all calculations.
         
-        Args:
-            match_map_kills: List of kills per map in order [map1_kills, map2_kills, ...]
-            
+        For Bo5 (combo_maps=3): 2-map matches are scaled by 1.5 to estimate 3-map equivalent,
+        so they contribute to the distribution instead of being discarded.
+        
         Returns:
-            List of combination results:
-            - For 2 maps: [{'maps': [1, 2], 'combined_kills': total, 'hit': bool}]
-            - For 3 maps: [{'maps': [1, 2], ...}, {'maps': [1, 3], ...}, {'maps': [2, 3], ...}]
+            List of combination results based on combo_maps.
         """
         match_map_kills = [k for k in match_map_kills if k is not None and k > 0]
         num_maps = len(match_map_kills)
+        n = self.combo_maps  # 2 or 3
         
         if num_maps < 2:
-            return []  # Need at least 2 maps for PrizePicks
+            return []
         
         combinations = []
         
-        if num_maps == 2:
-            # Simple case: combine maps 1 and 2
-            combined_kills = match_map_kills[0] + match_map_kills[1]
+        # Bo5 mode: scale 2-map matches by 1.5 to estimate 3-map equivalent
+        if n == 3 and num_maps == 2:
+            raw_kills = match_map_kills[0] + match_map_kills[1]
+            scaled_kills = round(raw_kills * 1.5)  # 2 maps -> 3 maps: scale by 1.5
             combinations.append({
                 'maps': [1, 2],
+                'combined_kills': scaled_kills,
+                'hit': scaled_kills > self.kill_line,
+                'map1_kills': match_map_kills[0],
+                'map2_kills': match_map_kills[1],
+                'scaled': True,
+                'raw_kills': raw_kills,
+            })
+            return combinations
+        
+        if num_maps < n:
+            return []
+        
+        for indices in itertools.combinations(range(num_maps), n):
+            map_indices = [i + 1 for i in indices]  # 1-indexed for display
+            combined_kills = sum(match_map_kills[i] for i in indices)
+            combo = {
+                'maps': map_indices,
                 'combined_kills': combined_kills,
                 'hit': combined_kills > self.kill_line,
-                'map1_kills': match_map_kills[0],
-                'map2_kills': match_map_kills[1]
-            })
-        elif num_maps >= 3:
-            # 3 choose 2: all combinations of 2 maps
-            # Combinations: (1,2), (1,3), (2,3)
-            for i, j in itertools.combinations(range(num_maps), 2):
-                map1_idx = i + 1  # 1-indexed for display
-                map2_idx = j + 1
-                combined_kills = match_map_kills[i] + match_map_kills[j]
-                combinations.append({
-                    'maps': [map1_idx, map2_idx],
-                    'combined_kills': combined_kills,
-                    'hit': combined_kills > self.kill_line,
-                    'map1_kills': match_map_kills[i],
-                    'map2_kills': match_map_kills[j]
-                })
+            }
+            for j, idx in enumerate(indices):
+                combo[f'map{j+1}_kills'] = match_map_kills[idx]
+            combinations.append(combo)
         
         return combinations
     
@@ -456,7 +463,7 @@ class PrizePicksProcessor(PlayerProcessor):
         
         # Calculate win/loss margin statistics
         margin_stats = self._calculate_prizepicks_margin_stats(match_combinations, self.kill_line)
-        two_map_outcome_stats = self._calculate_two_map_outcome_stats(match_results, self.kill_line)
+        outcome_stats = self._calculate_outcome_stats(match_results, self.kill_line)
         
         return {
             'player_ign': player_data.get('ign'),
@@ -475,7 +482,8 @@ class PrizePicksProcessor(PlayerProcessor):
             'agent_analysis': agent_analysis,  # Agent-specific hit rates
             'map_analysis': map_analysis,       # Map-specific hit rates
             'margin_stats': margin_stats,       # Win/loss margin statistics
-            'two_map_outcome_stats': two_map_outcome_stats,  # WW / WL / LL combo-level stats
+            'two_map_outcome_stats': outcome_stats,  # WW/WL/LL or WWW/2W1L/1W2L/LLL
+            'combo_maps': self.combo_maps,
             'total_combinations': total_combinations,
             'hit_count': hit_count,
             'miss_count': miss_count,
@@ -484,37 +492,32 @@ class PrizePicksProcessor(PlayerProcessor):
         }
     
     def _calculate_agent_hit_rates(self, match_results: List[Dict], kill_line: float) -> List[Dict]:
-        """Calculate hit rates broken down by agent combinations"""
+        """Calculate hit rates broken down by agent combinations (uses combo_maps)"""
         agent_stats = {}
+        n = self.combo_maps
         
         for match in match_results:
             agents = match.get('agents', [])
-            map_kills = match.get('map_kills', [])
+            combinations = match.get('combinations', [])
             
-            # For 2-map combinations
-            if len(map_kills) >= 2 and len(agents) >= 2:
-                # Combination of first two maps
-                combined_kills = map_kills[0] + map_kills[1]
-                hit = combined_kills > kill_line
-                
-                # Track agent pair (sorted so "Jett + Raze" is same as "Raze + Jett")
-                agent_pair = tuple(sorted([agents[0], agents[1]]))
-                if agent_pair not in agent_stats:
-                    agent_stats[agent_pair] = {
-                        'agents': list(agent_pair),
-                        'combinations': 0,
-                        'hits': 0,
-                        'total_kills': 0
-                    }
-                
-                agent_stats[agent_pair]['combinations'] += 1
-                agent_stats[agent_pair]['total_kills'] += combined_kills
-                if hit:
-                    agent_stats[agent_pair]['hits'] += 1
+            for combo in combinations:
+                if len(combo.get('maps', [])) != n:
+                    continue
+                maps_indices = [m - 1 for m in combo['maps']]
+                if any(i < 0 or i >= len(agents) for i in maps_indices):
+                    continue
+                agent_combo = tuple(sorted([agents[i] for i in maps_indices if i < len(agents)]))
+                if len(agent_combo) != n:
+                    continue
+                if agent_combo not in agent_stats:
+                    agent_stats[agent_combo] = {'agents': list(agent_combo), 'combinations': 0, 'hits': 0, 'total_kills': 0}
+                agent_stats[agent_combo]['combinations'] += 1
+                agent_stats[agent_combo]['total_kills'] += combo['combined_kills']
+                if combo.get('hit'):
+                    agent_stats[agent_combo]['hits'] += 1
         
-        # Convert to list and calculate rates
         agent_analysis = []
-        for agent_pair, stats in agent_stats.items():
+        for agent_tuple, stats in agent_stats.items():
             agent_analysis.append({
                 'agent_combo': ' + '.join(stats['agents']),
                 'agents': stats['agents'],
@@ -523,43 +526,36 @@ class PrizePicksProcessor(PlayerProcessor):
                 'hit_rate': round((stats['hits'] / stats['combinations'] * 100), 1) if stats['combinations'] > 0 else 0,
                 'avg_kills': round(stats['total_kills'] / stats['combinations'], 1) if stats['combinations'] > 0 else 0
             })
-        
-        # Sort by combinations (most common first)
         agent_analysis.sort(key=lambda x: x['combinations'], reverse=True)
         return agent_analysis
     
     def _calculate_map_hit_rates(self, match_results: List[Dict], kill_line: float) -> List[Dict]:
-        """Calculate hit rates broken down by map combinations"""
+        """Calculate hit rates broken down by map combinations (uses combo_maps)"""
         map_stats = {}
+        n = self.combo_maps
         
         for match in match_results:
             map_names = match.get('map_names', [])
-            map_kills = match.get('map_kills', [])
+            combinations = match.get('combinations', [])
             
-            # For 2-map combinations
-            if len(map_kills) >= 2 and len(map_names) >= 2:
-                # Combination of first two maps
-                combined_kills = map_kills[0] + map_kills[1]
-                hit = combined_kills > kill_line
-                
-                # Track map pair (sorted so "Bind + Haven" is same as "Haven + Bind")
-                map_pair = tuple(sorted([map_names[0], map_names[1]]))
-                if map_pair not in map_stats:
-                    map_stats[map_pair] = {
-                        'maps': list(map_pair),
-                        'combinations': 0,
-                        'hits': 0,
-                        'total_kills': 0
-                    }
-                
-                map_stats[map_pair]['combinations'] += 1
-                map_stats[map_pair]['total_kills'] += combined_kills
-                if hit:
-                    map_stats[map_pair]['hits'] += 1
+            for combo in combinations:
+                if len(combo.get('maps', [])) != n:
+                    continue
+                maps_indices = [m - 1 for m in combo['maps']]
+                if any(i < 0 or i >= len(map_names) for i in maps_indices):
+                    continue
+                map_combo = tuple(sorted([map_names[i] for i in maps_indices if i < len(map_names)]))
+                if len(map_combo) != n:
+                    continue
+                if map_combo not in map_stats:
+                    map_stats[map_combo] = {'maps': list(map_combo), 'combinations': 0, 'hits': 0, 'total_kills': 0}
+                map_stats[map_combo]['combinations'] += 1
+                map_stats[map_combo]['total_kills'] += combo['combined_kills']
+                if combo.get('hit'):
+                    map_stats[map_combo]['hits'] += 1
         
-        # Convert to list and calculate rates
         map_analysis = []
-        for map_pair, stats in map_stats.items():
+        for map_tuple, stats in map_stats.items():
             map_analysis.append({
                 'map_combo': ' + '.join(stats['maps']),
                 'maps': stats['maps'],
@@ -568,7 +564,5 @@ class PrizePicksProcessor(PlayerProcessor):
                 'hit_rate': round((stats['hits'] / stats['combinations'] * 100), 1) if stats['combinations'] > 0 else 0,
                 'avg_kills': round(stats['total_kills'] / stats['combinations'], 1) if stats['combinations'] > 0 else 0
             })
-        
-        # Sort by combinations (most common first)
         map_analysis.sort(key=lambda x: x['combinations'], reverse=True)
         return map_analysis

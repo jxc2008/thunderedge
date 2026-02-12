@@ -689,14 +689,18 @@
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <button type="button" onclick="refreshLeaderboard()" id="leaderboardRefreshBtn" style="background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);">Refresh (API)</button>
                     <label style="cursor: pointer; padding: 0.5rem 1rem; background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); border-radius: 8px; font-size: 0.875rem; font-weight: 600;">
-                        Upload Screenshot
-                        <input type="file" id="leaderboardImageInput" accept="image/*" style="display: none;" onchange="uploadLeaderboardImage(this)">
+                        Upload Screenshot(s)
+                        <input type="file" id="leaderboardImageInput" accept="image/*" multiple style="display: none;" onchange="uploadLeaderboardImage(this)">
                     </label>
                 </div>
             </div>
             <div id="leaderboardLoading" style="display:none; text-align:center; padding:2rem;">
                 <div class="spinner" style="margin:0 auto 1rem;"></div>
-                <p style="color:#71717a;">Fetching PrizePicks lines & computing rankings...</p>
+                <p id="leaderboardLoadingStatus" style="color:#71717a;">Uploading & parsing screenshots...</p>
+                <div style="max-width:320px; margin:1rem auto 0; background:#27272a; border-radius:8px; overflow:hidden; height:8px;">
+                    <div id="leaderboardProgressBar" style="height:100%; width:0%; background:linear-gradient(90deg,#3b82f6,#22c55e); transition:width 0.3s ease;"></div>
+                </div>
+                <p id="leaderboardProgressPct" style="color:#a1a1aa; font-size:0.875rem; margin-top:0.5rem; font-weight:600;">0%</p>
             </div>
             <div id="leaderboardResult" style="min-height: 80px;">
                 <p style="color:#71717a; font-size:0.875rem;">Click "Refresh Leaderboard" to load today's PrizePicks Valorant lines ranked by hit probability.</p>
@@ -708,13 +712,20 @@
         </div>
         
         <div class="search-section">
+            <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+                <span style="color: #a1a1aa; font-size: 0.875rem;">Combo type:</span>
+                <div id="comboModeToggle" style="display: flex; background: #27272a; border-radius: 8px; padding: 2px;">
+                    <button type="button" id="comboBo3" class="combo-mode-btn active" onclick="setComboMode(2)" style="padding: 0.5rem 1rem; border: none; border-radius: 6px; background: #3b82f6; color: #fff; font-weight: 600; cursor: pointer;">Bo3 (Maps 1+2)</button>
+                    <button type="button" id="comboBo5" class="combo-mode-btn" onclick="setComboMode(3)" style="padding: 0.5rem 1rem; border: none; border-radius: 6px; background: transparent; color: #a1a1aa; font-weight: 500; cursor: pointer;">Bo5 (Maps 1+2+3)</button>
+                </div>
+            </div>
             <div class="search-box">
                 <div class="input-group">
                     <label>Player IGN</label>
                     <input type="text" id="playerInput" placeholder="aspas, TenZ, Demon1..." />
                 </div>
                 <div class="input-group">
-                    <label>PrizePicks Line (Maps 1+2 Combined)</label>
+                    <label id="killLineLabel">PrizePicks Line (Maps 1+2 Combined)</label>
                     <input type="number" id="killLine" step="0.5" value="30.5" placeholder="30.5" />
                 </div>
                 <div class="input-group">
@@ -754,6 +765,19 @@
 
     <script>
         let ppDistributionChart = null;
+        let comboMaps = 2;
+
+        function setComboMode(n) {
+            comboMaps = n;
+            document.getElementById('comboBo3').classList.toggle('active', n === 2);
+            document.getElementById('comboBo5').classList.toggle('active', n === 3);
+            document.getElementById('comboBo3').style.background = n === 2 ? '#3b82f6' : 'transparent';
+            document.getElementById('comboBo3').style.color = n === 2 ? '#fff' : '#a1a1aa';
+            document.getElementById('comboBo5').style.background = n === 3 ? '#3b82f6' : 'transparent';
+            document.getElementById('comboBo5').style.color = n === 3 ? '#fff' : '#a1a1aa';
+            document.getElementById('killLineLabel').textContent = n === 2 ? 'PrizePicks Line (Maps 1+2 Combined)' : 'PrizePicks Line (Maps 1+2+3 Combined)';
+            document.getElementById('killLine').placeholder = n === 2 ? '30.5' : '45.5';
+        }
 
         function createParlayLegRow(index, leg = {}) {
             const lineValue = leg.line ?? 30.5;
@@ -805,33 +829,91 @@
             reindexParlayLegs();
         }
 
-        async function uploadLeaderboardImage(inputEl) {
-            const file = inputEl?.files?.[0];
-            if (!file) return;
+        function uploadLeaderboardImage(inputEl) {
+            const files = inputEl?.files;
+            if (!files || files.length === 0) return;
             const loadingEl = document.getElementById('leaderboardLoading');
             const resultEl = document.getElementById('leaderboardResult');
             const btn = document.getElementById('leaderboardRefreshBtn');
+            const statusEl = document.getElementById('leaderboardLoadingStatus');
+            const progressBar = document.getElementById('leaderboardProgressBar');
+            const progressPct = document.getElementById('leaderboardProgressPct');
+
             loadingEl.style.display = 'block';
             resultEl.innerHTML = '';
             if (btn) btn.disabled = true;
+            progressBar.style.width = '0%';
+            progressPct.textContent = '0%';
+
+            const formData = new FormData();
+            if (files.length === 1) {
+                formData.append('image', files[0]);
+            } else {
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('images', files[i]);
+                }
+            }
             inputEl.value = '';
 
-            try {
-                const formData = new FormData();
-                formData.append('image', file);
-                const resp = await fetch('/api/prizepicks/leaderboard/upload', { method: 'POST', body: formData });
-                const data = await resp.json();
-                if (!resp.ok || data.error) {
-                    resultEl.innerHTML = `<p style="color:#ef4444;">${data.error || 'Upload failed.'}</p>`;
-                    return;
+            let parseProgressInterval = null;
+
+            function setProgress(pct, status) {
+                const v = Math.min(100, Math.max(0, Math.round(pct)));
+                progressBar.style.width = v + '%';
+                progressPct.textContent = v + '%';
+                if (status) statusEl.textContent = status;
+            }
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const uploadPct = (e.loaded / e.total) * 40;
+                    setProgress(uploadPct, 'Uploading... ' + Math.round(e.loaded/1024) + ' KB');
                 }
-                renderLeaderboardResults(data);
-            } catch (err) {
-                resultEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
-            } finally {
+            });
+
+            xhr.addEventListener('load', function() {
+                if (parseProgressInterval) clearInterval(parseProgressInterval);
+                setProgress(100, 'Done!');
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (xhr.status >= 400 || data.error) {
+                        resultEl.innerHTML = `<p style="color:#ef4444;">${data.error || 'Upload failed.'}</p>`;
+                    } else {
+                        renderLeaderboardResults(data);
+                    }
+                } catch (err) {
+                    resultEl.innerHTML = `<p style="color:#ef4444;">Error: ${err.message}</p>`;
+                }
                 loadingEl.style.display = 'none';
                 if (btn) btn.disabled = false;
-            }
+            });
+
+            xhr.addEventListener('error', function() {
+                if (parseProgressInterval) clearInterval(parseProgressInterval);
+                resultEl.innerHTML = `<p style="color:#ef4444;">Network error. Please try again.</p>`;
+                loadingEl.style.display = 'none';
+                if (btn) btn.disabled = false;
+            });
+
+            xhr.addEventListener('abort', function() {
+                if (parseProgressInterval) clearInterval(parseProgressInterval);
+                loadingEl.style.display = 'none';
+                if (btn) btn.disabled = false;
+            });
+
+            xhr.open('POST', '/api/prizepicks/leaderboard/upload', true);
+
+            xhr.send(formData);
+
+            setProgress(5, 'Uploading... ' + files.length + ' file(s)');
+
+            parseProgressInterval = setInterval(function() {
+                const w = parseInt(progressBar.style.width) || 0;
+                if (w >= 95) return;
+                setProgress(w + 3, w < 45 ? 'Uploading...' : 'Parsing OCR & ranking players...');
+            }, 500);
         }
 
         function renderLeaderboardResults(data) {
@@ -845,18 +927,32 @@
             if (data.created_at && !msg) {
                 msg = `Loaded from history – ${new Date(data.created_at).toLocaleString()}`;
             }
-            const rows = lb.map((r, i) => `
-                <tr style="border-bottom:1px solid #27272a;">
-                    <td style="padding:0.75rem; font-weight:600; color:#a1a1aa;">${r.rank}</td>
-                    <td style="padding:0.75rem;"><a href="#" class="leaderboard-player-link" data-ign="${(r.vlr_ign || r.player_name || '').replace(/"/g, '&quot;')}" data-line="${r.line}" style="color:#3b82f6; text-decoration:none; font-weight:600;">${r.player_name}</a></td>
-                    <td style="padding:0.75rem; color:#71717a;">${r.team}</td>
-                    <td style="padding:0.75rem;">${r.line}</td>
-                    <td style="padding:0.75rem;"><span style="text-transform:uppercase; color:${r.best_side === 'over' ? '#22c55e' : '#ef4444'};">${r.best_side}</span></td>
-                    <td style="padding:0.75rem; font-weight:700; color:#22c55e;">${(r.p_hit * 100).toFixed(1)}%</td>
-                    <td style="padding:0.75rem; color:#71717a;">${r.sample_size}</td>
-                    <td style="padding:0.75rem; color:#71717a;">${r.mu}</td>
+            const rows = lb.map((r, i) => {
+                const isIncomplete = r.incomplete === true;
+                const rowStyle = isIncomplete ? 'border-bottom:1px solid #27272a; opacity:0.85;' : 'border-bottom:1px solid #27272a;';
+                const playerCell = isIncomplete
+                    ? `<span style="color:#71717a; font-weight:600;" title="${(r.reason || 'No data').replace(/"/g, '&quot;')}">${r.player_name}</span>`
+                    : `<a href="#" class="leaderboard-player-link" data-ign="${(r.vlr_ign || r.player_name || '').replace(/"/g, '&quot;')}" data-line="${r.line}" style="color:#3b82f6; text-decoration:none; font-weight:600;">${r.player_name}</a>`;
+                const teamVal = r.team ?? 'N/A';
+                const lineVal = r.line ?? 'N/A';
+                const bestVal = r.best_side ?? 'N/A';
+                const hitVal = r.p_hit != null ? (r.p_hit * 100).toFixed(1) + '%' : 'N/A';
+                const samplesVal = r.sample_size != null ? r.sample_size : 'N/A';
+                const muVal = r.mu != null ? r.mu : 'N/A';
+                const bestColor = r.best_side === 'over' ? '#22c55e' : (r.best_side === 'under' ? '#ef4444' : '#71717a');
+                const rankVal = r.rank > 0 ? r.rank : '—';
+                return `
+                <tr style="${rowStyle}">
+                    <td style="padding:0.75rem; font-weight:600; color:#a1a1aa;">${rankVal}</td>
+                    <td style="padding:0.75rem;">${playerCell}</td>
+                    <td style="padding:0.75rem; color:#71717a;">${teamVal}</td>
+                    <td style="padding:0.75rem;">${lineVal}</td>
+                    <td style="padding:0.75rem;"><span style="text-transform:uppercase; color:${bestColor};">${bestVal}</span></td>
+                    <td style="padding:0.75rem; font-weight:700; color:${r.p_hit != null ? '#22c55e' : '#71717a'};">${hitVal}</td>
+                    <td style="padding:0.75rem; color:#71717a;">${samplesVal}</td>
+                    <td style="padding:0.75rem; color:#71717a;">${muVal}</td>
                 </tr>
-            `).join('');
+            `}).join('');
                 resultEl.innerHTML = `
                 ${msg ? `<p style="color:#71717a; font-size:0.875rem; margin-bottom:0.75rem;">${msg}</p>` : ''}
                 <div style="overflow-x:auto;">
@@ -1001,7 +1097,7 @@
                 const resp = await fetch('/api/prizepicks/parlay', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ legs })
+                    body: JSON.stringify({ legs, combo_maps: comboMaps })
                 });
                 const data = await resp.json();
                 if (!resp.ok || data.error) {
@@ -1090,7 +1186,7 @@
             
             try {
                 const startTime = performance.now();
-                const response = await fetch(`/api/prizepicks/${encodeURIComponent(ign)}?line=${killLine}`);
+                const response = await fetch(`/api/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
                 
@@ -1109,7 +1205,7 @@
                     if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
                         try {
                             const edgeResponse = await fetch(
-                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
                             );
                             if (edgeResponse.ok) {
                                 edgeData = await edgeResponse.json();
@@ -1155,11 +1251,12 @@
                         
                         const combinationsHtml = match.combinations.map(combo => {
                             const comboClass = combo.hit ? 'hit' : 'miss';
-                            const mapsText = match.num_maps === 2 
-                                ? 'Maps 1+2' 
-                                : `Maps ${combo.maps[0]}+${combo.maps[1]}`;
+                            let mapsText = combo.maps && combo.maps.length === 3
+                                ? `Maps ${combo.maps[0]}+${combo.maps[1]}+${combo.maps[2]}`
+                                : (combo.maps && combo.maps.length === 2 ? `Maps ${combo.maps[0]}+${combo.maps[1]}` : 'Maps 1+2');
+                            if (combo.scaled) mapsText += ' (scaled)';
                             return `
-                                <div class="combination-chip ${comboClass}">
+                                <div class="combination-chip ${comboClass}" title="${combo.scaled ? '2-map match scaled by 1.5 to estimate 3-map equivalent' : ''}">
                                     <span class="combination-maps">${mapsText}</span>
                                     <span class="combination-kills">${combo.combined_kills} ${combo.hit ? '✓' : '✗'}</span>
                                 </div>
@@ -1206,11 +1303,12 @@
                     
                     const combinationsHtml = match.combinations.map(combo => {
                         const comboClass = combo.hit ? 'hit' : 'miss';
-                        const mapsText = match.num_maps === 2 
-                            ? 'Maps 1+2' 
-                            : `Maps ${combo.maps[0]}+${combo.maps[1]}`;
+                        let mapsText = combo.maps && combo.maps.length === 3
+                            ? `Maps ${combo.maps[0]}+${combo.maps[1]}+${combo.maps[2]}`
+                            : (combo.maps && combo.maps.length === 2 ? `Maps ${combo.maps[0]}+${combo.maps[1]}` : 'Maps 1+2');
+                        if (combo.scaled) mapsText += ' (scaled)';
                         return `
-                            <div class="combination-chip ${comboClass}">
+                            <div class="combination-chip ${comboClass}" title="${combo.scaled ? '2-map match scaled by 1.5 to estimate 3-map equivalent' : ''}">
                                 <span class="combination-maps">${mapsText}</span>
                                 <span class="combination-kills">${combo.combined_kills} ${combo.hit ? '✓' : '✗'}</span>
                             </div>
@@ -1557,19 +1655,32 @@
             if (!outcomeStats || outcomeStats.total_combinations === 0) {
                 return '';
             }
-            
+            const is3Map = outcomeStats.combo_maps === 3;
+            const title = is3Map ? '3-Map Outcome Breakdown (for each analyzed combo)' : '2-Map Outcome Breakdown (for each analyzed combo)';
+            const desc = is3Map
+                ? 'Over/Under rates by outcome: all wins (W+W+W), two wins (2W+1L), one win (1W+2L), all losses (L+L+L)'
+                : 'Over/Under rates by outcome composition: both wins (W+W), split (W+L), both losses (L+L)';
+            const cards = is3Map
+                ? `
+                    ${renderPPOutcomeCard('#22c55e', outcomeStats.all_wins)}
+                    ${renderPPOutcomeCard('#84cc16', outcomeStats.two_wins)}
+                    ${renderPPOutcomeCard('#f59e0b', outcomeStats.one_win)}
+                    ${renderPPOutcomeCard('#ef4444', outcomeStats.all_losses)}
+                `
+                : `
+                    ${renderPPOutcomeCard('#22c55e', outcomeStats.both_wins)}
+                    ${renderPPOutcomeCard('#f59e0b', outcomeStats.split)}
+                    ${renderPPOutcomeCard('#ef4444', outcomeStats.both_losses)}
+                `;
+            const gridCols = is3Map ? 'repeat(4, minmax(180px, 1fr))' : 'repeat(3, minmax(220px, 1fr))';
             return `
                 <div class="over-under-box" style="margin-top: 2rem;">
-                    <div class="over-under-title">2-Map Outcome Breakdown (for each analyzed combo)</div>
-                    <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">
-                        Over/Under rates by outcome composition: both wins (W+W), split (W+L), both losses (L+L)
-                    </p>
-                    <div style="display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 1rem; margin-top: 1.5rem;">
-                        ${renderPPOutcomeCard('#22c55e', outcomeStats.both_wins)}
-                        ${renderPPOutcomeCard('#f59e0b', outcomeStats.split)}
-                        ${renderPPOutcomeCard('#ef4444', outcomeStats.both_losses)}
+                    <div class="over-under-title">${title}</div>
+                    <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">${desc}</p>
+                    <div style="display: grid; grid-template-columns: ${gridCols}; gap: 1rem; margin-top: 1.5rem;">
+                        ${cards}
                     </div>
-                    <div class="map-count" style="margin-top: 1.25rem;">Analyzing ${outcomeStats.total_combinations} 2-map combinations (line: ${killLine})</div>
+                    <div class="map-count" style="margin-top: 1.25rem;">Analyzing ${outcomeStats.total_combinations} ${is3Map ? '3-map' : '2-map'} combinations (line: ${killLine})</div>
                 </div>
             `;
         }

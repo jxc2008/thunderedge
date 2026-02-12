@@ -109,6 +109,41 @@ class VLRScraper:
         {'name': 'VCT 2026: China Kickoff', 'url': '/event/2685/vct-2026-china-kickoff', 'region': 'China'},
     ]
     
+    @classmethod
+    def get_teams_from_vct_events(cls, events: list = None) -> set:
+        """
+        Scrape VLR event matches to extract team name fragments for OCR blacklist.
+        Returns lowercase fragments (e.g. 'bbl', 'esports', 'rex', 'regum') from all teams.
+        Uses events list or defaults to VCT 2026 Kickoff (all 4 regions).
+        """
+        if events is None:
+            events = cls.VCT_2026_KICKOFF_EVENTS
+        fragments = set()
+        base_url = Config.VLR_BASE_URL
+        headers = Config.HEADERS
+        import urllib.request
+        import urllib.error
+        for event in events:
+            matches_url = event['url'].replace('/event/', '/event/matches/')
+            full_url = f"{base_url}{matches_url}/?series_id=all"
+            try:
+                req = urllib.request.Request(full_url, headers=headers)
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                content = opener.open(req, timeout=15).read()
+                soup = BeautifulSoup(content, 'html.parser')
+                match_pattern = re.compile(r'/\d+/[\w-]+-vs-[\w-]+')
+                for link in soup.find_all('a', href=match_pattern):
+                    href = link.get('href', '')
+                    m = re.match(r'/\d+/([\w-]+)-vs-([\w-]+)', href)
+                    if m:
+                        for t in (m.group(1), m.group(2)):
+                            for part in t.split('-'):
+                                if len(part) >= 2 and part.isalpha():
+                                    fragments.add(part.lower())
+            except Exception as e:
+                logger.warning(f"Could not fetch teams from {event.get('name', 'event')}: {e}")
+        return fragments
+
     # 2025 VCT events (completed - use cache)
     # ALL URLs VERIFIED FROM VLR.gg 2026-01-24
     VCT_2025_EVENTS = [

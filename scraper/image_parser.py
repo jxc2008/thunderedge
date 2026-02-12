@@ -8,6 +8,7 @@ Improvements:
 - Multi-engine support (pytesseract + easyocr)
 - Confidence filtering
 - Batch processing support
+- Team name blacklist to avoid misidentifying team names as IGNs
 """
 import re
 import logging
@@ -15,6 +16,35 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+try:
+    from config import Config
+    _STATIC_BLACKLIST = Config.OCR_TEAM_BLACKLIST
+except ImportError:
+    _STATIC_BLACKLIST = frozenset()
+
+_VLR_TEAM_CACHE = None
+
+
+def _get_team_blacklist() -> frozenset:
+    """Combine static config blacklist with VLR-scraped teams from 2026 Kickoff."""
+    global _VLR_TEAM_CACHE
+    if _VLR_TEAM_CACHE is not None:
+        return _VLR_TEAM_CACHE
+    base = set(_STATIC_BLACKLIST)
+    try:
+        from scraper.vlr_scraper import VLRScraper
+        vlr_teams = VLRScraper.get_teams_from_vct_events()
+        base.update(vlr_teams)
+        logger.info(f"OCR blacklist: {len(_STATIC_BLACKLIST)} static + {len(vlr_teams)} from VLR = {len(base)} fragments")
+    except Exception as e:
+        logger.warning(f"Could not fetch VLR teams for OCR blacklist: {e}. Using static list only.")
+    _VLR_TEAM_CACHE = frozenset(base)
+    return _VLR_TEAM_CACHE
+
+
+# For backward compat; actual blacklist is built lazily via _get_team_blacklist()
+TEAM_BLACKLIST = _STATIC_BLACKLIST
 
 
 def _bbox_center(bbox) -> Tuple[float, float]:
@@ -37,22 +67,49 @@ def _is_likely_line_value(text: str) -> bool:
 
 
 def _is_likely_player_name(text: str) -> bool:
-    """ Player names: short alphanumeric, possibly with numbers/underscores """
+    """
+    Player IGNs: SINGLE WORD names like 'Rb', 'TenZ', 'aspas', 'Monyet', 'Jemkin'
+    
+    Key insight: IGNs are ALWAYS one word. Team names are multiple words.
+    - IGN: "Rb", "Monyet", "aspas"
+    - Team: "Rex Regum Qeon", "Nongshim RedForce", "Gentle Mates"
+    """
     t = str(text).strip()
-    if len(t) < 2 or len(t) > 25:
+    
+    # IGNs are single words - this is the most important filter
+    words = t.split()
+    if len(words) != 1:
+        return False  # Team names have spaces, IGNs don't
+    
+    # Length check - IGNs are typically 2-15 characters (single word)
+    if len(t) < 2 or len(t) > 15:
         return False
-    if re.match(r'^[\d\s\.\-:]+$', t):  # mostly numbers
+    
+    # Skip purely numeric strings
+    if re.match(r'^[\d\.\-:]+$', t):
         return False
-    # Skip team/label words - NOT "loss" (Loss is a player on FURIA Academy)
-    skip = ('maps', 'kills', 'less', 'more', 'vs', 'at', 'thu', 'fri', 'sat', 'sun',
-            'am', 'pm', 'g', 'academy', 'canids', 'liquid', 'heretics', 'rex', 'paper', 'furia', 'red',
-            'drx', 'val', 'tl', 'vct', 'valorant')
-    if t.lower() in skip:
+    
+    # Skip team names and UI labels (static + VLR-scraped from 2026 Kickoff)
+    if t.lower() in _get_team_blacklist():
         return False
-    if 'MAPS' in t.upper() or 'KILL' in t.upper():
+    
+    # Skip strings with time patterns "1:00AM"
+    if re.search(r'\d+:\d+', t):
         return False
-    if re.match(r'^\d+\.\d+[Kk]?$', t):  # engagement numbers like 1.0K
+    
+    # Skip strings with "MAPS" or "KILL"
+    if 'MAP' in t.upper() or 'KILL' in t.upper():
         return False
+    
+    # Skip engagement/stats numbers "1.0K", "98.6%"
+    if re.match(r'^\d+\.\d+[Kk%]?$', t):
+        return False
+    
+    # Skip strings that are mostly punctuation or special chars
+    if re.match(r'^[\W_]+$', t):
+        return False
+    
+    # If it's a single word, alphanumeric, reasonable length -> likely an IGN
     return True
 
 
@@ -126,7 +183,9 @@ def _ocr_with_pytesseract(img, use_confidence=True) -> List[Tuple[float, float, 
     import pytesseract
     from PIL import Image
     
-    config = '--psm 6'  # Assume uniform block of text
+    # PSM 11: Sparse text. Find as much text as possible in no particular order.
+    # Better for card-based layouts like PrizePicks
+    config = '--psm 11 --oem 3'  # Sparse text + LSTM OCR Engine
     data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, config=config)
     
     detections = []
@@ -137,8 +196,9 @@ def _ocr_with_pytesseract(img, use_confidence=True) -> List[Tuple[float, float, 
         
         conf = int(data['conf'][i])
         
-        # Filter low confidence detections
-        if use_confidence and conf < 30:
+        # More lenient confidence filtering - short names like "Rb" might have lower confidence
+        # but are still valid if they pass our heuristics
+        if use_confidence and conf < 20:  # Lower threshold from 30 to 20
             continue
         
         x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
@@ -214,10 +274,65 @@ def _merge_detections(detections_pytess, detections_easy):
     return merged
 
 
-def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_engine=False) -> List[Dict]:
+def _detect_combo_maps_from_detections(detections: List) -> int:
     """
-    Parse PrizePicks screenshot to extract player names and MAPS 1-2 Kills lines.
-    Card layout: team -> player name -> match -> LINE -> MAPS 1-2 Kills
+    Scan OCR text for MAPS 1-2 vs MAPS 1-3 to detect Bo3 vs Bo5 combo type.
+    PrizePicks cards show "MAPS 1-2 Kills" or "MAPS 1-3 Kills" below the line.
+    Returns 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3). Default 2.
+    """
+    # Build combined string from ALL detection text - OCR often splits
+    # "MAPS 1-3 Kills" into separate tokens: "MAPS", "1", "-", "3", "Kills"
+    combined = " ".join(
+        item[2] if len(item) >= 3 else str(item)
+        for item in detections
+    )
+
+    # Patterns: 1-3, 1 - 3, 1–3 (en-dash), 1—3 (em-dash), 1.3 (OCR misreads - as .)
+    # 1 3 when MAPS/KILLS nearby. (?!\d) avoids 1-30 or 1-25
+    # maps\s*1\s*[-.\s]+\s*3 catches "MAPS 1 3" when Kills is missing or split
+    pat_1_3 = re.compile(
+        r'1\s*[-–—]\s*3(?!\d)|'
+        r'1\s*\.\s*3(?!\d)|'
+        r'1\s+3(?=.*(?:maps|kills))|'
+        r'maps\s*1\s*[-–—.\s]+\s*3(?!\d)|'
+        r'1\s*[-–—.]?\s*3\s*kills',
+        re.IGNORECASE
+    )
+    pat_1_2 = re.compile(
+        r'1\s*[-–—]\s*2(?!\d)|'
+        r'1\s*\.\s*2(?!\d)|'
+        r'1\s+2(?=.*(?:maps|kills))|'
+        r'maps\s*1\s*[-–—.\s]+\s*2(?!\d)|'
+        r'1\s*[-–—.]?\s*2\s*kills',
+        re.IGNORECASE
+    )
+
+    # Search in combined string first (handles split tokens)
+    found_1_3 = 1 if pat_1_3.search(combined) else 0
+    found_1_2 = 1 if pat_1_2.search(combined) else 0
+
+    # Also check per-token for edge cases (e.g. "1-3" as single token)
+    for item in detections:
+        t = (item[2] if len(item) >= 3 else str(item))
+        if pat_1_3.search(t):
+            found_1_3 += 1
+        if pat_1_2.search(t):
+            found_1_2 += 1
+
+    if found_1_3 > 0:
+        logger.debug(f"Bo5 detected: found '1-3' in OCR text (combined snippet: ...{combined[:200]})")
+        return 3
+    if found_1_2 > 0:
+        logger.debug(f"Bo3 detected: found '1-2' in OCR text")
+        return 2
+    logger.debug(f"No MAPS 1-2/1-3 found in OCR. Combined text snippet: ...{combined[:300]}")
+    return 2  # default Bo3
+
+
+def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_engine=False) -> tuple:
+    """
+    Parse PrizePicks screenshot to extract player names and kill lines.
+    Detects MAPS 1-2 (Bo3) vs MAPS 1-3 (Bo5) from card text.
     
     Args:
         image_bytes: Screenshot image bytes
@@ -225,7 +340,7 @@ def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_eng
         multi_engine: Try both pytesseract AND easyocr for better accuracy (slower)
     
     Returns:
-        List of {"player_name": str, "line": float} dicts
+        (projections: List[{"player_name": str, "line": float}], combo_maps: int)
     """
     import io
     from PIL import Image
@@ -234,10 +349,11 @@ def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_eng
     original_img = img.copy()
     
     # Preprocess image for better OCR
+    # Try gentle preprocessing first - aggressive can sometimes blur text
     if use_preprocessing:
         try:
             img = _preprocess_image(img, aggressive=False)
-            logger.info("Applied image preprocessing")
+            logger.info("Applied image preprocessing (gentle mode)")
         except Exception as e:
             logger.warning(f"Preprocessing failed, using original: {e}")
             img = original_img
@@ -283,49 +399,75 @@ def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_eng
     # Extract line values and player names
     line_values = []
     player_names = []
+    all_text = []  # For debugging
     
     for item in detections:
         cx, cy, t = item if len(item) == 3 else (item[0], item[1], item[2])
+        all_text.append((cx, cy, t))
         
         if _is_likely_line_value(t):
             try:
                 line_values.append((cx, cy, float(t)))
+                logger.debug(f"Line value detected: {t} at ({cx}, {cy})")
             except ValueError:
                 pass
         
         if _is_likely_player_name(t):
             player_names.append((cx, cy, t))
+            logger.debug(f"Player name candidate: '{t}' at ({cx}, {cy})")
+
+    logger.info(f"Found {len(line_values)} line values and {len(player_names)} player name candidates")
 
     # For each line value, find nearest player name above it (within same card ~ same x)
-    HORIZ_THRESHOLD = 180  # max horizontal distance (same card) - increased for wider grids
-    VERT_OVERLAP = 30  # allow slight overlap (player can be slightly below line center)
+    # PrizePicks layout: Team -> IGN -> Match -> Line -> "MAPS 1-2 Kills"
+    HORIZ_THRESHOLD = 200  # max horizontal distance (same card)
+    MIN_VERT_DISTANCE = 20  # player should be at least 20px above line
+    MAX_VERT_DISTANCE = 250  # but not more than 250px above
     parsed = []
     used_players = set()
 
     for lx, ly, line_val in sorted(line_values, key=lambda x: (x[1], x[0])):
-        best_player = None
-        best_dist = float('inf')
+        # Find candidates above this line
+        candidates = []
         for px, py, pname in player_names:
             if pname in used_players:
                 continue
-            if py >= ly + VERT_OVERLAP:  # player must be above the line (with tolerance)
+            
+            # Must be above the line
+            if py >= ly:
                 continue
+            
+            # Check horizontal alignment (same card)
             dx = abs(px - lx)
             if dx > HORIZ_THRESHOLD:
                 continue
+            
+            # Check vertical distance
             dy = ly - py
-            if dy < 0:
-                dy = 0  # same row or below - prefer closer horizontal
-            dist = dx * 1.5 + dy  # weight horizontal alignment, prefer players directly above
-            if dist < best_dist:
-                best_dist = dist
-                best_player = pname
-
-        if best_player:
+            if dy < MIN_VERT_DISTANCE or dy > MAX_VERT_DISTANCE:
+                continue  # Too close or too far vertically
+            
+            # Calculate score: prefer closer + shorter names (IGNs are typically 1 word)
+            # IGNs: "Rb", "aspas", "TenZ" vs Teams: "Nongshim RedForce"
+            word_count = len(pname.split())
+            name_length_penalty = len(pname) if word_count > 1 else 0
+            
+            # Distance score (lower is better)
+            dist = dy + (dx * 0.5) + (name_length_penalty * 2)
+            candidates.append((dist, pname, px, py))
+        
+        # Choose the best candidate (shortest distance, prefer short names)
+        if candidates:
+            candidates.sort(key=lambda x: x[0])  # Sort by score
+            best_dist, best_player, best_px, best_py = candidates[0]
+            
+            logger.debug(f"Line {line_val} at ({lx},{ly}) matched to '{best_player}' at ({best_px},{best_py})")
             used_players.add(best_player)
             parsed.append({"player_name": best_player, "line": line_val})
         else:
-            parsed.append({"player_name": f"Player_{line_val}", "line": line_val})
+            logger.warning(f"No player found for line {line_val} at ({lx},{ly})")
+            # Still add it so we know how many lines were detected
+            parsed.append({"player_name": f"Unknown_{line_val}", "line": line_val})
 
     # Dedupe by (player, line)
     seen = set()
@@ -336,32 +478,33 @@ def parse_prizepicks_image(image_bytes: bytes, use_preprocessing=True, multi_eng
             seen.add(k)
             unique.append(p)
 
-    logger.info(f"Parsed {len(unique)} lines from image")
-    return unique
+    # Detect MAPS 1-2 vs MAPS 1-3 from OCR text
+    combo_maps = _detect_combo_maps_from_detections(detections)
+    logger.info(f"Parsed {len(unique)} lines from image; detected combo: Maps 1+2 (Bo3)" if combo_maps == 2 else f"Parsed {len(unique)} lines from image; detected combo: Maps 1+2+3 (Bo5)")
+
+    return unique, combo_maps
 
 
 def parse_prizepicks_images_batch(image_bytes_list: List[bytes], 
                                    use_preprocessing=True, 
-                                   multi_engine=False) -> List[Dict]:
+                                   multi_engine=False) -> tuple:
     """
     Parse multiple PrizePicks screenshots and combine results.
     Automatically deduplicates across all images.
     
-    Args:
-        image_bytes_list: List of screenshot image bytes
-        use_preprocessing: Apply image enhancement
-        multi_engine: Use both OCR engines
-    
     Returns:
-        Combined and deduplicated list of {"player_name": str, "line": float}
+        (projections: List[{"player_name": str, "line": float}], combo_maps: int)
+        combo_maps uses most common detected value across images, default 2.
     """
     all_projections = []
+    combo_counts = {2: 0, 3: 0}
     
     for i, image_bytes in enumerate(image_bytes_list):
         try:
-            projections = parse_prizepicks_image(image_bytes, use_preprocessing, multi_engine)
+            projections, combo_maps = parse_prizepicks_image(image_bytes, use_preprocessing, multi_engine)
             all_projections.extend(projections)
-            logger.info(f"Image {i+1}/{len(image_bytes_list)}: Parsed {len(projections)} lines")
+            combo_counts[combo_maps] = combo_counts.get(combo_maps, 0) + 1
+            logger.info(f"Image {i+1}/{len(image_bytes_list)}: Parsed {len(projections)} lines, combo={combo_maps}")
         except Exception as e:
             logger.error(f"Failed to parse image {i+1}: {e}")
     
@@ -374,5 +517,7 @@ def parse_prizepicks_images_batch(image_bytes_list: List[bytes],
             seen.add(k)
             unique.append(p)
     
-    logger.info(f"Batch total: {len(all_projections)} parsed, {len(unique)} unique lines")
-    return unique
+    # Use most common combo_maps across images
+    combo_maps = 3 if combo_counts.get(3, 0) > combo_counts.get(2, 0) else 2
+    logger.info(f"Batch total: {len(all_projections)} parsed, {len(unique)} unique lines; combo_maps={combo_maps}")
+    return unique, combo_maps

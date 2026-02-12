@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -71,15 +72,16 @@
             color: #a1a1aa;
         }
         
-        .header-nav span {
+        .header-nav a {
             padding: 0.5rem 0.75rem;
             border-radius: 6px;
             cursor: pointer;
             transition: all 0.2s;
+            text-decoration: none;
         }
         
-        .header-nav span:hover {
-            color: #ffffff;
+        .header-nav a:hover {
+            color: #ffffff !important;
             background: #18181b;
         }
         
@@ -729,6 +731,217 @@
                 padding: 0.75rem 0.5rem;
             }
         }
+
+        /* Edge Analysis Styles */
+        .edge-analysis-section {
+            background: linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-top: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        }
+
+        .edge-recommendation-card {
+            background: #18181b;
+            border: 2px solid;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .edge-recommendation-card.bet-over {
+            border-color: #22c55e;
+            background: linear-gradient(180deg, #18181b 0%, rgba(34, 197, 94, 0.05) 100%);
+        }
+
+        .edge-recommendation-card.bet-under {
+            border-color: #ef4444;
+            background: linear-gradient(180deg, #18181b 0%, rgba(239, 68, 68, 0.05) 100%);
+        }
+
+        .edge-recommendation-card.no-bet {
+            border-color: #71717a;
+            background: linear-gradient(180deg, #18181b 0%, rgba(113, 113, 122, 0.05) 100%);
+        }
+
+        .edge-rec-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .edge-recommendation-card.bet-over .edge-rec-title {
+            color: #22c55e;
+        }
+
+        .edge-recommendation-card.bet-under .edge-rec-title {
+            color: #ef4444;
+        }
+
+        .edge-recommendation-card.no-bet .edge-rec-title {
+            color: #71717a;
+        }
+
+        .edge-ev-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 1rem 0;
+        }
+
+        .edge-confidence-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .confidence-high {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .confidence-med {
+            background: rgba(234, 179, 8, 0.2);
+            color: #eab308;
+        }
+
+        .confidence-low {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .edge-metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+
+        .edge-metric-card {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            padding: 1rem;
+        }
+
+        .edge-metric-label {
+            font-size: 0.75rem;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .edge-metric-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #e4e4e7;
+        }
+
+        .edge-metric-value.positive {
+            color: #22c55e;
+        }
+
+        .edge-metric-value.negative {
+            color: #ef4444;
+        }
+
+        .edge-metric-detail {
+            font-size: 0.75rem;
+            color: #a1a1aa;
+            margin-top: 0.25rem;
+        }
+
+        .edge-chart-container {
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .edge-chart-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-align: center;
+            color: #e4e4e7;
+        }
+
+        .edge-chart-wrapper {
+            position: relative;
+            height: 300px;
+        }
+
+        .edge-comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.5rem;
+            background: #18181b;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .edge-comparison-table th,
+        .edge-comparison-table td {
+            padding: 0.875rem;
+            text-align: left;
+            border-bottom: 1px solid #27272a;
+        }
+
+        .edge-comparison-table th {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            background: #0a0a0a;
+        }
+
+        .edge-comparison-table td {
+            font-size: 0.875rem;
+            color: #e4e4e7;
+        }
+
+        .edge-comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .edge-comparison-table .positive {
+            color: #22c55e;
+            font-weight: 600;
+        }
+
+        .edge-comparison-table .negative {
+            color: #ef4444;
+            font-weight: 600;
+        }
+
+        .edge-section-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: #e4e4e7;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .edge-badge {
+            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
     </style>
 </head>
 <body>
@@ -749,7 +962,7 @@
     <div class="container">
         <div class="hero-section">
             <h1>VCT Kill Line Analytics</h1>
-            <p class="subtitle">Advanced statistical analysis for Valorant esports betting lines</p>
+            <p class="subtitle">Advanced statistical analysis with mathematical edge calculation • Enter odds to see EV analysis</p>
         </div>
         
         <div class="search-section">
@@ -763,12 +976,12 @@
                     <input type="number" id="killLine" step="0.5" value="15.5" placeholder="15.5" />
                 </div>
                 <div class="input-group">
-                    <label>Over Odds (e.g., +100, -200)</label>
-                    <input type="text" id="overOdds" placeholder="+100" />
+                    <label>Over Odds (optional - enables EV)</label>
+                    <input type="text" id="overOdds" placeholder="-110" />
                 </div>
                 <div class="input-group">
-                    <label>Under Odds (e.g., +100, -200)</label>
-                    <input type="text" id="underOdds" placeholder="+100" />
+                    <label>Under Odds (optional - enables EV)</label>
+                    <input type="text" id="underOdds" placeholder="-110" />
                 </div>
                 <button onclick="analyzePlayer()">Analyze Player</button>
             </div>
@@ -809,6 +1022,8 @@
             }
         }
         
+        let distributionChart = null;
+
         async function analyzePlayer() {
             const ign = document.getElementById('playerInput').value.trim();
             const killLine = document.getElementById('killLine').value;
@@ -842,7 +1057,26 @@
                     return;
                 }
                 
-                displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds, data.agent_stats, data.map_stats);
+                // Fetch edge analysis if odds are provided
+                let edgeData = null;
+                if (overOdds && underOdds) {
+                    try {
+                        const parsedOver = parseFloat(overOdds);
+                        const parsedUnder = parseFloat(underOdds);
+                        if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
+                            const edgeResponse = await fetch(
+                                `/api/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                            );
+                            if (edgeResponse.ok) {
+                                edgeData = await edgeResponse.json();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Edge analysis failed:', error);
+                    }
+                }
+                
+                displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds, data.agent_stats, data.map_stats, edgeData);
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
                 showError('Error connecting to server: ' + error.message);
@@ -853,7 +1087,7 @@
             return classification.toLowerCase().replace(/ /g, '-');
         }
         
-        function displayResults(analysis, rawEvents, elapsed, overOdds, underOdds, agentStats, mapStats) {
+        function displayResults(analysis, rawEvents, elapsed, overOdds, underOdds, agentStats, mapStats, edgeData = null) {
             const resultDiv = document.getElementById('result');
             
             if (analysis.error) {
@@ -1103,9 +1337,15 @@
                 
                 ${renderAgentStats(agentStats, analysis.kill_line)}
                 ${renderMapStats(mapStats, analysis.kill_line)}
+                ${renderEdgeAnalysis(edgeData, analysis.kill_line)}
             `;
             
             resultDiv.style.display = 'block';
+            
+            // Render distribution chart if edge data is available
+            if (edgeData && edgeData.visualization) {
+                setTimeout(() => renderDistributionChart(edgeData), 100);
+            }
         }
         
         function renderMarginStats(marginStats, killLine) {
@@ -1451,6 +1691,251 @@
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = message;
             errorDiv.style.display = 'block';
+        }
+        
+        function renderEdgeAnalysis(edgeData, killLine) {
+            if (!edgeData || !edgeData.success) {
+                return '';
+            }
+            
+            const recommended = edgeData.edge.recommended;
+            const confidence = edgeData.player.confidence;
+            
+            let recClass = 'no-bet';
+            if (recommended === 'OVER') recClass = 'bet-over';
+            else if (recommended === 'UNDER') recClass = 'bet-under';
+            
+            const evPct = recommended === 'OVER' ? edgeData.edge.roi_over_pct : edgeData.edge.roi_under_pct;
+            const bestEV = Math.max(edgeData.edge.ev_over, edgeData.edge.ev_under);
+            const bestSide = edgeData.edge.ev_over > edgeData.edge.ev_under ? 'OVER' : 'UNDER';
+            
+            const meanDiff = edgeData.model.mu - edgeData.market.mu_implied;
+            let interpretation = '';
+            if (Math.abs(meanDiff) < 0.5) {
+                interpretation = 'Model and market roughly agree on player performance';
+            } else if (meanDiff > 0) {
+                interpretation = 'Model is more bullish than market → OVER has better value';
+            } else {
+                interpretation = 'Model is less bullish than market → UNDER has better value';
+            }
+            
+            return `
+                <div class="edge-analysis-section">
+                    <div class="edge-section-header">
+                        <span style="font-size: 1.5rem;">📊</span>
+                        Mathematical Edge Analysis
+                        <span class="edge-badge">ADVANCED</span>
+                    </div>
+                    
+                    <div class="edge-recommendation-card ${recClass}">
+                        <div class="edge-rec-title">
+                            ${recommended === 'NO BET' ? 'NO BET RECOMMENDED' : `BET ${recommended}`}
+                        </div>
+                        <div class="edge-ev-display">
+                            ${evPct >= 0 ? '+' : ''}${evPct.toFixed(2)}% ROI
+                        </div>
+                        <span class="edge-confidence-badge confidence-${confidence.toLowerCase()}">
+                            ${confidence} CONFIDENCE
+                        </span>
+                        <p style="margin-top: 1rem; color: #a1a1aa; font-size: 0.875rem;">
+                            ${interpretation}
+                        </p>
+                    </div>
+                    
+                    <div class="edge-metrics-grid">
+                        <div class="edge-metric-card">
+                            <div class="edge-metric-label">Model Mean</div>
+                            <div class="edge-metric-value">${edgeData.model.mu.toFixed(1)}</div>
+                            <div class="edge-metric-detail">${edgeData.model.dist === 'poisson' ? 'Poisson' : 'Negative Binomial'}</div>
+                        </div>
+                        <div class="edge-metric-card">
+                            <div class="edge-metric-label">Market Mean</div>
+                            <div class="edge-metric-value">${edgeData.market.mu_implied.toFixed(1)}</div>
+                            <div class="edge-metric-detail">${edgeData.market.vig_percentage.toFixed(2)}% vig</div>
+                        </div>
+                        <div class="edge-metric-card">
+                            <div class="edge-metric-label">Sample Size</div>
+                            <div class="edge-metric-value">${edgeData.player.sample_size}</div>
+                            <div class="edge-metric-detail">maps analyzed</div>
+                        </div>
+                        <div class="edge-metric-card">
+                            <div class="edge-metric-label">Best EV</div>
+                            <div class="edge-metric-value ${bestEV >= 0 ? 'positive' : 'negative'}">
+                                ${bestEV >= 0 ? '+' : ''}${(bestEV * 100).toFixed(1)}%
+                            </div>
+                            <div class="edge-metric-detail">${bestSide}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="edge-chart-container">
+                        <div class="edge-chart-title">Kill Distribution: Model vs Market</div>
+                        <div class="edge-chart-wrapper">
+                            <canvas id="distributionChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <table class="edge-comparison-table">
+                        <thead>
+                            <tr>
+                                <th>Side</th>
+                                <th>Model P(Win)</th>
+                                <th>Market P(Win)</th>
+                                <th>Prob Edge</th>
+                                <th>EV per $1</th>
+                                <th>ROI %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>OVER</strong></td>
+                                <td>${(edgeData.model.p_over * 100).toFixed(2)}%</td>
+                                <td>${(edgeData.market.p_over_vigfree * 100).toFixed(2)}%</td>
+                                <td class="${edgeData.edge.prob_edge_over >= 0 ? 'positive' : 'negative'}">
+                                    ${edgeData.edge.prob_edge_over >= 0 ? '+' : ''}${(edgeData.edge.prob_edge_over * 100).toFixed(2)}%
+                                </td>
+                                <td class="${edgeData.edge.ev_over >= 0 ? 'positive' : 'negative'}">
+                                    $${edgeData.edge.ev_over.toFixed(4)}
+                                </td>
+                                <td class="${edgeData.edge.roi_over_pct >= 0 ? 'positive' : 'negative'}">
+                                    ${edgeData.edge.roi_over_pct >= 0 ? '+' : ''}${edgeData.edge.roi_over_pct.toFixed(2)}%
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>UNDER</strong></td>
+                                <td>${(edgeData.model.p_under * 100).toFixed(2)}%</td>
+                                <td>${(edgeData.market.p_under_vigfree * 100).toFixed(2)}%</td>
+                                <td class="${edgeData.edge.prob_edge_under >= 0 ? 'positive' : 'negative'}">
+                                    ${edgeData.edge.prob_edge_under >= 0 ? '+' : ''}${(edgeData.edge.prob_edge_under * 100).toFixed(2)}%
+                                </td>
+                                <td class="${edgeData.edge.ev_under >= 0 ? 'positive' : 'negative'}">
+                                    $${edgeData.edge.ev_under.toFixed(4)}
+                                </td>
+                                <td class="${edgeData.edge.roi_under_pct >= 0 ? 'positive' : 'negative'}">
+                                    ${edgeData.edge.roi_under_pct >= 0 ? '+' : ''}${edgeData.edge.roi_under_pct.toFixed(2)}%
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <div style="margin-top: 1rem; padding: 1rem; background: #0a0a0a; border-radius: 8px; border: 1px solid #27272a;">
+                        <div style="font-size: 0.75rem; color: #71717a; line-height: 1.6;">
+                            <strong style="color: #e4e4e7;">How to read:</strong> Probability Edge shows the difference between your model and the market. 
+                            Expected Value (EV) is the average profit per dollar bet. Positive EV = profitable long-term. 
+                            ROI is EV expressed as a percentage of your stake.
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderDistributionChart(edgeData) {
+            if (!edgeData || !edgeData.visualization) return;
+            
+            const ctx = document.getElementById('distributionChart');
+            if (!ctx) return;
+            
+            if (distributionChart) {
+                distributionChart.destroy();
+            }
+            
+            distributionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: edgeData.visualization.x,
+                    datasets: [
+                        {
+                            label: 'Your Model',
+                            data: edgeData.visualization.model_pmf,
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Market Implied',
+                            data: edgeData.visualization.market_pmf,
+                            borderColor: '#f97316',
+                            backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#e4e4e7',
+                                font: {
+                                    size: 12
+                                },
+                                padding: 15
+                            }
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#18181b',
+                            titleColor: '#e4e4e7',
+                            bodyColor: '#a1a1aa',
+                            borderColor: '#27272a',
+                            borderWidth: 1,
+                            padding: 12,
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + 
+                                           (context.parsed.y * 100).toFixed(2) + '%';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Kills',
+                                color: '#a1a1aa',
+                                font: {
+                                    size: 12
+                                }
+                            },
+                            grid: {
+                                color: '#27272a'
+                            },
+                            ticks: {
+                                color: '#a1a1aa'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Probability',
+                                color: '#a1a1aa',
+                                font: {
+                                    size: 12
+                                }
+                            },
+                            grid: {
+                                color: '#27272a'
+                            },
+                            ticks: {
+                                color: '#a1a1aa',
+                                callback: function(value) {
+                                    return (value * 100).toFixed(1) + '%';
+                                }
+                            }
+                        }
+                    },
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    }
+                }
+            });
         }
         
         // Allow Enter key to trigger search

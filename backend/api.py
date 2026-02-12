@@ -720,45 +720,85 @@ def get_prizepicks_leaderboard():
 @app.route('/api/prizepicks/leaderboard/upload', methods=['POST'])
 def upload_leaderboard_image():
     """
-    Upload a PrizePicks screenshot; OCR parses player names and lines, then ranks by hit probability.
+    Upload PrizePicks screenshot(s); OCR parses player names and lines, then ranks by hit probability.
+    
+    Query params (optional):
+        multi_engine: 'true' to use both pytesseract and easyocr (slower but more accurate)
+        no_preprocessing: 'true' to skip image enhancement (not recommended)
+    
+    Supports single or multiple file upload:
+        - Single: 'image' or 'file' field
+        - Multiple: 'images' or 'files' field (array)
     """
     try:
         try:
-            from scraper.image_parser import parse_prizepicks_image
+            from scraper.image_parser import parse_prizepicks_image, parse_prizepicks_images_batch
         except ImportError as ie:
             return jsonify({'error': f'OCR not available: {ie}. Install pytesseract + Tesseract (see https://github.com/UB-Mannheim/tesseract/wiki) or easyocr.'}), 500
 
-        if 'image' not in request.files and 'file' not in request.files:
-            return jsonify({'error': 'No image file provided'}), 400
-        f = request.files.get('image') or request.files.get('file')
-        if not f or f.filename == '':
-            return jsonify({'error': 'No image file selected'}), 400
-        image_bytes = f.read()
-        if len(image_bytes) < 100:
-            return jsonify({'error': 'File appears empty or too small'}), 400
-
-        projections = parse_prizepicks_image(image_bytes)
+        # Get optional parameters
+        multi_engine = request.args.get('multi_engine', 'false').lower() == 'true'
+        use_preprocessing = request.args.get('no_preprocessing', 'false').lower() != 'true'
+        
+        # Check for multiple files
+        files = request.files.getlist('images') or request.files.getlist('files')
+        
+        if not files:
+            # Single file mode
+            if 'image' not in request.files and 'file' not in request.files:
+                return jsonify({'error': 'No image file provided'}), 400
+            f = request.files.get('image') or request.files.get('file')
+            if not f or f.filename == '':
+                return jsonify({'error': 'No image file selected'}), 400
+            files = [f]
+        
+        # Read all images
+        image_bytes_list = []
+        for f in files:
+            img_bytes = f.read()
+            if len(img_bytes) < 100:
+                logger.warning(f"Skipping {f.filename}: file too small")
+                continue
+            image_bytes_list.append(img_bytes)
+        
+        if not image_bytes_list:
+            return jsonify({'error': 'No valid image files provided'}), 400
+        
+        # Parse images
+        if len(image_bytes_list) == 1:
+            projections = parse_prizepicks_image(image_bytes_list[0], use_preprocessing, multi_engine)
+        else:
+            projections = parse_prizepicks_images_batch(image_bytes_list, use_preprocessing, multi_engine)
+        
         if not projections:
             return jsonify({
                 'success': True,
                 'leaderboard': [],
-                'message': 'Could not parse any lines from the image. Ensure it shows PrizePicks MAPS 1-2 Kills cards.'
+                'images_processed': len(image_bytes_list),
+                'message': 'Could not parse any lines from the image(s). Ensure they show PrizePicks MAPS 1-2 Kills cards.'
             })
 
         results, skipped = _build_leaderboard_from_projections(projections)
         if results:
-            db.save_leaderboard_snapshot('upload', results, parsed_count=len(projections))
+            source = 'batch_upload' if len(image_bytes_list) > 1 else 'upload'
+            db.save_leaderboard_snapshot(source, results, parsed_count=len(projections))
         skip_msg = ''
         if skipped:
             skip_msg = f' {len(skipped)} skipped: ' + '; '.join(s[:50] for s in [f"{s['player_name']} ({s['reason']})" for s in skipped[:5]])
             if len(skipped) > 5:
                 skip_msg += f' ...'
+        
+        batch_info = f' from {len(image_bytes_list)} image(s)' if len(image_bytes_list) > 1 else ''
+        
         return jsonify({
             'success': True,
             'leaderboard': results,
             'skipped': skipped,
+            'images_processed': len(image_bytes_list),
             'parsed_count': len(projections),
-            'message': f'Parsed {len(projections)} lines from image; ranked {len(results)} with sufficient data. Saved to history.{skip_msg}'
+            'preprocessing_used': use_preprocessing,
+            'multi_engine_used': multi_engine,
+            'message': f'Parsed {len(projections)} lines{batch_info}; ranked {len(results)} with sufficient data. Saved to history.{skip_msg}'
         })
     except Exception as e:
         logger.error(f"Error processing leaderboard image: {e}", exc_info=True)

@@ -12,6 +12,10 @@ beautifulsoup4==4.12.2
 # Use pytesseract (lighter). Requires Tesseract binary: https://github.com/UB-Mannheim/tesseract/wiki
 pytesseract==0.3.10
 Pillow==10.2.0
+opencv-python-headless==4.8.1.78  # Image preprocessing for better OCR accuracy
+
+# Alternative OCR engine (heavier, optional)
+# easyocr==1.7.0  # Uncomment for multi-engine OCR (better accuracy, ~2GB install)
 
 # Data processing (required for mathematical backtesting)
 numpy==1.26.2

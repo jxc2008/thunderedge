@@ -72,7 +72,17 @@ To repopulate only Americas & EMEA:
 python repopulate_americas_emea.py
 ```
 
-### 3. Run the application
+### 3. PrizePicks screenshot upload (optional)
+
+Upload screenshots to parse Valorant kill lines. Uses Google Gemini 1.5 Flash (affordable, ~$0.0001/image):
+
+```bash
+# Get a free API key at https://aistudio.google.com/apikey
+export GOOGLE_API_KEY=your_key_here
+# Or on Windows: set GOOGLE_API_KEY=your_key_here
+```
+
+### 4. Run the application
 
 ```bash
 python run.py
@@ -165,6 +175,7 @@ In `config.py`:
 
 - `CALCULATION_EXPLANATION.md` – Team fights/round and pick/ban logic.
 - `GITHUB_SETUP.md` – GitHub setup notes.
+- `docs/MONEYLINE_STRATEGY_SPEC.md` – Deployable pre-match moneyline strategy (Americas+China, p_fair≥0.55).
 
 ## Important Notes
 

@@ -1,13 +1,16 @@
 # backend/api.py
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
+import re
 import sys
 import os
+import time
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scraper.vlr_scraper import VLRScraper
+from scraper.rib_scraper import RibScraper
 from scraper.player_processor import PlayerProcessor
 from scraper.prizepicks_processor import PrizePicksProcessor
 from scraper.prizepicks_api import fetch_valorant_projections
@@ -30,12 +33,14 @@ logger = logging.getLogger(__name__)
 
 # Initialize components
 db = Database(Config.DATABASE_PATH)
-scraper = VLRScraper(database=db)  # Inject database for caching
+scraper = VLRScraper(database=db)        # Used for team analysis, KPR analysis, moneylines
+pp_scraper = RibScraper(database=db)     # Used for PrizePicks leaderboard (rib.gg doesn't IP-ban)
 team_scraper = TeamScraper(database=db)
 
 # Add request logging middleware (after logger is initialized)
 @app.before_request
 def log_request_info():
+    print(f">>> {request.method} {request.path}", flush=True)
     logger.info(f"REQUEST: {request.method} {request.path}")
     if request.args:
         logger.info(f"Query params: {request.args}")
@@ -48,10 +53,25 @@ def log_response_info(response):
 # Add error handler for 404 to debug (must be after routes are defined)
 
 
+@app.route('/api/health')
+def health():
+    """Quick health check - if you see '>>> GET /api/health' in terminal, server is receiving requests."""
+    return jsonify({'ok': True, 'message': 'Server is running'})
+
 @app.route('/')
 def index():
     """Serve the frontend"""
     return send_from_directory('../frontend/templates', 'index.html')
+
+@app.route('/challengers')
+def challengers_page():
+    """Challengers player analysis page"""
+    return send_from_directory('../frontend/templates', 'challengers.html')
+
+@app.route('/challengers/prizepicks')
+def challengers_prizepicks_page():
+    """Challengers PrizePicks page"""
+    return send_from_directory('../frontend/templates', 'challengers-prizepicks.html')
 
 @app.route('/api/player/<ign>', methods=['GET'])
 def get_player_analysis(ign):
@@ -125,6 +145,200 @@ def batch_analysis():
         return jsonify({'results': results})
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== Challengers (Tier 2) API ====================
+
+@app.route('/api/challengers/player/<ign>', methods=['GET'])
+def get_challengers_player_analysis(ign):
+    """Get KPR analysis for a Challengers player (tier 2, database only)"""
+    try:
+        kill_line = float(request.args.get('line', Config.DEFAULT_KILL_LINE))
+        processor = PlayerProcessor(kill_line=kill_line)
+        player_data = scraper.get_player_challengers_data(ign, kill_line=kill_line)
+        if not player_data or not player_data.get('ign'):
+            return jsonify({'error': 'Player not found or no Challengers data'}), 404
+        analysis = processor.evaluate_betting_line(player_data)
+        agent_stats = db.get_player_agent_aggregation(ign, tier=2)
+        map_stats = db.get_player_map_aggregation(ign, tier=2)
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'agent_stats': agent_stats,
+            'map_stats': map_stats,
+            'player_info': {
+                'ign': player_data['ign'],
+                'team': player_data.get('team', 'Unknown'),
+                'events_count': len(player_data.get('events', []))
+            },
+            'raw_events': player_data.get('events', [])[:5]
+        })
+    except Exception as e:
+        logger.error(f"Error processing Challengers player {ign}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/challengers/edge/<ign>', methods=['GET'])
+def get_challengers_edge_analysis(ign):
+    """Mathematical edge analysis for Challengers player"""
+    try:
+        line = float(request.args.get('line', 18.5))
+        over_odds = float(request.args.get('over_odds', -110))
+        under_odds = float(request.args.get('under_odds', -110))
+        player_data = scraper.get_player_challengers_data(ign, kill_line=line)
+        if not player_data or not player_data.get('all_map_kills'):
+            return jsonify({'error': 'Player not found or insufficient Challengers data'}), 404
+        all_map_kills = player_data['all_map_kills']
+        if len(all_map_kills) < 5:
+            return jsonify({'error': f'Insufficient data ({len(all_map_kills)} maps)'}), 400
+        dist_params = compute_distribution_params(all_map_kills)
+        model_probs = compute_prop_probabilities(dist_params, line)
+        market_params = compute_market_parameters(
+            line=line, over_odds=over_odds, under_odds=under_odds,
+            model_dist_type=dist_params['dist'], model_dispersion=dist_params.get('k'))
+        p_over_model = model_probs['p_over']
+        p_under_model = model_probs['p_under']
+        p_over_market = market_params['p_over_vigfree']
+        p_under_market = market_params['p_under_vigfree']
+        prob_edge_over = p_over_model - p_over_market
+        prob_edge_under = p_under_model - p_under_market
+        ev_over = expected_value_per_1(p_over_model, over_odds)
+        ev_under = expected_value_per_1(p_under_model, under_odds)
+        recommended = 'OVER' if (ev_over > 0 and ev_over >= ev_under) else ('UNDER' if ev_under > 0 else 'NO BET')
+        best_ev = max(ev_over, ev_under)
+        mu = dist_params['mu']
+        var = dist_params.get('var', 0)
+        model_pmf = generate_pmf(dist_params, (max(0, int(mu - 15)), int(mu + 15)))
+        market_dist_params = {'dist': dist_params['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
+        if dist_params['dist'] == 'nbinom':
+            k = dist_params.get('k', 1.0)
+            market_dist_params['k'] = k
+            market_dist_params['p'] = k / (k + market_params['mu_market'])
+        market_pmf = generate_pmf(market_dist_params, (max(0, int(mu - 15)), int(mu + 15)))
+        return jsonify({
+            'success': True,
+            'scope': 'challengers',
+            'player': {'ign': player_data['ign'], 'sample_size': len(all_map_kills), 'confidence': dist_params.get('confidence', '')},
+            'line': line,
+            'model': {'dist': dist_params['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
+            'market': {
+                'over_odds': over_odds, 'under_odds': under_odds,
+                'p_over_vigfree': p_over_market, 'p_under_vigfree': p_under_market,
+                'vig_percentage': market_params.get('vig_percentage', 0),
+                'mu_implied': market_params.get('mu_market', mu)
+            },
+            'edge': {
+                'prob_edge_over': prob_edge_over, 'prob_edge_under': prob_edge_under,
+                'ev_over': ev_over, 'ev_under': ev_under,
+                'recommended': recommended, 'best_ev': best_ev,
+                'roi_over_pct': ev_over * 100, 'roi_under_pct': ev_under * 100
+            },
+            'visualization': {
+                'x': model_pmf['x'], 'model_pmf': model_pmf['pmf'],
+                'market_pmf': market_pmf['pmf'], 'line_position': line
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in Challengers edge analysis for {ign}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/challengers/prizepicks/<ign>', methods=['GET'])
+def get_challengers_prizepicks_analysis(ign):
+    """PrizePicks analysis for Challengers player"""
+    try:
+        kill_line = float(request.args.get('line', 30.5))
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
+        processor = PrizePicksProcessor(kill_line=kill_line, combo_maps=combo_maps)
+        player_data = pp_scraper.get_player_prizepicks_data_challengers(ign, kill_line=kill_line)
+        if not player_data or not player_data.get('ign'):
+            return jsonify({'error': 'Player not found or no Challengers data'}), 404
+        analysis = processor.evaluate_prizepicks_line(player_data)
+        return jsonify({
+            'success': True,
+            'analysis': analysis,
+            'player_info': {
+                'ign': player_data['ign'],
+                'team': player_data.get('team', 'Unknown'),
+                'matches_count': len(player_data.get('match_combinations', []))
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error processing Challengers PrizePicks for {ign}: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/challengers/prizepicks/edge/<ign>', methods=['GET'])
+def get_challengers_prizepicks_edge(ign):
+    """PrizePicks edge analysis for Challengers player"""
+    try:
+        line = float(request.args.get('line', 30.5))
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
+        over_odds = float(request.args.get('over_odds', -110))
+        under_odds = float(request.args.get('under_odds', -110))
+        player_data = pp_scraper.get_player_prizepicks_data_challengers(ign, kill_line=line)
+        if not player_data or not player_data.get('ign'):
+            return jsonify({'error': 'Player not found'}), 404
+        pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
+        combo_samples = db.get_cached_combo_samples_challengers(ign, combo_maps=combo_maps)
+        if combo_samples is None:
+            combo_samples = []
+            for match_data in player_data.get('match_combinations', []):
+                map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+                if len(map_kills) < 2:
+                    continue
+                combos = pp_processor.process_match_combinations(map_kills)
+                combo_samples.extend([c['combined_kills'] for c in combos])
+            if combo_samples:
+                db.save_combo_cache_challengers(ign, combo_samples, combo_maps=combo_maps)
+        if len(combo_samples) < 3:
+            return jsonify({'error': f'Insufficient {combo_maps}-map combo samples'}), 400
+        dist_params = compute_distribution_params(combo_samples)
+        model_probs = compute_prop_probabilities(dist_params, line)
+        market_params = compute_market_parameters(
+            line=line, over_odds=over_odds, under_odds=under_odds,
+            model_dist_type=dist_params['dist'], model_dispersion=dist_params.get('k'))
+        p_over_model = model_probs['p_over']
+        p_under_model = model_probs['p_under']
+        p_over_market = market_params['p_over_vigfree']
+        p_under_market = market_params['p_under_vigfree']
+        ev_over = expected_value_per_1(p_over_model, over_odds)
+        ev_under = expected_value_per_1(p_under_model, under_odds)
+        recommended = 'OVER' if (ev_over > 0 and ev_over >= ev_under) else ('UNDER' if ev_under > 0 else 'NO BET')
+        prob_edge_over = p_over_model - p_over_market
+        prob_edge_under = p_under_model - p_under_market
+        mu = dist_params['mu']
+        var = dist_params.get('var', 0)
+        model_pmf = generate_pmf(dist_params, (max(0, int(mu - 25)), int(mu + 25)))
+        market_dist_params = {'dist': dist_params['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
+        if dist_params['dist'] == 'nbinom':
+            k = dist_params.get('k', 1.0)
+            market_dist_params['k'] = k
+            market_dist_params['p'] = k / (k + market_params['mu_market'])
+        market_pmf = generate_pmf(market_dist_params, (max(0, int(mu - 25)), int(mu + 25)))
+        return jsonify({
+            'success': True,
+            'scope': 'challengers_prizepicks',
+            'player': {'ign': player_data['ign'], 'sample_size': len(combo_samples)},
+            'line': line,
+            'model': {'dist': dist_params['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
+            'market': {
+                'over_odds': over_odds, 'under_odds': under_odds,
+                'p_over_vigfree': p_over_market, 'p_under_vigfree': p_under_market,
+                'mu_implied': market_params.get('mu_market', mu)
+            },
+            'edge': {
+                'prob_edge_over': prob_edge_over, 'prob_edge_under': prob_edge_under,
+                'ev_over': ev_over, 'ev_under': ev_under,
+                'recommended': recommended,
+                'roi_over_pct': ev_over * 100, 'roi_under_pct': ev_under * 100
+            },
+            'visualization': {
+                'x': model_pmf['x'], 'model_pmf': model_pmf['pmf'],
+                'market_pmf': market_pmf['pmf'], 'line_position': line
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in Challengers PrizePicks edge for {ign}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/edge/<ign>', methods=['GET'])
@@ -286,6 +500,77 @@ def get_cache_status():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/cache/prizepicks/clear', methods=['POST'])
+def clear_prizepicks_cache():
+    """Clear PrizePicks player/combo caches so fresh 2026 data is fetched on next upload."""
+    try:
+        challengers_only = request.json.get('challengers_only', False) if request.is_json else False
+        counts = db.clear_prizepicks_cache(challengers_only=challengers_only)
+        return jsonify({'success': True, 'cleared': counts})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/moneylines')
+def moneylines_page():
+    """Serve the MoneyLine strategy page"""
+    return send_from_directory('../frontend/templates', 'moneylines.html')
+
+@app.route('/api/moneylines/stats', methods=['GET'])
+def get_moneylines_stats():
+    """Get moneyline strategy statistics (heavy/moderate/even favorite win rates)"""
+    try:
+        stats = db.get_moneyline_stats()
+        return jsonify({'success': True, **stats})
+    except Exception as e:
+        logger.error(f"Error getting moneyline stats: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/moneylines/strategy', methods=['GET'])
+def get_moneylines_strategy():
+    """Get full strategy data (walk-forward, bet log, consistency check, etc.)"""
+    try:
+        from scripts.moneyline_analytics import get_strategy_data
+        data = get_strategy_data()
+        if data is None:
+            return jsonify({'success': False, 'message': 'No moneyline data. Run: python scripts/populate_moneyline.py'}), 404
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting strategy data: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/moneylines/upcoming', methods=['GET'])
+def get_moneylines_upcoming():
+    """Scrape VLR for upcoming Americas+China matches, fetch Thunderpick odds, run strategy."""
+    try:
+        from scripts.moneyline_analytics import get_upcoming_picks
+        data = get_upcoming_picks()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting upcoming picks: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e), 'picks': []}), 500
+
+@app.route('/api/match/odds', methods=['GET'])
+def get_match_odds():
+    """
+    Scrape Thunderpick pre-match odds from a VLR match page.
+    Query param: match_path - VLR match path (e.g. /596427/mibr-vs-nrg-vct-2026-americas-kickoff-lbf)
+    """
+    try:
+        match_path = request.args.get('match_path', '').strip()
+        if not match_path:
+            return jsonify({'error': 'match_path required (e.g. /596427/mibr-vs-nrg-vct-2026-americas-kickoff-lbf)'}), 400
+        if not match_path.startswith('/'):
+            match_path = '/' + match_path
+        odds = scraper.get_match_betting_odds(match_path)
+        if not odds:
+            return jsonify({'success': False, 'message': 'No Thunderpick odds found for this match'}), 404
+        return jsonify({'success': True, **odds})
+    except Exception as e:
+        logger.error(f"Error fetching match odds: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/team')
 def team_page():
     """Serve the team analysis page"""
@@ -361,7 +646,7 @@ def get_prizepicks_analysis(ign):
         logger.info(f"Scraping PrizePicks data for player: {ign} with kill line: {kill_line}")
         
         # Scrape match-level data from VLR.gg
-        player_data = scraper.get_player_prizepicks_data(ign, kill_line=kill_line)
+        player_data = pp_scraper.get_player_prizepicks_data(ign, kill_line=kill_line)
         
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found'}), 404
@@ -399,7 +684,7 @@ def get_prizepicks_edge_analysis(ign):
 
         logger.info(f"PrizePicks edge analysis for {ign}: line={line}, combo_maps={combo_maps}")
 
-        player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
+        player_data = pp_scraper.get_player_prizepicks_data(ign, kill_line=line)
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found'}), 404
 
@@ -534,6 +819,9 @@ def get_prizepicks_parlay_analysis():
         payout_map = {2: 3.0, 3: 6.0, 4: 10.0, 5: 20.0, 6: 37.5}
         payout_multiplier = payout_map[len(legs)]
 
+        use_challengers = payload.get('challengers', False)
+        get_data_fn = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
+
         leg_results = []
         parlay_hit_prob = 1.0
 
@@ -549,7 +837,7 @@ def get_prizepicks_parlay_analysis():
             if line <= 0:
                 return jsonify({'error': f'Leg {i+1}: line must be positive'}), 400
 
-            player_data = scraper.get_player_prizepicks_data(ign, kill_line=line)
+            player_data = get_data_fn(ign, kill_line=line)
             if not player_data or not player_data.get('ign'):
                 return jsonify({'error': f'Leg {i+1}: player not found ({ign})'}), 404
 
@@ -608,23 +896,39 @@ def get_prizepicks_parlay_analysis():
         return jsonify({'error': str(e)}), 500
 
 
-def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2) -> tuple:
+def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, use_challengers: bool = False) -> tuple:
     """Shared logic: take list of {player_name, line}, fetch VLR data (or use cache), compute ranks.
-    combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)"""
+    combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)
+    use_challengers: if True, use Challengers (tier 2) stats only"""
     player_cache = {}
     results = []
     skipped = []
-    for proj in projections:
+    # Use RibScraper (rib.gg) for live data — not IP-banned like VLR.gg
+    get_data = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
+    get_cache = db.get_cached_player_data_challengers if use_challengers else db.get_cached_player_data
+    save_cache = db.save_player_data_cache_challengers if use_challengers else db.save_player_data_cache
+    get_combo = db.get_cached_combo_samples_challengers if use_challengers else db.get_cached_combo_samples
+    save_combo = db.save_combo_cache_challengers if use_challengers else db.save_combo_cache
+    n_total = len(projections)
+    for idx, proj in enumerate(projections):
+        if (idx + 1) % 10 == 0 or idx == 0:
+            print(f"[UPLOAD] Progress: {idx + 1}/{n_total} players...", flush=True)
         pp_name = proj.get('player_name', '').strip()
+        # Normalize OCR artifacts before VLR lookup (strip trailing dots, ellipsis)
+        if pp_name and not pp_name.startswith('Unknown_'):
+            pp_name = re.sub(r'\.{2,}$|…+$', '', pp_name).strip('.\t ')
         line = proj.get('line')
         if not pp_name or line is None:
             continue
         if pp_name not in player_cache:
-            player_data = db.get_cached_player_data(pp_name)
+            player_data = get_cache(pp_name)
             if not player_data:
-                player_data = scraper.get_player_prizepicks_data(pp_name, kill_line=line)
+                # Pace VLR requests: 2s between live fetches to avoid rate limiting
+                if idx > 0:
+                    time.sleep(2.0)
+                player_data = get_data(pp_name, kill_line=line)
                 if player_data:
-                    db.save_player_data_cache(pp_name, player_data)
+                    save_cache(pp_name, player_data)
             player_cache[pp_name] = player_data
         else:
             player_data = player_cache[pp_name]
@@ -632,7 +936,7 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2) 
             skipped.append({'player_name': pp_name, 'line': line, 'reason': 'Player not found on VLR'})
             continue
         pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
-        combo_samples = db.get_cached_combo_samples(pp_name, combo_maps=combo_maps)
+        combo_samples = get_combo(pp_name, combo_maps=combo_maps)
         if combo_samples is None:
             combo_samples = []
             for match_data in player_data.get('match_combinations', []):
@@ -642,7 +946,7 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2) 
                 combos = pp_processor.process_match_combinations(map_kills)
                 combo_samples.extend([c['combined_kills'] for c in combos])
             if combo_samples:
-                db.save_combo_cache(pp_name, combo_samples, combo_maps=combo_maps)
+                save_combo(pp_name, combo_samples, combo_maps=combo_maps)
         if len(combo_samples) < 3:
             skipped.append({'player_name': pp_name, 'line': line, 'reason': f'Insufficient data ({len(combo_samples)} combo samples)'})
             continue
@@ -667,6 +971,7 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2) 
     results.sort(key=lambda x: x['p_hit'], reverse=True)
     for i, r in enumerate(results, 1):
         r['rank'] = i
+    print(f"[UPLOAD] Done: {len(results)} ranked, {len(skipped)} skipped", flush=True)
     return results, skipped
 
 
@@ -710,28 +1015,69 @@ def get_prizepicks_leaderboard():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/challengers/prizepicks/leaderboard', methods=['GET'])
+def get_challengers_prizepicks_leaderboard():
+    """Fetch PrizePicks Valorant lines and rank by Challengers hit probability"""
+    try:
+        try:
+            projections = fetch_valorant_projections(stat_filter=['kill'])
+        except Exception as fetch_err:
+            status = getattr(getattr(fetch_err, 'response', None), 'status_code', None)
+            if status == 403:
+                return jsonify({
+                    'success': True, 'leaderboard': [],
+                    'message': 'PrizePicks API blocking. Try VPN or enter lines manually.'
+                })
+            raise
+        if not projections:
+            return jsonify({
+                'success': True, 'leaderboard': [],
+                'message': 'No Valorant kill lines from PrizePicks.'
+            })
+        results, skipped = _build_leaderboard_from_projections(projections, use_challengers=True)
+        if results:
+            db.save_leaderboard_snapshot('challengers_api', results, parsed_count=len(projections))
+        return jsonify({
+            'success': True,
+            'leaderboard': results,
+            'skipped': skipped,
+            'fetched_at': projections[0].get('description', '') if projections else '',
+        })
+    except Exception as e:
+        logger.error(f"Error building Challengers leaderboard: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/prizepicks/leaderboard/upload', methods=['POST'])
 def upload_leaderboard_image():
     """
-    Upload PrizePicks screenshot(s); OCR parses player names and lines, then ranks by hit probability.
+    Upload PrizePicks screenshot(s); Gemini vision parses player names and lines, then ranks by hit probability.
     
     Query params (optional):
-        multi_engine: 'true' to use both pytesseract and easyocr (slower but more accurate)
-        no_preprocessing: 'true' to skip image enhancement (not recommended)
+        combo_maps: 2 (Bo3) or 3 (Bo5) to override auto-detection
+    
+    Requires GOOGLE_API_KEY or GEMINI_API_KEY (free at https://aistudio.google.com/apikey)
     
     Supports single or multiple file upload:
         - Single: 'image' or 'file' field
         - Multiple: 'images' or 'files' field (array)
     """
     try:
+        print("[UPLOAD] Screenshot upload received", flush=True)
         try:
-            from scraper.image_parser import parse_prizepicks_image, parse_prizepicks_images_batch
+            from scraper.vision_parser import parse_prizepicks_image_vision, parse_prizepicks_images_batch_vision
         except ImportError as ie:
-            return jsonify({'error': f'OCR not available: {ie}. Install pytesseract + Tesseract (see https://github.com/UB-Mannheim/tesseract/wiki) or easyocr.'}), 500
+            return jsonify({
+                'error': f'Vision parser not available: {ie}. Install: pip install google-generativeai. Set GOOGLE_API_KEY (free at https://aistudio.google.com/apikey)'
+            }), 500
 
-        # Get optional parameters
-        multi_engine = request.args.get('multi_engine', 'false').lower() == 'true'
-        use_preprocessing = request.args.get('no_preprocessing', 'false').lower() != 'true'
+        # Manual override: combo_maps=2 (Bo3) or combo_maps=3 (Bo5)
+        combo_maps_override = request.args.get('combo_maps', '').strip()
+        if combo_maps_override in ('2', '3'):
+            combo_maps_override = int(combo_maps_override)
+        else:
+            combo_maps_override = None
+        use_challengers = request.args.get('challengers', 'false').lower() == 'true'
         
         # Check for multiple files
         files = request.files.getlist('images') or request.files.getlist('files')
@@ -757,23 +1103,32 @@ def upload_leaderboard_image():
         if not image_bytes_list:
             return jsonify({'error': 'No valid image files provided'}), 400
         
-        # Parse images (returns projections + detected combo_maps from MAPS 1-2 vs MAPS 1-3)
+        # Parse images with Gemini vision
+        print(f"[UPLOAD] Running vision on {len(image_bytes_list)} image(s)...", flush=True)
         if len(image_bytes_list) == 1:
-            projections, combo_maps = parse_prizepicks_image(image_bytes_list[0], use_preprocessing, multi_engine)
+            projections, combo_maps = parse_prizepicks_image_vision(image_bytes_list[0])
         else:
-            projections, combo_maps = parse_prizepicks_images_batch(image_bytes_list, use_preprocessing, multi_engine)
+            projections, combo_maps = parse_prizepicks_images_batch_vision(image_bytes_list)
+        if combo_maps_override is not None:
+            combo_maps = combo_maps_override
+            print(f"[UPLOAD] Vision done: {len(projections)} lines; using manual combo_maps={combo_maps}", flush=True)
+        else:
+            print(f"[UPLOAD] Vision done: {len(projections)} lines, combo_maps={combo_maps} (auto-detected)", flush=True)
         
         if not projections:
             return jsonify({
                 'success': True,
                 'leaderboard': [],
                 'images_processed': len(image_bytes_list),
-                'message': 'Could not parse any lines from the image(s). Ensure they show PrizePicks MAPS 1-2 or MAPS 1-3 Kills cards.'
+                'message': 'Could not parse any lines from the image(s). Ensure they show PrizePicks Valorant kill cards (MAPS 1-2 or MAPS 1-3 Kills).'
             })
 
-        results, skipped = _build_leaderboard_from_projections(projections, combo_maps=combo_maps)
+        print(f"[UPLOAD] Building leaderboard for {len(projections)} players (VLR lookups - may take a minute)...", flush=True)
+        results, skipped = _build_leaderboard_from_projections(projections, combo_maps=combo_maps, use_challengers=use_challengers)
+        print(f"[UPLOAD] Done: {len(results)} ranked, {len(skipped)} skipped", flush=True)
         if results:
-            source = 'batch_upload' if len(image_bytes_list) > 1 else 'upload'
+            base = 'challengers_' if use_challengers else ''
+            source = base + ('batch_upload' if len(image_bytes_list) > 1 else 'upload')
             db.save_leaderboard_snapshot(source, results, parsed_count=len(projections))
         
         # Include skipped entries in leaderboard with N/A values so user can see all detected lines
@@ -813,8 +1168,6 @@ def upload_leaderboard_image():
             'combo_maps': combo_maps,
             'images_processed': len(image_bytes_list),
             'parsed_count': len(projections),
-            'preprocessing_used': use_preprocessing,
-            'multi_engine_used': multi_engine,
             'message': f'Parsed {len(projections)} lines ({combo_label}){batch_info}; ranked {len(results)} with sufficient data. All {len(combined_leaderboard)} shown.' + (f' {skip_msg}' if skip_msg else '')
         })
     except Exception as e:
@@ -824,11 +1177,13 @@ def upload_leaderboard_image():
 
 @app.route('/api/prizepicks/leaderboard/history', methods=['GET'])
 def get_leaderboard_history():
-    """List recent leaderboard snapshots."""
+    """List recent leaderboard snapshots. ?challengers=true filters to Challengers snapshots."""
     try:
         limit = int(request.args.get('limit', 50))
         limit = min(limit, 200)
         snapshots = db.get_leaderboard_snapshots(limit=limit)
+        if request.args.get('challengers', 'false').lower() == 'true':
+            snapshots = [s for s in snapshots if s.get('source', '').startswith('challengers')]
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
         logger.error(f"Error getting leaderboard history: {e}", exc_info=True)

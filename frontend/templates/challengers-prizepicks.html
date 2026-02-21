@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ThunderEdge | PrizePicks Kill Line Analytics</title>
+    <title>ThunderEdge | Challengers PrizePicks Analytics</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -672,8 +672,8 @@
                 <a href="/">VCT Player</a>
                 <a href="/challengers">Challengers</a>
                 <a href="/team">Team</a>
-                <a href="/prizepicks" style="color: #ffffff; background: #18181b;">PrizePicks</a>
-                <a href="/challengers/prizepicks">Challengers PP</a>
+                <a href="/prizepicks">PrizePicks</a>
+                <a href="/challengers/prizepicks" style="color: #ffffff; background: #18181b;">Challengers PP</a>
                 <a href="/moneylines">MoneyLine</a>
             </nav>
         </div>
@@ -681,8 +681,8 @@
 
     <div class="container">
         <div class="hero-section">
-            <h1>PrizePicks Kill Line Analytics</h1>
-            <p class="subtitle">Analyze combined kills for Maps 1 & 2 (or all 2-map combinations)</p>
+            <h1>Challengers PrizePicks Analytics</h1>
+            <p class="subtitle">PrizePicks analysis using Challengers (tier 2) stats only. Populate with <code>python scripts/populate_challengers.py</code></p>
         </div>
 
         <div class="search-section">
@@ -712,7 +712,7 @@
                 <p id="leaderboardProgressPct" style="color:#a1a1aa; font-size:0.875rem; margin-top:0.5rem; font-weight:600;">0%</p>
             </div>
             <div id="leaderboardResult" style="min-height: 80px;">
-                <p style="color:#71717a; font-size:0.875rem;">Click "Refresh Leaderboard" to load today's PrizePicks Valorant lines ranked by hit probability.</p>
+                <p style="color:#71717a; font-size:0.875rem;">Click "Refresh Leaderboard" to load PrizePicks lines ranked by Challengers hit probability.</p>
             </div>
             <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #27272a;">
                 <button type="button" onclick="loadLeaderboardHistory()" style="background:#27272a; font-size:0.875rem;">View History</button>
@@ -914,7 +914,7 @@
 
             const comboEl = document.getElementById('uploadComboMaps');
             const comboVal = comboEl ? comboEl.value : '';
-            const url = comboVal ? '/api/prizepicks/leaderboard/upload?combo_maps=' + encodeURIComponent(comboVal) : '/api/prizepicks/leaderboard/upload';
+            const url = '/api/prizepicks/leaderboard/upload?challengers=true' + (comboVal ? '&combo_maps=' + encodeURIComponent(comboVal) : '');
             xhr.open('POST', url, true);
 
             xhr.send(formData);
@@ -1002,7 +1002,7 @@
             if (btn) btn.disabled = true;
 
             try {
-                const resp = await fetch('/api/prizepicks/leaderboard');
+                const resp = await fetch('/api/challengers/prizepicks/leaderboard');
                 const data = await resp.json();
 
                 if (!resp.ok || data.error) {
@@ -1030,7 +1030,7 @@
             histEl.style.display = 'block';
             histEl.innerHTML = '<p style="color:#71717a;">Loading...</p>';
             try {
-                const resp = await fetch('/api/prizepicks/leaderboard/history?limit=30');
+                const resp = await fetch('/api/prizepicks/leaderboard/history?limit=30&challengers=true');
                 const data = await resp.json();
                 if (!data.success || !data.snapshots?.length) {
                     histEl.innerHTML = '<p style="color:#71717a;">No history yet. Upload or refresh a leaderboard first.</p>';
@@ -1109,7 +1109,7 @@
                 const resp = await fetch('/api/prizepicks/parlay', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ legs, combo_maps: comboMaps })
+                    body: JSON.stringify({ legs, combo_maps: comboMaps, challengers: true })
                 });
                 const data = await resp.json();
                 if (!resp.ok || data.error) {
@@ -1198,7 +1198,7 @@
             
             try {
                 const startTime = performance.now();
-                const response = await fetch(`/api/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}`);
+                const response = await fetch(`/api/challengers/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
                 
@@ -1217,7 +1217,7 @@
                     if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
                         try {
                             const edgeResponse = await fetch(
-                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                                `/api/challengers/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
                             );
                             if (edgeResponse.ok) {
                                 edgeData = await edgeResponse.json();

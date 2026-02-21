@@ -2,6 +2,13 @@
 import os
 from datetime import timedelta
 
+# Load .env for GOOGLE_API_KEY (PrizePicks vision parsing)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Force-disable proxy environment variables.
 # This project scrapes VLR.gg and proxy env vars frequently break requests on Windows
 # (e.g. misconfigured HTTP(S)_PROXY pointing to 127.0.0.1:9).
@@ -42,9 +49,7 @@ class Config:
     # Cache settings
     CACHE_DURATION = timedelta(hours=6)
     
-    # OCR: Team name fragments to never treat as player IGNs.
-    # Add any team names (or fragments) that OCR might misread as player names.
-    # VLR-scraped teams from 2026 Kickoff are merged at runtime (see image_parser).
+    # (Legacy - was used by OCR) Team name fragments - kept for reference
     OCR_TEAM_BLACKLIST = frozenset([
         # Pacific/Asia
         'rex', 'regum', 'qeon', 'nongshim', 'redforce', 'gentle', 'mates',
@@ -54,8 +59,12 @@ class Config:
         'liquid', 'sentinels', 'loud', 'optic', 'leviatan', 'cloud9', 'c9',
         'furia', 'academy', 'heretics', 'mibr', '100t', 'nrg', 'eg',
         'evi', 'complexity', 'col', 'g2', 'kru',
-        # EMEA
-        'fnatic', 'vitality', 'karmine', 'koi', 'g2', 'navi', 'fpx',
+        # Challengers / common OCR mixups (team names mistaken for players)
+        'sleepers', '9z', 'sorex', 'solada', 'tonza',
+        # EMEA / team fragments OCR often picks up
+        'fnatic', 'vitality', 'karmine', 'karmi', 'koi', 'g2', 'navi', 'fpx', 'natus', 'vincere',
+        # UI / date labels OCR misreads as player names
+        'today', 'tomorrow', 'yesterday',
         # UI labels
         'player', 'team', 'line', 'best', 'samples', 'prob', 'hit',
         'maps', 'kills', 'vs', 'am', 'pm', 'over', 'under',

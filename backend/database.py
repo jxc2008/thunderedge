@@ -33,7 +33,7 @@ class Database:
             )
         ''')
         
-        # VCT Events table (the event itself, not player-specific)
+        # VCT Events table (tier 1=VCT, tier 2=Challengers)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vct_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,9 +43,16 @@ class Database:
                 year INTEGER,
                 status TEXT DEFAULT 'completed',
                 last_scraped TIMESTAMP,
-                total_matches INTEGER DEFAULT 0
+                total_matches INTEGER DEFAULT 0,
+                tier INTEGER DEFAULT 1
             )
         ''')
+        # Migration: add tier column if missing
+        cursor.execute("PRAGMA table_info(vct_events)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if 'tier' not in cols:
+            cursor.execute('ALTER TABLE vct_events ADD COLUMN tier INTEGER DEFAULT 1')
+            cursor.execute('UPDATE vct_events SET tier = 1 WHERE tier IS NULL')
         
         # Matches table
         cursor.execute('''
@@ -147,6 +154,25 @@ class Database:
             )
         ''')
         
+        # Moneyline: match odds + result for strategy analysis (VCT 2024+)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS moneyline_matches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_url TEXT UNIQUE NOT NULL,
+                event_name TEXT,
+                event_url TEXT,
+                team1 TEXT NOT NULL,
+                team2 TEXT NOT NULL,
+                team1_odds REAL,
+                team2_odds REAL,
+                winner TEXT,
+                team1_maps INTEGER DEFAULT 0,
+                team2_maps INTEGER DEFAULT 0,
+                match_date TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Analysis results table (for caching)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS analysis_results (
@@ -200,6 +226,16 @@ class Database:
                 PRIMARY KEY (player_name, combo_maps)
             )
         ''')
+        # Challengers combo cache (tier 2)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_combo_cache_challengers (
+                player_name TEXT NOT NULL,
+                combo_maps INTEGER NOT NULL DEFAULT 2,
+                combo_samples TEXT NOT NULL,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (player_name, combo_maps)
+            )
+        ''')
         # Migration: if old table has no combo_maps column, migrate
         cursor.execute("PRAGMA table_info(player_combo_cache)")
         cols = [row[1] for row in cursor.fetchall()]
@@ -229,6 +265,24 @@ class Database:
                 last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Challengers player data cache (tier 2)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS player_data_cache_challengers (
+                player_name TEXT PRIMARY KEY,
+                ign TEXT,
+                team TEXT,
+                match_combinations TEXT,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        # VLR player URL cache: maps player name -> VLR profile path (avoids repeat /search hits)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vlr_player_url_cache (
+                player_name TEXT PRIMARY KEY,
+                vlr_url TEXT NOT NULL,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         
         # Create indexes for faster lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_name ON player_map_stats(player_name)')
@@ -244,17 +298,17 @@ class Database:
     # ==================== VCT Events ====================
     
     def save_vct_event(self, event_url: str, event_name: str, region: str = None, 
-                       year: int = None, status: str = 'completed') -> int:
-        """Save or update a VCT event"""
+                       year: int = None, status: str = 'completed', tier: int = 1) -> int:
+        """Save or update a VCT event. tier: 1=VCT, 2=Challengers."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
         try:
             cursor.execute('''
                 INSERT OR REPLACE INTO vct_events 
-                (event_url, event_name, region, year, status, last_scraped)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (event_url, event_name, region, year, status, datetime.now().isoformat()))
+                (event_url, event_name, region, year, status, last_scraped, tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (event_url, event_name, region, year, status, datetime.now().isoformat(), tier))
             
             conn.commit()
             
@@ -401,6 +455,144 @@ class Database:
             conn.close()
         
         return None
+    
+    def save_moneyline_match(self, match_url: str, event_name: str, event_url: str,
+                             team1: str, team2: str, team1_odds: float = None, team2_odds: float = None,
+                             winner: str = None, team1_maps: int = 0, team2_maps: int = 0,
+                             match_date: str = None) -> Optional[int]:
+        """Save or update a moneyline match record"""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO moneyline_matches 
+                (match_url, event_name, event_url, team1, team2, team1_odds, team2_odds, 
+                 winner, team1_maps, team2_maps, match_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(match_url) DO UPDATE SET
+                    event_name=excluded.event_name, event_url=excluded.event_url,
+                    team1=excluded.team1, team2=excluded.team2,
+                    team1_odds=excluded.team1_odds, team2_odds=excluded.team2_odds,
+                    winner=excluded.winner, team1_maps=excluded.team1_maps,
+                    team2_maps=excluded.team2_maps, match_date=excluded.match_date
+            ''', (match_url, event_name, event_url, team1, team2, team1_odds, team2_odds,
+                  winner, team1_maps, team2_maps, match_date))
+            conn.commit()
+            cursor.execute('SELECT id FROM moneyline_matches WHERE match_url = ?', (match_url,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error saving moneyline match: {e}")
+            conn.rollback()
+            return None
+        finally:
+            conn.close()
+    
+    def get_moneyline_stats(self) -> Dict:
+        """
+        Compute moneyline strategy stats from historical data.
+        Categories: heavy_favorite (<1.5), moderate_favorite (1.5-1.86), even (1.86-1.86).
+        Returns win rates and sample sizes per category.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT team1, team2, team1_odds, team2_odds, winner
+                FROM moneyline_matches
+                WHERE winner IS NOT NULL AND winner != ''
+                  AND (team1_odds IS NOT NULL OR team2_odds IS NOT NULL)
+            ''')
+            rows = cursor.fetchall()
+            
+            heavy_fav_wins, heavy_fav_total = 0, 0
+            mod_fav_wins, mod_fav_total = 0, 0
+            even_wins, even_total = 0, 0
+            
+            for team1, team2, o1, o2, winner in rows:
+                fav_odds = None
+                fav_team = None
+                underdog_odds = None
+                if o1 is not None and o2 is not None:
+                    if o1 < o2:
+                        fav_odds, fav_team = o1, team1
+                        underdog_odds = o2
+                    else:
+                        fav_odds, fav_team = o2, team2
+                        underdog_odds = o1
+                elif o1 is not None:
+                    fav_odds, fav_team = o1, team1
+                    underdog_odds = 1.0 / (1.0 / 1.05 - 1.0 / o1) if o1 > 1 else None
+                elif o2 is not None:
+                    fav_odds, fav_team = o2, team2
+                    underdog_odds = 1.0 / (1.0 / 1.05 - 1.0 / o2) if o2 > 1 else None
+                
+                if fav_odds is None or fav_team is None:
+                    continue
+                
+                fav_won = (winner and winner.lower() == fav_team.lower())
+                
+                if fav_odds < 1.5:
+                    heavy_fav_total += 1
+                    if fav_won:
+                        heavy_fav_wins += 1
+                elif fav_odds <= 1.86 and (underdog_odds is None or underdog_odds >= 1.86):
+                    mod_fav_total += 1
+                    if fav_won:
+                        mod_fav_wins += 1
+                elif underdog_odds is not None and 1.75 <= fav_odds <= 2.0 and 1.75 <= underdog_odds <= 2.0:
+                    even_total += 1
+                    if fav_won:
+                        even_wins += 1
+            
+            total = heavy_fav_total + mod_fav_total + even_total
+            return {
+                'total_matches': total,
+                'heavy_favorite': {
+                    'wins': heavy_fav_wins,
+                    'total': heavy_fav_total,
+                    'win_rate_pct': round(100 * heavy_fav_wins / heavy_fav_total, 1) if heavy_fav_total else 0,
+                    'description': 'Favorite odds < 1.50 (implied >66%)'
+                },
+                'moderate_favorite': {
+                    'wins': mod_fav_wins,
+                    'total': mod_fav_total,
+                    'win_rate_pct': round(100 * mod_fav_wins / mod_fav_total, 1) if mod_fav_total else 0,
+                    'description': 'Favorite odds 1.50-1.86 (implied 54-66%)'
+                },
+                'even_matchup': {
+                    'wins': even_wins,
+                    'total': even_total,
+                    'win_rate_pct': round(100 * even_wins / even_total, 1) if even_total else 0,
+                    'description': 'Both teams ~1.86 (coin flip, vig-adjusted)'
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting moneyline stats: {e}")
+            return {}
+        finally:
+            conn.close()
+    
+    def get_all_moneyline_matches(self) -> List[Dict]:
+        """Export all moneyline matches for analytics (calibration, backtest)."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT id, match_url, event_name, event_url, team1, team2,
+                       team1_odds, team2_odds, winner, team1_maps, team2_maps, match_date, created_at
+                FROM moneyline_matches
+                ORDER BY created_at, id
+            ''')
+            cols = ['id', 'match_url', 'event_name', 'event_url', 'team1', 'team2',
+                    'team1_odds', 'team2_odds', 'winner', 'team1_maps', 'team2_maps',
+                    'match_date', 'created_at']
+            return [dict(zip(cols, row)) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting moneyline matches: {e}")
+            return []
+        finally:
+            conn.close()
     
     # ==================== Player Map Stats ====================
     
@@ -566,29 +758,50 @@ class Database:
         finally:
             conn.close()
     
-    def get_player_agent_aggregation(self, player_name: str) -> List[Dict]:
-        """Get aggregated stats per agent for a player across all events"""
+    def get_player_agent_aggregation(self, player_name: str, tier: Optional[int] = None) -> List[Dict]:
+        """Get aggregated stats per agent. tier: 1=VCT, 2=Challengers, None=all."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
         try:
-            cursor.execute('''
-                SELECT 
-                    pms.agent,
-                    COUNT(DISTINCT pms.match_id) as matches_played,
-                    COUNT(*) as maps_played,
-                    SUM(pms.kills) as total_kills,
-                    SUM(pms.deaths) as total_deaths,
-                    SUM(pms.assists) as total_assists,
-                    AVG(pms.acs) as avg_acs,
-                    AVG(pms.adr) as avg_adr,
-                    AVG(pms.kast) as avg_kast,
-                    SUM(pms.first_bloods) as total_first_bloods
-                FROM player_map_stats pms
-                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0
-                GROUP BY pms.agent
-                ORDER BY maps_played DESC
-            ''', (player_name,))
+            if tier is not None:
+                cursor.execute('''
+                    SELECT 
+                        pms.agent,
+                        COUNT(DISTINCT pms.match_id) as matches_played,
+                        COUNT(*) as maps_played,
+                        SUM(pms.kills) as total_kills,
+                        SUM(pms.deaths) as total_deaths,
+                        SUM(pms.assists) as total_assists,
+                        AVG(pms.acs) as avg_acs,
+                        AVG(pms.adr) as avg_adr,
+                        AVG(pms.kast) as avg_kast,
+                        SUM(pms.first_bloods) as total_first_bloods
+                    FROM player_map_stats pms
+                    JOIN matches m ON pms.match_id = m.id
+                    JOIN vct_events ve ON m.event_id = ve.id
+                    WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0 AND ve.tier = ?
+                    GROUP BY pms.agent
+                    ORDER BY maps_played DESC
+                ''', (player_name, tier))
+            else:
+                cursor.execute('''
+                    SELECT 
+                        pms.agent,
+                        COUNT(DISTINCT pms.match_id) as matches_played,
+                        COUNT(*) as maps_played,
+                        SUM(pms.kills) as total_kills,
+                        SUM(pms.deaths) as total_deaths,
+                        SUM(pms.assists) as total_assists,
+                        AVG(pms.acs) as avg_acs,
+                        AVG(pms.adr) as avg_adr,
+                        AVG(pms.kast) as avg_kast,
+                        SUM(pms.first_bloods) as total_first_bloods
+                    FROM player_map_stats pms
+                    WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0
+                    GROUP BY pms.agent
+                    ORDER BY maps_played DESC
+                ''', (player_name,))
             
             rows = cursor.fetchall()
             
@@ -616,29 +829,50 @@ class Database:
         finally:
             conn.close()
     
-    def get_player_map_aggregation(self, player_name: str) -> List[Dict]:
-        """Get aggregated stats per map for a player across all events"""
+    def get_player_map_aggregation(self, player_name: str, tier: Optional[int] = None) -> List[Dict]:
+        """Get aggregated stats per map. tier: 1=VCT, 2=Challengers, None=all."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
         try:
-            cursor.execute('''
-                SELECT 
-                    pms.map_name,
-                    COUNT(DISTINCT pms.match_id) as matches_played,
-                    COUNT(*) as times_played,
-                    SUM(pms.kills) as total_kills,
-                    SUM(pms.deaths) as total_deaths,
-                    SUM(pms.assists) as total_assists,
-                    AVG(pms.acs) as avg_acs,
-                    AVG(pms.adr) as avg_adr,
-                    AVG(pms.kast) as avg_kast,
-                    SUM(pms.first_bloods) as total_first_bloods
-                FROM player_map_stats pms
-                WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL AND pms.kills > 0
-                GROUP BY pms.map_name
-                ORDER BY times_played DESC
-            ''', (player_name,))
+            if tier is not None:
+                cursor.execute('''
+                    SELECT 
+                        pms.map_name,
+                        COUNT(DISTINCT pms.match_id) as matches_played,
+                        COUNT(*) as times_played,
+                        SUM(pms.kills) as total_kills,
+                        SUM(pms.deaths) as total_deaths,
+                        SUM(pms.assists) as total_assists,
+                        AVG(pms.acs) as avg_acs,
+                        AVG(pms.adr) as avg_adr,
+                        AVG(pms.kast) as avg_kast,
+                        SUM(pms.first_bloods) as total_first_bloods
+                    FROM player_map_stats pms
+                    JOIN matches m ON pms.match_id = m.id
+                    JOIN vct_events ve ON m.event_id = ve.id
+                    WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL AND pms.kills > 0 AND ve.tier = ?
+                    GROUP BY pms.map_name
+                    ORDER BY times_played DESC
+                ''', (player_name, tier))
+            else:
+                cursor.execute('''
+                    SELECT 
+                        pms.map_name,
+                        COUNT(DISTINCT pms.match_id) as matches_played,
+                        COUNT(*) as times_played,
+                        SUM(pms.kills) as total_kills,
+                        SUM(pms.deaths) as total_deaths,
+                        SUM(pms.assists) as total_assists,
+                        AVG(pms.acs) as avg_acs,
+                        AVG(pms.adr) as avg_adr,
+                        AVG(pms.kast) as avg_kast,
+                        SUM(pms.first_bloods) as total_first_bloods
+                    FROM player_map_stats pms
+                    WHERE LOWER(pms.player_name) = LOWER(?) AND pms.map_name IS NOT NULL AND pms.kills > 0
+                    GROUP BY pms.map_name
+                    ORDER BY times_played DESC
+                ''', (player_name,))
             
             rows = cursor.fetchall()
             
@@ -724,21 +958,28 @@ class Database:
         
         return None
     
-    def get_player_all_event_stats(self, player_name: str) -> List[Dict]:
-        """Get all cached event stats for a player"""
+    def get_player_all_event_stats(self, player_name: str, tier: Optional[int] = None) -> List[Dict]:
+        """Get all cached event stats for a player. tier: 1=VCT, 2=Challengers, None=all."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
         try:
-            # Order by rounds_played DESC, then event_id DESC (higher ID = more recent event)
-            # This ensures we get the player's main regional events, not guest appearances
-            cursor.execute('''
-                SELECT pes.*, ve.event_url, ve.event_name, ve.status
-                FROM player_event_stats pes
-                JOIN vct_events ve ON pes.event_id = ve.id
-                WHERE LOWER(pes.player_name) = LOWER(?) AND ve.status = 'completed'
-                ORDER BY pes.rounds_played DESC, ve.id DESC
-            ''', (player_name,))
+            if tier is not None:
+                cursor.execute('''
+                    SELECT pes.*, ve.event_url, ve.event_name, ve.status
+                    FROM player_event_stats pes
+                    JOIN vct_events ve ON pes.event_id = ve.id
+                    WHERE LOWER(pes.player_name) = LOWER(?) AND ve.status = 'completed' AND ve.tier = ?
+                    ORDER BY pes.rounds_played DESC, ve.id DESC
+                ''', (player_name, tier))
+            else:
+                cursor.execute('''
+                    SELECT pes.*, ve.event_url, ve.event_name, ve.status
+                    FROM player_event_stats pes
+                    JOIN vct_events ve ON pes.event_id = ve.id
+                    WHERE LOWER(pes.player_name) = LOWER(?) AND ve.status = 'completed'
+                    ORDER BY pes.rounds_played DESC, ve.id DESC
+                ''', (player_name,))
             
             return [{
                 'id': row[0],
@@ -859,6 +1100,156 @@ class Database:
             conn.rollback()
         finally:
             conn.close()
+
+    def get_cached_player_data_challengers(self, player_name: str) -> Optional[Dict]:
+        """Get cached Challengers player_data if not stale."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT ign, team, match_combinations, last_updated FROM player_data_cache_challengers
+                WHERE LOWER(player_name) = LOWER(?)
+            ''', (player_name,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            ign, team, mc_json, last_updated = row[0], row[1], row[2], row[3]
+            if last_updated:
+                try:
+                    from datetime import datetime
+                    last = datetime.fromisoformat(last_updated.replace('Z', '').split('+')[0].split('.')[0])
+                    if (datetime.now() - last).days > self.CACHE_TTL_DAYS:
+                        return None
+                except Exception:
+                    pass
+            return {
+                'ign': ign or player_name,
+                'team': team or 'Unknown',
+                'match_combinations': json.loads(mc_json) if mc_json else []
+            }
+        except Exception as e:
+            logger.error(f"Error getting Challengers player data cache: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def save_player_data_cache_challengers(self, player_name: str, player_data: Dict) -> None:
+        """Save Challengers player_data to cache."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            mc = player_data.get('match_combinations', [])
+            cursor.execute('''
+                INSERT OR REPLACE INTO player_data_cache_challengers (player_name, ign, team, match_combinations, last_updated)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            ''', (player_name.lower(), player_data.get('ign'), player_data.get('team', 'Unknown'), json.dumps(mc)))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving Challengers player data cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_cached_combo_samples_challengers(self, player_name: str, combo_maps: int = 2) -> Optional[List[int]]:
+        """Get cached Challengers combo samples if not stale."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT combo_samples, last_updated FROM player_combo_cache_challengers
+                WHERE LOWER(player_name) = LOWER(?) AND combo_maps = ?
+            ''', (player_name, combo_maps))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            samples_json, last_updated = row[0], row[1]
+            if last_updated:
+                try:
+                    from datetime import datetime, timedelta
+                    last = datetime.fromisoformat(last_updated.replace('Z', '').split('+')[0].split('.')[0])
+                    if (datetime.now() - last).days > self.CACHE_TTL_DAYS:
+                        return None
+                except Exception:
+                    pass
+            return json.loads(samples_json) if samples_json else None
+        except Exception as e:
+            logger.error(f"Error getting Challengers combo cache: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def save_combo_cache_challengers(self, player_name: str, combo_samples: List[int], combo_maps: int = 2) -> None:
+        """Save Challengers combo samples to cache."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO player_combo_cache_challengers (player_name, combo_maps, combo_samples, last_updated)
+                VALUES (?, ?, ?, datetime('now'))
+            ''', (player_name.lower(), combo_maps, json.dumps(combo_samples)))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving Challengers combo cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_vlr_player_url(self, player_name: str) -> Optional[str]:
+        """Return cached VLR profile path for a player, or None if not cached."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT vlr_url FROM vlr_player_url_cache WHERE LOWER(player_name) = LOWER(?)',
+                (player_name,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error getting VLR player URL cache: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def save_vlr_player_url(self, player_name: str, vlr_url: str) -> None:
+        """Persist a player_name → VLR profile path mapping so future lookups skip /search."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO vlr_player_url_cache (player_name, vlr_url, last_updated)
+                VALUES (LOWER(?), ?, datetime('now'))
+            ''', (player_name, vlr_url))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving VLR player URL cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def clear_prizepicks_cache(self, challengers_only: bool = False) -> Dict[str, int]:
+        """Clear PrizePicks player/combo caches so fresh 2026 data is fetched.
+        challengers_only: if True, only clear Challengers caches; else clear both VCT and Challengers."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        counts = {}
+        try:
+            if not challengers_only:
+                cursor.execute('DELETE FROM player_data_cache')
+                counts['player_data'] = cursor.rowcount
+                cursor.execute('DELETE FROM player_combo_cache')
+                counts['player_combo'] = cursor.rowcount
+            cursor.execute('DELETE FROM player_data_cache_challengers')
+            counts['player_data_challengers'] = cursor.rowcount
+            cursor.execute('DELETE FROM player_combo_cache_challengers')
+            counts['player_combo_challengers'] = cursor.rowcount
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error clearing PrizePicks cache: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+        return counts
 
     def save_leaderboard_snapshot(self, source: str, results: List[Dict], parsed_count: int = 0) -> Optional[int]:
         """Save a leaderboard snapshot. Returns snapshot_id."""

@@ -745,6 +745,14 @@
                     <label>Under Odds (optional)</label>
                     <input type="number" id="underOdds" placeholder="-110" />
                 </div>
+                <div class="input-group">
+                    <label>Team Odds (optional)</label>
+                    <input type="number" id="teamOdds" placeholder="1.62 or -160" />
+                </div>
+                <div class="input-group">
+                    <label>Opponent Odds (optional)</label>
+                    <input type="number" id="oppOdds" placeholder="2.30 or +140" />
+                </div>
                 <button onclick="analyzePrizePicks()">Analyze PrizePicks Line</button>
             </div>
         </div>
@@ -949,6 +957,8 @@
                 const lineVal = r.line ?? 'N/A';
                 const bestVal = r.best_side ?? 'N/A';
                 const hitVal = r.p_hit != null ? (r.p_hit * 100).toFixed(1) + '%' : 'N/A';
+                const overVal = r.p_over != null ? (r.p_over * 100).toFixed(1) + '%' : 'N/A';
+                const underVal = r.p_under != null ? (r.p_under * 100).toFixed(1) + '%' : 'N/A';
                 const samplesVal = r.sample_size != null ? r.sample_size : 'N/A';
                 const muVal = r.mu != null ? r.mu : 'N/A';
                 const bestColor = r.best_side === 'over' ? '#22c55e' : (r.best_side === 'under' ? '#ef4444' : '#71717a');
@@ -961,6 +971,8 @@
                     <td style="padding:0.75rem;">${lineVal}</td>
                     <td style="padding:0.75rem;"><span style="text-transform:uppercase; color:${bestColor};">${bestVal}</span></td>
                     <td style="padding:0.75rem; font-weight:700; color:${r.p_hit != null ? '#22c55e' : '#71717a'};">${hitVal}</td>
+                    <td style="padding:0.75rem; font-weight:600; color:#22c55e;">${overVal}</td>
+                    <td style="padding:0.75rem; font-weight:600; color:#ef4444;">${underVal}</td>
                     <td style="padding:0.75rem; color:#71717a;">${samplesVal}</td>
                     <td style="padding:0.75rem; color:#71717a;">${muVal}</td>
                 </tr>
@@ -977,6 +989,8 @@
                                 <th style="padding:0.75rem;">Line</th>
                                 <th style="padding:0.75rem;">Best</th>
                                 <th style="padding:0.75rem;">Hit Prob</th>
+                                <th style="padding:0.75rem; color:#22c55e;">Over%</th>
+                                <th style="padding:0.75rem; color:#ef4444;">Under%</th>
                                 <th style="padding:0.75rem;">Samples</th>
                                 <th style="padding:0.75rem;">μ</th>
                             </tr>
@@ -1181,34 +1195,42 @@
             const killLine = document.getElementById('killLine').value;
             const overOdds = document.getElementById('overOdds').value.trim();
             const underOdds = document.getElementById('underOdds').value.trim();
-            
+            const teamOddsVal = document.getElementById('teamOdds').value.trim();
+            const oppOddsVal = document.getElementById('oppOdds').value.trim();
+
             if (!ign) {
                 showError('Please enter a player IGN');
                 return;
             }
-            
+
             if (!killLine || killLine <= 0) {
                 showError('Please enter a valid kill line');
                 return;
             }
-            
+
+            const teamOdds = parseFloat(teamOddsVal);
+            const oppOdds = parseFloat(oppOddsVal);
+            const matchupQuery = (!isNaN(teamOdds) && !isNaN(oppOdds))
+                ? `&team_odds=${teamOdds}&opp_odds=${oppOdds}`
+                : '';
+
             document.getElementById('loading').style.display = 'block';
             document.getElementById('result').style.display = 'none';
             document.getElementById('error').style.display = 'none';
-            
+
             try {
                 const startTime = performance.now();
-                const response = await fetch(`/api/challengers/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}`);
+                const response = await fetch(`/api/challengers/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}${matchupQuery}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-                
+
                 document.getElementById('loading').style.display = 'none';
-                
+
                 if (data.error) {
                     showError(data.error);
                     return;
                 }
-                
+
                 // Optional mathematical edge analysis when both odds are provided
                 let edgeData = null;
                 if (overOdds && underOdds) {
@@ -1217,7 +1239,7 @@
                     if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
                         try {
                             const edgeResponse = await fetch(
-                                `/api/challengers/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                                `/api/challengers/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}${matchupQuery}`
                             );
                             if (edgeResponse.ok) {
                                 edgeData = await edgeResponse.json();

@@ -1439,6 +1439,41 @@ def apply_leaderboard_matchup():
             }), 400
         print(f"[MATCHUP] Parsed {len(matchups)} matchup(s): {matchups}", flush=True)
 
+        # ── Refresh team names for every player via rib.gg before matching ──
+        # Priority: RibScraper memory cache → DB rib: cache → player_data_cache → live scrape
+        # All paths are already handled inside _find_player_info; we just parallelise the calls.
+        def _lookup_team(row: dict) -> tuple:
+            """Return (ign_lower, team_name_or_None) for a leaderboard row."""
+            ign = (row.get('vlr_ign') or row.get('player_name', '')).strip()
+            if not ign:
+                return '', None
+            try:
+                info = pp_scraper._find_player_info(ign, pp_scraper.ALL_EVENTS)
+                if info and info.get('team_name') and info['team_name'] not in ('Unknown', ''):
+                    return ign.lower(), info['team_name']
+            except Exception as exc:
+                logger.warning(f"[MATCHUP] team lookup error for {ign}: {exc}")
+            # Fallback: check player_data_cache in DB
+            for get_fn in (db.get_cached_player_data, db.get_cached_player_data_challengers):
+                try:
+                    pdata = get_fn(ign)
+                    if pdata and pdata.get('team') and pdata['team'] not in ('Unknown', 'N/A', '', None):
+                        return ign.lower(), pdata['team']
+                except Exception:
+                    pass
+            return ign.lower(), None
+
+        eligible_rows = [r for r in leaderboard if not r.get('incomplete') and r.get('p_over') is not None]
+        print(f"[MATCHUP] Looking up teams for {len(eligible_rows)} players...", flush=True)
+        fresh_teams: dict = {}  # ign_lower -> team_name
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as _ex:
+            for ign_lower, team_name in _ex.map(_lookup_team, eligible_rows):
+                if ign_lower and team_name:
+                    fresh_teams[ign_lower] = team_name
+                    print(f"[MATCHUP] team: {ign_lower} → {team_name}", flush=True)
+        print(f"[MATCHUP] Resolved teams for {len(fresh_teams)}/{len(eligible_rows)} players", flush=True)
+
         def _normalize(name):
             import re as _re
             return _re.sub(r'[^a-z0-9 ]', '', name.lower()).strip()
@@ -1481,7 +1516,8 @@ def apply_leaderboard_matchup():
                 adjusted_leaderboard.append(new_row)
                 continue
 
-            team = row.get('team', '')
+            ign_key = (row.get('vlr_ign') or row.get('player_name', '')).strip().lower()
+            team = fresh_teams.get(ign_key) or row.get('team', '')
             t_odds, o_odds = _find_team_odds(team)
             if t_odds is None:
                 unmatched_teams.add(team)
@@ -1523,6 +1559,7 @@ def apply_leaderboard_matchup():
             adj_best_side = 'over' if adj_p_over >= adj_p_under else 'under'
             adj_p_hit = adj_p_over if adj_best_side == 'over' else adj_p_under
 
+            new_row['team'] = team  # persist the freshly-resolved team name
             new_row['adj_p_over'] = round(adj_p_over, 4)
             new_row['adj_p_under'] = round(adj_p_under, 4)
             new_row['adj_p_hit'] = round(adj_p_hit, 4)

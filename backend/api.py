@@ -21,6 +21,7 @@ from backend.model_params import get_player_distribution, compute_distribution_p
 from backend.prop_prob import compute_prop_probabilities, generate_pmf
 from backend.market_implied import compute_market_parameters
 from backend.odds_utils import expected_value_per_1
+from backend.matchup_adjust import infer_team_win_probability, apply_matchup_adjustment
 from config import Config
 import logging
 
@@ -30,6 +31,28 @@ CORS(app)
 # Initialize logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _parse_matchup_inputs(args):
+    """Parse optional matchup inputs from request args."""
+    try:
+        team_win_prob = args.get('team_win_prob', None)
+        team_odds = args.get('team_odds', None)
+        opp_odds = args.get('opp_odds', None)
+
+        twp = float(team_win_prob) if team_win_prob not in (None, '') else None
+        to = float(team_odds) if team_odds not in (None, '') else None
+        oo = float(opp_odds) if opp_odds not in (None, '') else None
+        parsed = infer_team_win_probability(team_win_prob=twp, team_odds=to, opp_odds=oo)
+        parsed['invalid_error'] = None
+        return parsed
+    except ValueError as e:
+        return {
+            'provided': False,
+            'team_win_prob': None,
+            'method': 'invalid',
+            'invalid_error': str(e)
+        }
 
 # Initialize components
 db = Database(Config.DATABASE_PATH)
@@ -96,6 +119,24 @@ def get_player_analysis(ign):
         
         # Perform analysis
         analysis = processor.evaluate_betting_line(player_data)
+
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
+        if matchup.get('provided') and player_data.get('all_map_kills'):
+            dist_params = compute_distribution_params(player_data['all_map_kills'])
+            adj = apply_matchup_adjustment(dist_params, matchup['team_win_prob'])
+            adjusted_probs = compute_prop_probabilities(adj['dist_params'], kill_line)
+            analysis['matchup_adjusted_probabilities'] = {
+                'p_over': adjusted_probs['p_over'],
+                'p_under': adjusted_probs['p_under'],
+                'team_win_prob': matchup['team_win_prob'],
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {}),
+                'input_method': matchup.get('method')
+            }
         
         # Add agent and map aggregations
         agent_stats = db.get_player_agent_aggregation(ign)
@@ -159,6 +200,23 @@ def get_challengers_player_analysis(ign):
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found or no Challengers data'}), 404
         analysis = processor.evaluate_betting_line(player_data)
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
+        if matchup.get('provided') and player_data.get('all_map_kills'):
+            dist_params = compute_distribution_params(player_data['all_map_kills'])
+            adj = apply_matchup_adjustment(dist_params, matchup['team_win_prob'])
+            adjusted_probs = compute_prop_probabilities(adj['dist_params'], kill_line)
+            analysis['matchup_adjusted_probabilities'] = {
+                'p_over': adjusted_probs['p_over'],
+                'p_under': adjusted_probs['p_under'],
+                'team_win_prob': matchup['team_win_prob'],
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {}),
+                'input_method': matchup.get('method')
+            }
         agent_stats = db.get_player_agent_aggregation(ign, tier=2)
         map_stats = db.get_player_map_aggregation(ign, tier=2)
         return jsonify({
@@ -184,6 +242,9 @@ def get_challengers_edge_analysis(ign):
         line = float(request.args.get('line', 18.5))
         over_odds = float(request.args.get('over_odds', -110))
         under_odds = float(request.args.get('under_odds', -110))
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
         player_data = scraper.get_player_challengers_data(ign, kill_line=line)
         if not player_data or not player_data.get('all_map_kills'):
             return jsonify({'error': 'Player not found or insufficient Challengers data'}), 404
@@ -191,10 +252,12 @@ def get_challengers_edge_analysis(ign):
         if len(all_map_kills) < 5:
             return jsonify({'error': f'Insufficient data ({len(all_map_kills)} maps)'}), 400
         dist_params = compute_distribution_params(all_map_kills)
-        model_probs = compute_prop_probabilities(dist_params, line)
+        adj = apply_matchup_adjustment(dist_params, matchup.get('team_win_prob'))
+        dist_for_probs = adj['dist_params']
+        model_probs = compute_prop_probabilities(dist_for_probs, line)
         market_params = compute_market_parameters(
             line=line, over_odds=over_odds, under_odds=under_odds,
-            model_dist_type=dist_params['dist'], model_dispersion=dist_params.get('k'))
+            model_dist_type=dist_for_probs['dist'], model_dispersion=dist_for_probs.get('k'))
         p_over_model = model_probs['p_over']
         p_under_model = model_probs['p_under']
         p_over_market = market_params['p_over_vigfree']
@@ -205,12 +268,12 @@ def get_challengers_edge_analysis(ign):
         ev_under = expected_value_per_1(p_under_model, under_odds)
         recommended = 'OVER' if (ev_over > 0 and ev_over >= ev_under) else ('UNDER' if ev_under > 0 else 'NO BET')
         best_ev = max(ev_over, ev_under)
-        mu = dist_params['mu']
-        var = dist_params.get('var', 0)
-        model_pmf = generate_pmf(dist_params, (max(0, int(mu - 15)), int(mu + 15)))
-        market_dist_params = {'dist': dist_params['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
-        if dist_params['dist'] == 'nbinom':
-            k = dist_params.get('k', 1.0)
+        mu = dist_for_probs['mu']
+        var = dist_for_probs.get('var', 0)
+        model_pmf = generate_pmf(dist_for_probs, (max(0, int(mu - 15)), int(mu + 15)))
+        market_dist_params = {'dist': dist_for_probs['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
+        if dist_for_probs['dist'] == 'nbinom':
+            k = dist_for_probs.get('k', 1.0)
             market_dist_params['k'] = k
             market_dist_params['p'] = k / (k + market_params['mu_market'])
         market_pmf = generate_pmf(market_dist_params, (max(0, int(mu - 15)), int(mu + 15)))
@@ -219,12 +282,21 @@ def get_challengers_edge_analysis(ign):
             'scope': 'challengers',
             'player': {'ign': player_data['ign'], 'sample_size': len(all_map_kills), 'confidence': dist_params.get('confidence', '')},
             'line': line,
-            'model': {'dist': dist_params['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
+            'model': {'dist': dist_for_probs['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
             'market': {
                 'over_odds': over_odds, 'under_odds': under_odds,
                 'p_over_vigfree': p_over_market, 'p_under_vigfree': p_under_market,
                 'vig_percentage': market_params.get('vig_percentage', 0),
                 'mu_implied': market_params.get('mu_market', mu)
+            },
+            'matchup_adjustment': {
+                'applied': adj.get('applied', False),
+                'team_win_prob': matchup.get('team_win_prob'),
+                'input_method': matchup.get('method'),
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {})
             },
             'edge': {
                 'prob_edge_over': prob_edge_over, 'prob_edge_under': prob_edge_under,
@@ -253,6 +325,31 @@ def get_challengers_prizepicks_analysis(ign):
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found or no Challengers data'}), 404
         analysis = processor.evaluate_prizepicks_line(player_data)
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
+        if matchup.get('provided'):
+            combo_samples = []
+            for match_data in player_data.get('match_combinations', []):
+                map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+                if len(map_kills) < 2:
+                    continue
+                combos = processor.process_match_combinations(map_kills)
+                combo_samples.extend([c['combined_kills'] for c in combos])
+            if len(combo_samples) >= 3:
+                dist_params = compute_distribution_params(combo_samples)
+                adj = apply_matchup_adjustment(dist_params, matchup['team_win_prob'])
+                adjusted_probs = compute_prop_probabilities(adj['dist_params'], kill_line)
+                analysis['matchup_adjusted_probabilities'] = {
+                    'p_over': adjusted_probs['p_over'],
+                    'p_under': adjusted_probs['p_under'],
+                    'team_win_prob': matchup['team_win_prob'],
+                    'mu_base': adj.get('mu_base'),
+                    'mu_adjusted': adj.get('mu_adjusted'),
+                    'multiplier': adj.get('multiplier'),
+                    'components': adj.get('components', {}),
+                    'input_method': matchup.get('method')
+                }
         return jsonify({
             'success': True,
             'analysis': analysis,
@@ -275,6 +372,9 @@ def get_challengers_prizepicks_edge(ign):
         combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
         over_odds = float(request.args.get('over_odds', -110))
         under_odds = float(request.args.get('under_odds', -110))
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
         player_data = pp_scraper.get_player_prizepicks_data_challengers(ign, kill_line=line)
         if not player_data or not player_data.get('ign'):
             return jsonify({'error': 'Player not found'}), 404
@@ -293,10 +393,12 @@ def get_challengers_prizepicks_edge(ign):
         if len(combo_samples) < 3:
             return jsonify({'error': f'Insufficient {combo_maps}-map combo samples'}), 400
         dist_params = compute_distribution_params(combo_samples)
-        model_probs = compute_prop_probabilities(dist_params, line)
+        adj = apply_matchup_adjustment(dist_params, matchup.get('team_win_prob'))
+        dist_for_probs = adj['dist_params']
+        model_probs = compute_prop_probabilities(dist_for_probs, line)
         market_params = compute_market_parameters(
             line=line, over_odds=over_odds, under_odds=under_odds,
-            model_dist_type=dist_params['dist'], model_dispersion=dist_params.get('k'))
+            model_dist_type=dist_for_probs['dist'], model_dispersion=dist_for_probs.get('k'))
         p_over_model = model_probs['p_over']
         p_under_model = model_probs['p_under']
         p_over_market = market_params['p_over_vigfree']
@@ -306,12 +408,12 @@ def get_challengers_prizepicks_edge(ign):
         recommended = 'OVER' if (ev_over > 0 and ev_over >= ev_under) else ('UNDER' if ev_under > 0 else 'NO BET')
         prob_edge_over = p_over_model - p_over_market
         prob_edge_under = p_under_model - p_under_market
-        mu = dist_params['mu']
-        var = dist_params.get('var', 0)
-        model_pmf = generate_pmf(dist_params, (max(0, int(mu - 25)), int(mu + 25)))
-        market_dist_params = {'dist': dist_params['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
-        if dist_params['dist'] == 'nbinom':
-            k = dist_params.get('k', 1.0)
+        mu = dist_for_probs['mu']
+        var = dist_for_probs.get('var', 0)
+        model_pmf = generate_pmf(dist_for_probs, (max(0, int(mu - 25)), int(mu + 25)))
+        market_dist_params = {'dist': dist_for_probs['dist'], 'mu': market_params['mu_market'], 'lambda': market_params['mu_market']}
+        if dist_for_probs['dist'] == 'nbinom':
+            k = dist_for_probs.get('k', 1.0)
             market_dist_params['k'] = k
             market_dist_params['p'] = k / (k + market_params['mu_market'])
         market_pmf = generate_pmf(market_dist_params, (max(0, int(mu - 25)), int(mu + 25)))
@@ -320,11 +422,20 @@ def get_challengers_prizepicks_edge(ign):
             'scope': 'challengers_prizepicks',
             'player': {'ign': player_data['ign'], 'sample_size': len(combo_samples)},
             'line': line,
-            'model': {'dist': dist_params['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
+            'model': {'dist': dist_for_probs['dist'], 'mu': mu, 'var': var, 'p_over': p_over_model, 'p_under': p_under_model},
             'market': {
                 'over_odds': over_odds, 'under_odds': under_odds,
                 'p_over_vigfree': p_over_market, 'p_under_vigfree': p_under_market,
                 'mu_implied': market_params.get('mu_market', mu)
+            },
+            'matchup_adjustment': {
+                'applied': adj.get('applied', False),
+                'team_win_prob': matchup.get('team_win_prob'),
+                'input_method': matchup.get('method'),
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {})
             },
             'edge': {
                 'prob_edge_over': prob_edge_over, 'prob_edge_under': prob_edge_under,
@@ -362,7 +473,11 @@ def get_edge_analysis(ign):
         if last_n:
             last_n = int(last_n)
         
-        logger.info(f"Edge analysis for {ign}: line={line}, over={over_odds}, under={under_odds}")
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
+
+        logger.info(f"Edge analysis for {ign}: line={line}, over={over_odds}, under={under_odds}, matchup={matchup.get('team_win_prob')}")
         
         # Step 1: Get player's distribution from cached data
         context = {'last_n': last_n} if last_n else {}
@@ -371,16 +486,18 @@ def get_edge_analysis(ign):
         if 'error' in dist_params:
             return jsonify({'error': dist_params['error']}), 404
         
-        # Step 2: Compute model probabilities
-        model_probs = compute_prop_probabilities(dist_params, line)
+        # Step 2: Apply optional matchup adjustment and compute model probabilities
+        adj = apply_matchup_adjustment(dist_params, matchup.get('team_win_prob'))
+        dist_for_probs = adj['dist_params']
+        model_probs = compute_prop_probabilities(dist_for_probs, line)
         
         # Step 3: Compute market-implied parameters
         market_params = compute_market_parameters(
             line=line,
             over_odds=over_odds,
             under_odds=under_odds,
-            model_dist_type=dist_params['dist'],
-            model_dispersion=dist_params.get('k', None)
+            model_dist_type=dist_for_probs['dist'],
+            model_dispersion=dist_for_probs.get('k', None)
         )
         
         # Step 4: Compute edge and EV
@@ -407,21 +524,21 @@ def get_edge_analysis(ign):
             best_ev = max(ev_over, ev_under)
         
         # Step 6: Generate PMF for visualization
-        mu = dist_params['mu']
+        mu = dist_for_probs['mu']
         x_min = max(0, int(mu - 15))
         x_max = int(mu + 15)
-        model_pmf = generate_pmf(dist_params, (x_min, x_max))
+        model_pmf = generate_pmf(dist_for_probs, (x_min, x_max))
         
         # Generate market PMF (using market-implied params)
         market_dist_params = {
-            'dist': dist_params['dist'],
+            'dist': dist_for_probs['dist'],
             'mu': market_params['mu_market'],
             'lambda': market_params['mu_market'],  # for Poisson
         }
-        if dist_params['dist'] == 'nbinom':
+        if dist_for_probs['dist'] == 'nbinom':
             # Use same dispersion as model for market PMF
-            market_dist_params['k'] = dist_params.get('k', 1.0)
-            k = dist_params.get('k', 1.0)
+            market_dist_params['k'] = dist_for_probs.get('k', 1.0)
+            k = dist_for_probs.get('k', 1.0)
             market_dist_params['p'] = k / (k + market_params['mu_market'])
         
         market_pmf = generate_pmf(market_dist_params, (x_min, x_max))
@@ -436,12 +553,21 @@ def get_edge_analysis(ign):
             },
             'line': line,
             'model': {
-                'dist': dist_params['dist'],
-                'mu': dist_params['mu'],
-                'var': dist_params['var'],
+                'dist': dist_for_probs['dist'],
+                'mu': dist_for_probs['mu'],
+                'var': dist_for_probs['var'],
                 'p_over': p_over_model,
                 'p_under': p_under_model,
                 'samples': dist_params.get('samples', [])[:20]  # First 20 for debugging
+            },
+            'matchup_adjustment': {
+                'applied': adj.get('applied', False),
+                'team_win_prob': matchup.get('team_win_prob'),
+                'input_method': matchup.get('method'),
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {})
             },
             'market': {
                 'over_odds': over_odds,
@@ -653,6 +779,33 @@ def get_prizepicks_analysis(ign):
         
         # Perform analysis
         analysis = processor.evaluate_prizepicks_line(player_data)
+
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
+        if matchup.get('provided'):
+            combo_samples = []
+            for match_data in player_data.get('match_combinations', []):
+                map_kills = [k for k in match_data.get('map_kills', []) if k is not None and k > 0]
+                if len(map_kills) < 2:
+                    continue
+                combos = processor.process_match_combinations(map_kills)
+                combo_samples.extend([c['combined_kills'] for c in combos])
+
+            if len(combo_samples) >= 3:
+                dist_params = compute_distribution_params(combo_samples)
+                adj = apply_matchup_adjustment(dist_params, matchup['team_win_prob'])
+                adjusted_probs = compute_prop_probabilities(adj['dist_params'], kill_line)
+                analysis['matchup_adjusted_probabilities'] = {
+                    'p_over': adjusted_probs['p_over'],
+                    'p_under': adjusted_probs['p_under'],
+                    'team_win_prob': matchup['team_win_prob'],
+                    'mu_base': adj.get('mu_base'),
+                    'mu_adjusted': adj.get('mu_adjusted'),
+                    'multiplier': adj.get('multiplier'),
+                    'components': adj.get('components', {}),
+                    'input_method': matchup.get('method')
+                }
         
         # Return response
         return jsonify({
@@ -681,6 +834,9 @@ def get_prizepicks_edge_analysis(ign):
         combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
         over_odds = float(request.args.get('over_odds', -110))
         under_odds = float(request.args.get('under_odds', -110))
+        matchup = _parse_matchup_inputs(request.args)
+        if matchup.get('invalid_error'):
+            return jsonify({'error': matchup['invalid_error']}), 400
 
         logger.info(f"PrizePicks edge analysis for {ign}: line={line}, combo_maps={combo_maps}")
 
@@ -706,15 +862,17 @@ def get_prizepicks_edge_analysis(ign):
         dist_params['samples'] = combo_samples
 
         # Probabilities from model
-        model_probs = compute_prop_probabilities(dist_params, line)
+        adj = apply_matchup_adjustment(dist_params, matchup.get('team_win_prob'))
+        dist_for_probs = adj['dist_params']
+        model_probs = compute_prop_probabilities(dist_for_probs, line)
 
         # Market implied probabilities/mean
         market_params = compute_market_parameters(
             line=line,
             over_odds=over_odds,
             under_odds=under_odds,
-            model_dist_type=dist_params['dist'],
-            model_dispersion=dist_params.get('k', None)
+            model_dist_type=dist_for_probs['dist'],
+            model_dispersion=dist_for_probs.get('k', None)
         )
 
         p_over_model = model_probs['p_over']
@@ -739,18 +897,18 @@ def get_prizepicks_edge_analysis(ign):
             best_ev = max(ev_over, ev_under)
 
         # Visualization PMFs around combined-kill mean
-        mu = dist_params['mu']
+        mu = dist_for_probs['mu']
         x_min = max(0, int(mu - 25))
         x_max = int(mu + 25)
-        model_pmf = generate_pmf(dist_params, (x_min, x_max))
+        model_pmf = generate_pmf(dist_for_probs, (x_min, x_max))
 
         market_dist_params = {
-            'dist': dist_params['dist'],
+            'dist': dist_for_probs['dist'],
             'mu': market_params['mu_market'],
             'lambda': market_params['mu_market'],
         }
-        if dist_params['dist'] == 'nbinom':
-            k = dist_params.get('k', 1.0)
+        if dist_for_probs['dist'] == 'nbinom':
+            k = dist_for_probs.get('k', 1.0)
             market_dist_params['k'] = k
             market_dist_params['p'] = k / (k + market_params['mu_market'])
         market_pmf = generate_pmf(market_dist_params, (x_min, x_max))
@@ -765,11 +923,20 @@ def get_prizepicks_edge_analysis(ign):
             },
             'line': line,
             'model': {
-                'dist': dist_params['dist'],
-                'mu': dist_params['mu'],
-                'var': dist_params['var'],
+                'dist': dist_for_probs['dist'],
+                'mu': dist_for_probs['mu'],
+                'var': dist_for_probs['var'],
                 'p_over': p_over_model,
                 'p_under': p_under_model
+            },
+            'matchup_adjustment': {
+                'applied': adj.get('applied', False),
+                'team_win_prob': matchup.get('team_win_prob'),
+                'input_method': matchup.get('method'),
+                'mu_base': adj.get('mu_base'),
+                'mu_adjusted': adj.get('mu_adjusted'),
+                'multiplier': adj.get('multiplier'),
+                'components': adj.get('components', {})
             },
             'market': {
                 'over_odds': over_odds,

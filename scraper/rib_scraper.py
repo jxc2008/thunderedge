@@ -18,6 +18,7 @@ import time
 import json
 import random
 import logging
+import threading
 import urllib.request
 import urllib.error
 from typing import Dict, List, Optional, Tuple
@@ -81,6 +82,9 @@ class RibScraper:
         # Session caches — persist for the life of the process
         self._player_info_cache: Dict[str, Optional[dict]] = {}  # ign_lower → player info or None
         self._event_series_cache: Dict[str, List] = {}           # event_id → [(slug, id)]
+        # Thread safety: lock protects shared caches; semaphore caps concurrent HTTP requests
+        self._cache_lock = threading.Lock()
+        self._request_sem = threading.Semaphore(3)  # max 3 simultaneous rib.gg requests
 
     # ------------------------------------------------------------------
     # HTTP
@@ -97,35 +101,37 @@ class RibScraper:
         }
 
     def _make_request(self, url: str, timeout: int = 90) -> Optional[bytes]:
-        """Fetch a rib.gg page with retry/backoff. Returns bytes or None on failure."""
+        """Fetch a rib.gg page with retry/backoff. Returns bytes or None on failure.
+        Uses a semaphore to cap concurrent requests and a lighter throttle for parallel use."""
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         last_err = None
         max_attempts = len(_RETRY_BACKOFFS) + 1
 
-        for attempt in range(max_attempts):
-            if attempt > 0:
-                wait = _RETRY_BACKOFFS[attempt - 1] + random.uniform(0, 4)
-                logger.info(f"RIB retry {attempt}/{max_attempts - 1} in {wait:.1f}s after: {last_err}")
-                time.sleep(wait)
+        with self._request_sem:  # at most 3 simultaneous HTTP requests to rib.gg
+            for attempt in range(max_attempts):
+                if attempt > 0:
+                    wait = _RETRY_BACKOFFS[attempt - 1] + random.uniform(0, 4)
+                    logger.info(f"RIB retry {attempt}/{max_attempts - 1} in {wait:.1f}s after: {last_err}")
+                    time.sleep(wait)
 
-            time.sleep(1.0 + random.uniform(0, 0.8))  # Light throttle
+                time.sleep(0.6 + random.uniform(0, 0.4))  # 0.6–1.0s throttle per request
 
-            req = urllib.request.Request(url, headers=self._build_headers())
-            try:
-                response = opener.open(req, timeout=timeout)
-                return response.read()
-            except urllib.error.HTTPError as e:
-                last_err = f"HTTP {e.code}: {e.reason}"
-                if e.code in (503, 429, 502, 504):
-                    continue
-                logger.warning(f"RIB HTTP {e.code} for {url}")
-                return None
-            except Exception as e:
-                last_err = str(e)
-                if any(t in last_err.lower() for t in ('timeout', 'timed out', '10054', 'reset', 'connection', 'eof')):
-                    continue
-                logger.warning(f"RIB request failed: {url} — {e}")
-                return None
+                req = urllib.request.Request(url, headers=self._build_headers())
+                try:
+                    response = opener.open(req, timeout=timeout)
+                    return response.read()
+                except urllib.error.HTTPError as e:
+                    last_err = f"HTTP {e.code}: {e.reason}"
+                    if e.code in (503, 429, 502, 504):
+                        continue
+                    logger.warning(f"RIB HTTP {e.code} for {url}")
+                    return None
+                except Exception as e:
+                    last_err = str(e)
+                    if any(t in last_err.lower() for t in ('timeout', 'timed out', '10054', 'reset', 'connection', 'eof')):
+                        continue
+                    logger.warning(f"RIB request failed: {url} — {e}")
+                    return None
 
         logger.error(f"RIB: gave up after {max_attempts} attempts for {url}: {last_err}")
         return None
@@ -170,13 +176,15 @@ class RibScraper:
 
     def _get_event_series_slugs(self, event_slug: str, event_id: str) -> List[Tuple[str, str]]:
         """Return list of (series_slug, series_id) for an event. Results cached per session."""
-        if event_id in self._event_series_cache:
-            return self._event_series_cache[event_id]
+        with self._cache_lock:
+            if event_id in self._event_series_cache:
+                return self._event_series_cache[event_id]
 
         url = f"{self.BASE_URL}/events/{event_slug}/{event_id}"
         content = self._make_request(url)
         if not content:
-            self._event_series_cache[event_id] = []
+            with self._cache_lock:
+                self._event_series_cache[event_id] = []
             return []
 
         soup = BeautifulSoup(content, 'html.parser')
@@ -192,7 +200,8 @@ class RibScraper:
                     results.append(key)
 
         logger.info(f"RIB event {event_slug}: found {len(results)} series")
-        self._event_series_cache[event_id] = results
+        with self._cache_lock:
+            self._event_series_cache[event_id] = results
         return results
 
     # ------------------------------------------------------------------
@@ -346,15 +355,17 @@ class RibScraper:
         """
         p_lower = player_name.lower()
 
-        if p_lower in self._player_info_cache:
-            return self._player_info_cache[p_lower]
+        with self._cache_lock:
+            if p_lower in self._player_info_cache:
+                return self._player_info_cache[p_lower]
 
         if self.db:
             cached_raw = self.db.get_vlr_player_url(f"rib:{p_lower}")
             if cached_raw:
                 try:
                     info = json.loads(cached_raw)
-                    self._player_info_cache[p_lower] = info
+                    with self._cache_lock:
+                        self._player_info_cache[p_lower] = info
                     return info
                 except Exception:
                     pass
@@ -427,7 +438,8 @@ class RibScraper:
                 'series': team_series,
             }
 
-            self._player_info_cache[p_lower] = player_info
+            with self._cache_lock:
+                self._player_info_cache[p_lower] = player_info
             if self.db:
                 self.db.save_vlr_player_url(f"rib:{p_lower}", json.dumps(player_info))
 
@@ -435,7 +447,8 @@ class RibScraper:
             return player_info
 
         logger.warning(f"RIB: player '{player_name}' not found in {len(events)} events")
-        self._player_info_cache[p_lower] = None
+        with self._cache_lock:
+            self._player_info_cache[p_lower] = None
         return None
 
     # ------------------------------------------------------------------

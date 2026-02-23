@@ -1066,42 +1066,85 @@ def get_prizepicks_parlay_analysis():
 def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, use_challengers: bool = False) -> tuple:
     """Shared logic: take list of {player_name, line}, fetch VLR data (or use cache), compute ranks.
     combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)
-    use_challengers: if True, use Challengers (tier 2) stats only"""
-    player_cache = {}
-    results = []
-    skipped = []
-    # Use RibScraper (rib.gg) for live data — not IP-banned like VLR.gg
-    get_data = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
-    get_cache = db.get_cached_player_data_challengers if use_challengers else db.get_cached_player_data
+    use_challengers: if True, use Challengers (tier 2) stats only
+
+    Speed strategy:
+      Phase 1 – normalize names + check DB/session cache for every player (fast, serial, no network).
+      Phase 2 – fetch uncached players in parallel using ThreadPoolExecutor (4 workers).
+      Phase 3 – compute combo samples + distribution stats for all players (fast, serial, in-memory).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    get_data   = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
+    get_cache  = db.get_cached_player_data_challengers if use_challengers else db.get_cached_player_data
     save_cache = db.save_player_data_cache_challengers if use_challengers else db.save_player_data_cache
-    get_combo = db.get_cached_combo_samples_challengers if use_challengers else db.get_cached_combo_samples
+    get_combo  = db.get_cached_combo_samples_challengers if use_challengers else db.get_cached_combo_samples
     save_combo = db.save_combo_cache_challengers if use_challengers else db.save_combo_cache
-    n_total = len(projections)
-    for idx, proj in enumerate(projections):
-        if (idx + 1) % 10 == 0 or idx == 0:
-            print(f"[UPLOAD] Progress: {idx + 1}/{n_total} players...", flush=True)
+
+    # ── Phase 1: normalize names + check all DB/session caches (no network I/O) ──
+    normalized: list = []   # ordered (pp_name, line) — same order as projections
+    player_cache: dict = {} # pp_name → player_data | None
+    name_to_line: dict = {} # first kill_line seen per name (for live fetch call)
+
+    for proj in projections:
         pp_name = proj.get('player_name', '').strip()
-        # Normalize OCR artifacts before VLR lookup (strip trailing dots, ellipsis)
         if pp_name and not pp_name.startswith('Unknown_'):
             pp_name = re.sub(r'\.{2,}$|…+$', '', pp_name).strip('.\t ')
         line = proj.get('line')
         if not pp_name or line is None:
             continue
+        normalized.append((pp_name, line))
         if pp_name not in player_cache:
-            player_data = get_cache(pp_name)
-            if not player_data:
-                # Pace VLR requests: 2s between live fetches to avoid rate limiting
-                if idx > 0:
-                    time.sleep(2.0)
-                player_data = get_data(pp_name, kill_line=line)
-                if player_data:
-                    save_cache(pp_name, player_data)
-            player_cache[pp_name] = player_data
-        else:
-            player_data = player_cache[pp_name]
+            player_cache[pp_name] = get_cache(pp_name)  # None if not cached
+        if pp_name not in name_to_line:
+            name_to_line[pp_name] = line
+
+    # ── Phase 2: parallel-fetch players not in DB/session cache ──
+    seen_unc: set = set()
+    unique_uncached: list = []
+    for pp_name, _ in normalized:
+        if player_cache.get(pp_name) is None and pp_name not in seen_unc:
+            seen_unc.add(pp_name)
+            unique_uncached.append(pp_name)
+
+    if unique_uncached:
+        print(f"[UPLOAD] {len(unique_uncached)} players not cached — fetching in parallel (4 workers)...", flush=True)
+
+        def _fetch_player(name: str):
+            try:
+                data = get_data(name, kill_line=name_to_line[name])
+                if data:
+                    save_cache(name, data)
+                return name, data
+            except Exception as exc:
+                logger.warning(f"[UPLOAD] fetch error for {name}: {exc}")
+                return name, None
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_fetch_player, name): name for name in unique_uncached}
+            done = 0
+            for future in as_completed(futures):
+                name, data = future.result()
+                player_cache[name] = data
+                done += 1
+                print(f"[UPLOAD] Fetched {done}/{len(unique_uncached)}: {name} ({'ok' if data else 'not found'})", flush=True)
+    else:
+        print(f"[UPLOAD] All {len(normalized)} players found in cache — skipping network fetch.", flush=True)
+
+    # ── Phase 3: compute combo samples + distribution stats (in-memory, serial) ──
+    results: list = []
+    skipped: list = []
+    n_total = len(normalized)
+
+    for idx, (pp_name, line) in enumerate(normalized):
+        if (idx + 1) % 10 == 0 or idx == 0:
+            print(f"[UPLOAD] Stats {idx + 1}/{n_total}: {pp_name}", flush=True)
+
+        player_data = player_cache.get(pp_name)
         if not player_data or not player_data.get('ign'):
             skipped.append({'player_name': pp_name, 'line': line, 'reason': 'Player not found on VLR'})
             continue
+
         pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
         combo_samples = get_combo(pp_name, combo_maps=combo_maps)
         if combo_samples is None:
@@ -1114,9 +1157,11 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, 
                 combo_samples.extend([c['combined_kills'] for c in combos])
             if combo_samples:
                 save_combo(pp_name, combo_samples, combo_maps=combo_maps)
+
         if len(combo_samples) < 3:
             skipped.append({'player_name': pp_name, 'line': line, 'reason': f'Insufficient data ({len(combo_samples)} combo samples)'})
             continue
+
         dist_params = compute_distribution_params(combo_samples)
         probs = compute_prop_probabilities(dist_params, line)
         p_over, p_under = probs['p_over'], probs['p_under']
@@ -1138,6 +1183,7 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, 
             'dist_var': round(float(dist_params.get('var', dist_params.get('mu', 1))), 4),
             'dist_k': round(float(dist_params['k']), 4) if dist_params.get('dist') == 'nbinom' and 'k' in dist_params else None,
         })
+
     results.sort(key=lambda x: x['p_hit'], reverse=True)
     for i, r in enumerate(results, 1):
         r['rank'] = i

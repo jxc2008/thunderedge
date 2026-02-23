@@ -1410,22 +1410,28 @@ def apply_leaderboard_matchup():
 
         f = request.files.get('image') or request.files.get('file')
         if not f or f.filename == '':
+            logger.warning("[MATCHUP] 400: no image file in request")
             return jsonify({'error': 'No odds image provided'}), 400
         img_bytes = f.read()
         if len(img_bytes) < 100:
+            logger.warning(f"[MATCHUP] 400: image too small ({len(img_bytes)} bytes)")
             return jsonify({'error': 'Image file too small or empty'}), 400
 
         lb_json = request.form.get('leaderboard', '[]')
+        logger.info(f"[MATCHUP] leaderboard field length: {len(lb_json)} chars")
         try:
             leaderboard = json.loads(lb_json)
-        except (ValueError, Exception):
+        except (ValueError, Exception) as json_err:
+            logger.warning(f"[MATCHUP] 400: json.loads failed — {json_err!r} — first 200 chars: {lb_json[:200]!r}")
             return jsonify({'error': 'Invalid leaderboard JSON'}), 400
         if not leaderboard:
+            logger.warning("[MATCHUP] 400: leaderboard is empty after parse")
             return jsonify({'error': 'No leaderboard data provided. Load a leaderboard first.'}), 400
 
         print("[MATCHUP] Parsing odds screenshot with Gemini...", flush=True)
         matchups = parse_matchup_odds_image_vision(img_bytes)
         if not matchups:
+            logger.warning("[MATCHUP] 400: Gemini returned no matchups from image")
             return jsonify({
                 'success': False,
                 'error': 'Could not parse any team odds from the image. Make sure the screenshot shows moneyline odds (e.g. Sentinels -150 vs NRG +130).'

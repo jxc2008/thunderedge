@@ -1231,6 +1231,14 @@
                     <label>Under Odds (optional - enables EV)</label>
                     <input type="text" id="underOdds" placeholder="-110" />
                 </div>
+                <div class="input-group">
+                    <label>Team Odds (optional)</label>
+                    <input type="number" id="teamOdds" placeholder="1.62 or -160" />
+                </div>
+                <div class="input-group">
+                    <label>Opponent Odds (optional)</label>
+                    <input type="number" id="oppOdds" placeholder="2.30 or +140" />
+                </div>
                 <button id="analyzeBtn" onclick="analyzePlayer()">Analyze Player</button>
             </div>
         </div>
@@ -1277,34 +1285,42 @@
             const killLine = document.getElementById('killLine').value;
             const overOdds = document.getElementById('overOdds').value.trim();
             const underOdds = document.getElementById('underOdds').value.trim();
-            
+            const teamOddsVal = document.getElementById('teamOdds').value.trim();
+            const oppOddsVal = document.getElementById('oppOdds').value.trim();
+
             if (!ign) {
                 showError('Please enter a player IGN');
                 return;
             }
-            
+
             if (!killLine || killLine <= 0) {
                 showError('Please enter a valid kill line');
                 return;
             }
-            
+
+            const teamOdds = parseFloat(teamOddsVal);
+            const oppOdds = parseFloat(oppOddsVal);
+            const matchupQuery = (!isNaN(teamOdds) && !isNaN(oppOdds))
+                ? `&team_odds=${teamOdds}&opp_odds=${oppOdds}`
+                : '';
+
             document.getElementById('loading').style.display = 'block';
             document.getElementById('result').style.display = 'none';
             document.getElementById('error').style.display = 'none';
             const analyzeBtn = document.getElementById('analyzeBtn');
             if (analyzeBtn) analyzeBtn.disabled = true;
-            
+
             try {
                 const startTime = performance.now();
-                const response = await fetch(`/api/player/${encodeURIComponent(ign)}?line=${killLine}`);
+                const response = await fetch(`/api/player/${encodeURIComponent(ign)}?line=${killLine}${matchupQuery}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-                
+
                 if (data.error) {
                     showError(data.error);
                     return;
                 }
-                
+
                 // Fetch edge analysis if odds are provided (keep loading visible during this)
                 let edgeData = null;
                 if (overOdds && underOdds) {
@@ -1313,7 +1329,7 @@
                         const parsedUnder = parseFloat(underOdds);
                         if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
                             const edgeResponse = await fetch(
-                                `/api/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                                `/api/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${parsedOver}&under_odds=${parsedUnder}${matchupQuery}`
                             );
                             if (edgeResponse.ok) {
                                 edgeData = await edgeResponse.json();
@@ -1323,7 +1339,7 @@
                         console.error('Edge analysis failed:', error);
                     }
                 }
-                
+
                 displayResults(data.analysis, data.raw_events, elapsed, overOdds, underOdds, data.agent_stats, data.map_stats, edgeData);
             } catch (error) {
                 showError('Error connecting to server: ' + error.message);
@@ -1523,9 +1539,11 @@
                     </div>
                     
                     ${renderMarginStats(analysis.margin_stats, analysis.kill_line)}
-                    
+
+                    ${renderMatchupAdjustment(analysis.matchup_adjusted_probabilities)}
+
                     ${oddsAnalysisHtml}
-                    
+
                     <div class="classification ${classificationClass}">
                         ${analysis.classification}
                         <div class="recommendation">${analysis.recommendation}</div>
@@ -1944,6 +1962,33 @@
             errorDiv.style.display = 'block';
         }
         
+        function renderMatchupAdjustment(adjusted) {
+            if (!adjusted) return '';
+            return `
+                <div style="background:#18181b; border:1px solid #27272a; border-radius:12px; padding:1.25rem; margin:1.5rem 0;">
+                    <div style="font-size:0.75rem; font-weight:700; color:#71717a; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:0.75rem;">Matchup-Adjusted Kill Probability</div>
+                    <div style="font-size:0.875rem; color:#a1a1aa; margin-bottom:0.75rem;">
+                        Team win probability: <strong style="color:#e4e4e7;">${(adjusted.team_win_prob * 100).toFixed(1)}%</strong>
+                        &nbsp;·&nbsp; μ ${adjusted.mu_base?.toFixed(2)} → ${adjusted.mu_adjusted?.toFixed(2)} (${adjusted.multiplier != null ? ((adjusted.multiplier - 1) * 100).toFixed(1) + '%' : 'N/A'})
+                    </div>
+                    <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                        <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:8px; padding:0.6rem 0.9rem;">
+                            <div style="font-size:0.7rem; color:#71717a;">Adj P(Over)</div>
+                            <div style="font-weight:700; color:#22c55e; font-size:1.1rem;">${(adjusted.p_over * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:8px; padding:0.6rem 0.9rem;">
+                            <div style="font-size:0.7rem; color:#71717a;">Adj P(Under)</div>
+                            <div style="font-weight:700; color:#ef4444; font-size:1.1rem;">${(adjusted.p_under * 100).toFixed(2)}%</div>
+                        </div>
+                        <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:8px; padding:0.6rem 0.9rem;">
+                            <div style="font-size:0.7rem; color:#71717a;">Multiplier</div>
+                            <div style="font-weight:700; font-size:1.1rem;">${adjusted.multiplier?.toFixed(3) || 'N/A'}x</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderEdgeAnalysis(edgeData, killLine) {
             if (!edgeData || !edgeData.success) {
                 return '';

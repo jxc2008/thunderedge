@@ -1066,42 +1066,85 @@ def get_prizepicks_parlay_analysis():
 def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, use_challengers: bool = False) -> tuple:
     """Shared logic: take list of {player_name, line}, fetch VLR data (or use cache), compute ranks.
     combo_maps: 2 for Bo3 (Maps 1+2), 3 for Bo5 (Maps 1+2+3)
-    use_challengers: if True, use Challengers (tier 2) stats only"""
-    player_cache = {}
-    results = []
-    skipped = []
-    # Use RibScraper (rib.gg) for live data — not IP-banned like VLR.gg
-    get_data = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
-    get_cache = db.get_cached_player_data_challengers if use_challengers else db.get_cached_player_data
+    use_challengers: if True, use Challengers (tier 2) stats only
+
+    Speed strategy:
+      Phase 1 – normalize names + check DB/session cache for every player (fast, serial, no network).
+      Phase 2 – fetch uncached players in parallel using ThreadPoolExecutor (4 workers).
+      Phase 3 – compute combo samples + distribution stats for all players (fast, serial, in-memory).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    get_data   = pp_scraper.get_player_prizepicks_data_challengers if use_challengers else pp_scraper.get_player_prizepicks_data
+    get_cache  = db.get_cached_player_data_challengers if use_challengers else db.get_cached_player_data
     save_cache = db.save_player_data_cache_challengers if use_challengers else db.save_player_data_cache
-    get_combo = db.get_cached_combo_samples_challengers if use_challengers else db.get_cached_combo_samples
+    get_combo  = db.get_cached_combo_samples_challengers if use_challengers else db.get_cached_combo_samples
     save_combo = db.save_combo_cache_challengers if use_challengers else db.save_combo_cache
-    n_total = len(projections)
-    for idx, proj in enumerate(projections):
-        if (idx + 1) % 10 == 0 or idx == 0:
-            print(f"[UPLOAD] Progress: {idx + 1}/{n_total} players...", flush=True)
+
+    # ── Phase 1: normalize names + check all DB/session caches (no network I/O) ──
+    normalized: list = []   # ordered (pp_name, line) — same order as projections
+    player_cache: dict = {} # pp_name → player_data | None
+    name_to_line: dict = {} # first kill_line seen per name (for live fetch call)
+
+    for proj in projections:
         pp_name = proj.get('player_name', '').strip()
-        # Normalize OCR artifacts before VLR lookup (strip trailing dots, ellipsis)
         if pp_name and not pp_name.startswith('Unknown_'):
             pp_name = re.sub(r'\.{2,}$|…+$', '', pp_name).strip('.\t ')
         line = proj.get('line')
         if not pp_name or line is None:
             continue
+        normalized.append((pp_name, line))
         if pp_name not in player_cache:
-            player_data = get_cache(pp_name)
-            if not player_data:
-                # Pace VLR requests: 2s between live fetches to avoid rate limiting
-                if idx > 0:
-                    time.sleep(2.0)
-                player_data = get_data(pp_name, kill_line=line)
-                if player_data:
-                    save_cache(pp_name, player_data)
-            player_cache[pp_name] = player_data
-        else:
-            player_data = player_cache[pp_name]
+            player_cache[pp_name] = get_cache(pp_name)  # None if not cached
+        if pp_name not in name_to_line:
+            name_to_line[pp_name] = line
+
+    # ── Phase 2: parallel-fetch players not in DB/session cache ──
+    seen_unc: set = set()
+    unique_uncached: list = []
+    for pp_name, _ in normalized:
+        if player_cache.get(pp_name) is None and pp_name not in seen_unc:
+            seen_unc.add(pp_name)
+            unique_uncached.append(pp_name)
+
+    if unique_uncached:
+        print(f"[UPLOAD] {len(unique_uncached)} players not cached — fetching in parallel (4 workers)...", flush=True)
+
+        def _fetch_player(name: str):
+            try:
+                data = get_data(name, kill_line=name_to_line[name])
+                if data:
+                    save_cache(name, data)
+                return name, data
+            except Exception as exc:
+                logger.warning(f"[UPLOAD] fetch error for {name}: {exc}")
+                return name, None
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_fetch_player, name): name for name in unique_uncached}
+            done = 0
+            for future in as_completed(futures):
+                name, data = future.result()
+                player_cache[name] = data
+                done += 1
+                print(f"[UPLOAD] Fetched {done}/{len(unique_uncached)}: {name} ({'ok' if data else 'not found'})", flush=True)
+    else:
+        print(f"[UPLOAD] All {len(normalized)} players found in cache — skipping network fetch.", flush=True)
+
+    # ── Phase 3: compute combo samples + distribution stats (in-memory, serial) ──
+    results: list = []
+    skipped: list = []
+    n_total = len(normalized)
+
+    for idx, (pp_name, line) in enumerate(normalized):
+        if (idx + 1) % 10 == 0 or idx == 0:
+            print(f"[UPLOAD] Stats {idx + 1}/{n_total}: {pp_name}", flush=True)
+
+        player_data = player_cache.get(pp_name)
         if not player_data or not player_data.get('ign'):
             skipped.append({'player_name': pp_name, 'line': line, 'reason': 'Player not found on VLR'})
             continue
+
         pp_processor = PrizePicksProcessor(kill_line=line, combo_maps=combo_maps)
         combo_samples = get_combo(pp_name, combo_maps=combo_maps)
         if combo_samples is None:
@@ -1114,9 +1157,11 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, 
                 combo_samples.extend([c['combined_kills'] for c in combos])
             if combo_samples:
                 save_combo(pp_name, combo_samples, combo_maps=combo_maps)
+
         if len(combo_samples) < 3:
             skipped.append({'player_name': pp_name, 'line': line, 'reason': f'Insufficient data ({len(combo_samples)} combo samples)'})
             continue
+
         dist_params = compute_distribution_params(combo_samples)
         probs = compute_prop_probabilities(dist_params, line)
         p_over, p_under = probs['p_over'], probs['p_under']
@@ -1134,7 +1179,11 @@ def _build_leaderboard_from_projections(projections: list, combo_maps: int = 2, 
             'p_under': round(p_under, 4),
             'sample_size': len(combo_samples),
             'mu': round(dist_params.get('mu', 0), 2),
+            'dist_type': dist_params.get('dist', 'poisson'),
+            'dist_var': round(float(dist_params.get('var', dist_params.get('mu', 1))), 4),
+            'dist_k': round(float(dist_params['k']), 4) if dist_params.get('dist') == 'nbinom' and 'k' in dist_params else None,
         })
+
     results.sort(key=lambda x: x['p_hit'], reverse=True)
     for i, r in enumerate(results, 1):
         r['rank'] = i
@@ -1339,6 +1388,171 @@ def upload_leaderboard_image():
         })
     except Exception as e:
         logger.error(f"Error processing leaderboard image: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/prizepicks/leaderboard/apply-matchup', methods=['POST'])
+def apply_leaderboard_matchup():
+    """
+    Parse a betting odds screenshot and apply matchup adjustments to leaderboard rows.
+
+    Form data:
+        image / file: odds screenshot (required)
+        leaderboard:  JSON string of current leaderboard rows (required)
+
+    Returns adjusted leaderboard with adj_p_over, adj_p_under, adj_p_hit, matchup_info added.
+    """
+    try:
+        try:
+            from scraper.vision_parser import parse_matchup_odds_image_vision
+        except ImportError as ie:
+            return jsonify({'error': f'Vision parser not available: {ie}. Install: pip install google-generativeai'}), 500
+
+        f = request.files.get('image') or request.files.get('file')
+        if not f or f.filename == '':
+            return jsonify({'error': 'No odds image provided'}), 400
+        img_bytes = f.read()
+        if len(img_bytes) < 100:
+            return jsonify({'error': 'Image file too small or empty'}), 400
+
+        lb_json = request.form.get('leaderboard', '[]')
+        try:
+            leaderboard = json.loads(lb_json)
+        except (ValueError, Exception):
+            return jsonify({'error': 'Invalid leaderboard JSON'}), 400
+        if not leaderboard:
+            return jsonify({'error': 'No leaderboard data provided. Load a leaderboard first.'}), 400
+
+        print("[MATCHUP] Parsing odds screenshot with Gemini...", flush=True)
+        matchups = parse_matchup_odds_image_vision(img_bytes)
+        if not matchups:
+            return jsonify({
+                'success': False,
+                'error': 'Could not parse any team odds from the image. Make sure the screenshot shows moneyline odds (e.g. Sentinels -150 vs NRG +130).'
+            }), 400
+        print(f"[MATCHUP] Parsed {len(matchups)} matchup(s): {matchups}", flush=True)
+
+        def _normalize(name):
+            import re as _re
+            return _re.sub(r'[^a-z0-9 ]', '', name.lower()).strip()
+
+        # Build lookup: normalized_team -> (team_odds, opp_odds)
+        team_odds_lookup = {}
+        for m in matchups:
+            t1 = _normalize(m['team1'])
+            t2 = _normalize(m['team2'])
+            o1 = m['team1_odds']
+            o2 = m['team2_odds']
+            team_odds_lookup[t1] = (o1, o2)
+            team_odds_lookup[t2] = (o2, o1)
+
+        def _find_team_odds(team_name):
+            if not team_name or team_name in ('N/A', 'Unknown', ''):
+                return None, None
+            norm = _normalize(team_name)
+            if norm in team_odds_lookup:
+                return team_odds_lookup[norm]
+            # Substring match
+            for key, odds in team_odds_lookup.items():
+                if norm in key or key in norm:
+                    return odds
+            # First-word match
+            first = norm.split()[0] if norm.split() else ''
+            if first:
+                for key, odds in team_odds_lookup.items():
+                    if key.startswith(first) or first in key:
+                        return odds
+            return None, None
+
+        adjusted_leaderboard = []
+        matched_count = 0
+        unmatched_teams = set()
+
+        for row in leaderboard:
+            new_row = dict(row)
+            if row.get('incomplete') or row.get('p_over') is None:
+                adjusted_leaderboard.append(new_row)
+                continue
+
+            team = row.get('team', '')
+            t_odds, o_odds = _find_team_odds(team)
+            if t_odds is None:
+                unmatched_teams.add(team)
+                adjusted_leaderboard.append(new_row)
+                continue
+
+            try:
+                matchup_info = infer_team_win_probability(team_odds=t_odds, opp_odds=o_odds)
+            except ValueError:
+                unmatched_teams.add(team)
+                adjusted_leaderboard.append(new_row)
+                continue
+
+            if not matchup_info.get('provided'):
+                adjusted_leaderboard.append(new_row)
+                continue
+
+            mu = float(row.get('mu') or 1.0)
+            dist_type = row.get('dist_type', 'poisson')
+            dist_var = float(row.get('dist_var') or mu)
+            dist_k = row.get('dist_k')
+
+            dist_params_approx = {'mu': mu, 'var': dist_var, 'dist': dist_type}
+            if dist_type == 'poisson':
+                dist_params_approx['lambda'] = mu
+            elif dist_type == 'nbinom' and dist_k is not None:
+                k = float(dist_k)
+                dist_params_approx['k'] = k
+                dist_params_approx['p'] = k / (k + mu)
+
+            team_win_prob = matchup_info['team_win_prob']
+            adj_result = apply_matchup_adjustment(dist_params_approx, team_win_prob)
+            adj_params = adj_result['dist_params']
+
+            line = float(row.get('line', 0))
+            adj_probs = compute_prop_probabilities(adj_params, line)
+            adj_p_over = adj_probs['p_over']
+            adj_p_under = adj_probs['p_under']
+            adj_best_side = 'over' if adj_p_over >= adj_p_under else 'under'
+            adj_p_hit = adj_p_over if adj_best_side == 'over' else adj_p_under
+
+            new_row['adj_p_over'] = round(adj_p_over, 4)
+            new_row['adj_p_under'] = round(adj_p_under, 4)
+            new_row['adj_p_hit'] = round(adj_p_hit, 4)
+            new_row['adj_best_side'] = adj_best_side
+            new_row['matchup_info'] = {
+                'team_win_prob': round(team_win_prob, 4),
+                'team_odds': t_odds,
+                'opp_odds': o_odds,
+                'multiplier': round(adj_result.get('multiplier', 1.0), 4),
+                'mu_base': round(adj_result.get('mu_base', mu), 3),
+                'mu_adjusted': round(adj_result.get('mu_adjusted', mu), 3),
+            }
+            matched_count += 1
+            adjusted_leaderboard.append(new_row)
+
+        # Re-sort ranked rows by adj_p_hit (or p_hit if no adjustment)
+        ranked = [r for r in adjusted_leaderboard if not r.get('incomplete')]
+        unranked = [r for r in adjusted_leaderboard if r.get('incomplete')]
+        ranked.sort(key=lambda r: r.get('adj_p_hit') or r.get('p_hit') or 0, reverse=True)
+        for i, r in enumerate(ranked, 1):
+            r['rank'] = i
+        adjusted_leaderboard = ranked + unranked
+
+        eligible = len([r for r in leaderboard if not r.get('incomplete') and r.get('p_over') is not None])
+        return jsonify({
+            'success': True,
+            'leaderboard': adjusted_leaderboard,
+            'matchups_parsed': matchups,
+            'matched_count': matched_count,
+            'unmatched_teams': list(unmatched_teams),
+            'message': f'Applied matchup odds to {matched_count} of {eligible} players from {len(matchups)} matchup(s).'
+        })
+
+    except ImportError as e:
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.error(f"Error applying leaderboard matchup: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

@@ -121,6 +121,93 @@ def parse_prizepicks_image_vision(image_bytes: bytes) -> Tuple[List[dict], int]:
     return projections, combo_maps
 
 
+MATCHUP_ODDS_PROMPT = """Extract team matchup moneyline odds from this sports betting screenshot.
+
+For each match shown, extract both teams and their moneyline odds.
+
+Return ONLY valid JSON array. Format:
+[
+  {"team1": "Sentinels", "team1_odds": -150, "team2": "NRG", "team2_odds": 130},
+  {"team1": "Team Liquid", "team1_odds": -110, "team2": "Fnatic", "team2_odds": -110}
+]
+
+Rules:
+- Extract team names exactly as shown in the screenshot
+- American odds: favorites have negative numbers (e.g. -150), underdogs have positive (e.g. +130 → use 130 without the + sign)
+- Decimal odds: use the exact decimal number (e.g. 1.65, 2.20)
+- Include ALL matches visible in the screenshot
+- Return ONLY valid JSON, no other text or explanation"""
+
+
+def parse_matchup_odds_image_vision(image_bytes: bytes) -> List[dict]:
+    """
+    Parse a betting odds screenshot to extract team matchups and moneyline odds.
+    Returns list of {team1, team1_odds, team2, team2_odds} dicts.
+    """
+    api_key = __import__('os').environ.get('GOOGLE_API_KEY') or __import__('os').environ.get('GEMINI_API_KEY')
+    if not api_key:
+        raise ImportError(
+            "Vision API requires GOOGLE_API_KEY or GEMINI_API_KEY. "
+            "Get a free key at https://aistudio.google.com/apikey"
+        )
+
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        raise ImportError("Install: pip install google-generativeai")
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-2.5-flash')
+
+    mime = _detect_mime_type(image_bytes)
+    b64 = base64.b64encode(image_bytes).decode('utf-8')
+    image_part = {'inline_data': {'mime_type': mime, 'data': b64}}
+
+    try:
+        response = model.generate_content(
+            [image_part, MATCHUP_ODDS_PROMPT],
+            generation_config=genai.types.GenerationConfig(temperature=0.1, max_output_tokens=1024),
+        )
+        text = (response.text or '').strip()
+        if not text:
+            logger.warning("Gemini returned empty response for odds screenshot")
+            return []
+    except Exception as e:
+        logger.error(f"Gemini vision error for odds screenshot: {e}")
+        raise
+
+    json_match = re.search(r'\[[\s\S]*?\]', text)
+    if not json_match:
+        logger.warning(f"No JSON array found in odds response: {text[:300]}")
+        return []
+
+    try:
+        data = json.loads(json_match.group())
+    except json.JSONDecodeError as e:
+        logger.warning(f"Invalid JSON from odds vision: {e}. Raw: {json_match.group()[:300]}")
+        return []
+
+    matchups = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        t1 = str(item.get('team1', '')).strip()
+        t2 = str(item.get('team2', '')).strip()
+        if not t1 or not t2:
+            continue
+        try:
+            o1 = float(item.get('team1_odds', 0))
+            o2 = float(item.get('team2_odds', 0))
+        except (TypeError, ValueError):
+            continue
+        if o1 == 0 or o2 == 0:
+            continue
+        matchups.append({'team1': t1, 'team1_odds': o1, 'team2': t2, 'team2_odds': o2})
+
+    logger.info(f"Odds vision: parsed {len(matchups)} matchup(s)")
+    return matchups
+
+
 def parse_prizepicks_images_batch_vision(image_bytes_list: List[bytes]) -> Tuple[List[dict], int]:
     """
     Parse multiple PrizePicks screenshots with Gemini vision.

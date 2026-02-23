@@ -714,6 +714,20 @@
             <div id="leaderboardResult" style="min-height: 80px;">
                 <p style="color:#71717a; font-size:0.875rem;">Click "Refresh Leaderboard" to load today's PrizePicks Valorant lines ranked by hit probability.</p>
             </div>
+            <div style="margin-top: 1.25rem; padding: 1rem; background: #18181b; border: 1px solid #3f3f46; border-radius: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
+                    <div>
+                        <div style="font-size: 0.9rem; font-weight: 600; color: #e4e4e7;">Apply Match Odds</div>
+                        <div style="font-size: 0.8rem; color: #71717a; margin-top: 0.2rem;">Upload a screenshot of today's moneyline odds — adjusted Over%/Under% will appear in the leaderboard above</div>
+                    </div>
+                    <label style="cursor: pointer; padding: 0.5rem 1rem; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); border-radius: 8px; font-size: 0.875rem; font-weight: 600; color: #fff; white-space: nowrap;">
+                        Upload Odds Screenshot
+                        <input type="file" id="oddsImageInput" accept="image/*" style="display: none;" onchange="uploadMatchupOdds(this)">
+                    </label>
+                </div>
+                <div id="oddsUploadStatus" style="display:none; margin-top:0.75rem;"></div>
+                <div id="matchupsDetected" style="display:none; margin-top:0.75rem;"></div>
+            </div>
             <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #27272a;">
                 <button type="button" onclick="loadLeaderboardHistory()" style="background:#27272a; font-size:0.875rem;">View History</button>
                 <div id="leaderboardHistory" style="margin-top:0.75rem; display:none;"></div>
@@ -936,9 +950,12 @@
             }, 500);
         }
 
+        let currentLeaderboard = null;
+
         function renderLeaderboardResults(data) {
             const resultEl = document.getElementById('leaderboardResult');
             const lb = data.leaderboard || [];
+            currentLeaderboard = lb;
             if (lb.length === 0) {
                 resultEl.innerHTML = `<p style="color:#71717a;">${data.message || 'No lines to display.'}</p>`;
                 return;
@@ -947,6 +964,7 @@
             if (data.created_at && !msg) {
                 msg = `Loaded from history – ${new Date(data.created_at).toLocaleString()}`;
             }
+            const hasAdj = lb.some(r => r.adj_p_over != null);
             const rows = lb.map((r, i) => {
                 const isIncomplete = r.incomplete === true;
                 const rowStyle = isIncomplete ? 'border-bottom:1px solid #27272a; opacity:0.85;' : 'border-bottom:1px solid #27272a;';
@@ -963,6 +981,17 @@
                 const muVal = r.mu != null ? r.mu : 'N/A';
                 const bestColor = r.best_side === 'over' ? '#22c55e' : (r.best_side === 'under' ? '#ef4444' : '#71717a');
                 const rankVal = r.rank > 0 ? r.rank : '—';
+                const adjCells = hasAdj ? (() => {
+                    if (r.adj_p_over != null) {
+                        const adjOver = (r.adj_p_over * 100).toFixed(1) + '%';
+                        const adjUnder = (r.adj_p_under * 100).toFixed(1) + '%';
+                        const mi = r.matchup_info || {};
+                        const winPct = mi.team_win_prob != null ? (mi.team_win_prob * 100).toFixed(0) + '%' : '';
+                        const tip = winPct ? `Team win prob: ${winPct}` : '';
+                        return `<td style="padding:0.75rem; font-weight:700; color:#22d3ee;" title="${tip}">${adjOver}</td><td style="padding:0.75rem; font-weight:700; color:#f472b6;" title="${tip}">${adjUnder}</td>`;
+                    }
+                    return `<td style="padding:0.75rem; color:#52525b;">—</td><td style="padding:0.75rem; color:#52525b;">—</td>`;
+                })() : '';
                 return `
                 <tr style="${rowStyle}">
                     <td style="padding:0.75rem; font-weight:600; color:#a1a1aa;">${rankVal}</td>
@@ -973,11 +1002,15 @@
                     <td style="padding:0.75rem; font-weight:700; color:${r.p_hit != null ? '#22c55e' : '#71717a'};">${hitVal}</td>
                     <td style="padding:0.75rem; font-weight:600; color:#22c55e;">${overVal}</td>
                     <td style="padding:0.75rem; font-weight:600; color:#ef4444;">${underVal}</td>
+                    ${adjCells}
                     <td style="padding:0.75rem; color:#71717a;">${samplesVal}</td>
                     <td style="padding:0.75rem; color:#71717a;">${muVal}</td>
                 </tr>
             `}).join('');
-                resultEl.innerHTML = `
+            const adjHeaders = hasAdj
+                ? `<th style="padding:0.75rem; color:#22d3ee;">Adj Over%</th><th style="padding:0.75rem; color:#f472b6;">Adj Under%</th>`
+                : '';
+            resultEl.innerHTML = `
                 ${msg ? `<p style="color:#71717a; font-size:0.875rem; margin-bottom:0.75rem;">${msg}</p>` : ''}
                 <div style="overflow-x:auto;">
                     <table style="width:100%; border-collapse:collapse; background:#18181b; border:1px solid #27272a; border-radius:8px;">
@@ -991,6 +1024,7 @@
                                 <th style="padding:0.75rem;">Hit Prob</th>
                                 <th style="padding:0.75rem; color:#22c55e;">Over%</th>
                                 <th style="padding:0.75rem; color:#ef4444;">Under%</th>
+                                ${adjHeaders}
                                 <th style="padding:0.75rem;">Samples</th>
                                 <th style="padding:0.75rem;">μ</th>
                             </tr>
@@ -1004,6 +1038,61 @@
                     e.preventDefault();
                     prefillAnalyze(link.dataset.ign, parseFloat(link.dataset.line));
                 });
+            });
+        }
+
+        function uploadMatchupOdds(inputEl) {
+            const file = inputEl?.files?.[0];
+            if (!file) return;
+            inputEl.value = '';
+
+            const statusEl = document.getElementById('oddsUploadStatus');
+            const matchupsEl = document.getElementById('matchupsDetected');
+
+            if (!currentLeaderboard || currentLeaderboard.length === 0) {
+                statusEl.style.display = 'block';
+                statusEl.innerHTML = '<p style="color:#f59e0b; font-size:0.875rem;">Load a leaderboard first (Refresh or Upload Screenshot), then upload the odds.</p>';
+                return;
+            }
+
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = '<p style="color:#71717a; font-size:0.875rem;">Parsing odds screenshot with Gemini...</p>';
+            matchupsEl.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('image', file);
+            formData.append('leaderboard', JSON.stringify(currentLeaderboard));
+
+            fetch('/api/prizepicks/leaderboard/apply-matchup', {
+                method: 'POST',
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    statusEl.innerHTML = `<p style="color:#ef4444; font-size:0.875rem;">${data.error || 'Failed to parse odds.'}</p>`;
+                    return;
+                }
+
+                // Show detected matchups
+                const matchupsHtml = (data.matchups_parsed || []).map(m => {
+                    const o1 = m.team1_odds > 0 ? '+' + m.team1_odds : m.team1_odds;
+                    const o2 = m.team2_odds > 0 ? '+' + m.team2_odds : m.team2_odds;
+                    return `<span style="background:#27272a; border:1px solid #3f3f46; border-radius:6px; padding:0.3rem 0.6rem; font-size:0.8rem; color:#e4e4e7; white-space:nowrap;">${m.team1} <span style="color:#a855f7; font-weight:700;">${o1}</span> vs ${m.team2} <span style="color:#a855f7; font-weight:700;">${o2}</span></span>`;
+                }).join(' ');
+                matchupsEl.style.display = 'block';
+                matchupsEl.innerHTML = `
+                    <div style="font-size:0.78rem; color:#a1a1aa; margin-bottom:0.4rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Detected matchups</div>
+                    <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">${matchupsHtml || '<span style="color:#71717a; font-size:0.8rem;">None</span>'}</div>
+                    ${data.unmatched_teams && data.unmatched_teams.length ? `<div style="margin-top:0.4rem; font-size:0.75rem; color:#71717a;">No odds found for: ${data.unmatched_teams.join(', ')}</div>` : ''}
+                `;
+                statusEl.innerHTML = `<p style="color:#22c55e; font-size:0.875rem;">${data.message}</p>`;
+
+                // Re-render leaderboard with adjusted columns
+                renderLeaderboardResults({ leaderboard: data.leaderboard });
+            })
+            .catch(err => {
+                statusEl.innerHTML = `<p style="color:#ef4444; font-size:0.875rem;">Error: ${err.message}</p>`;
             });
         }
 

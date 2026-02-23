@@ -745,6 +745,14 @@
                     <label>Under Odds (optional)</label>
                     <input type="number" id="underOdds" placeholder="-110" />
                 </div>
+                <div class="input-group">
+                    <label>Team Odds (optional)</label>
+                    <input type="number" id="teamOdds" placeholder="1.62 or -160" />
+                </div>
+                <div class="input-group">
+                    <label>Opponent Odds (optional)</label>
+                    <input type="number" id="oppOdds" placeholder="2.30 or +140" />
+                </div>
                 <button onclick="analyzePrizePicks()">Analyze PrizePicks Line</button>
             </div>
         </div>
@@ -1181,6 +1189,8 @@
             const killLine = document.getElementById('killLine').value;
             const overOdds = document.getElementById('overOdds').value.trim();
             const underOdds = document.getElementById('underOdds').value.trim();
+            const teamOdds = document.getElementById('teamOdds').value.trim();
+            const oppOdds = document.getElementById('oppOdds').value.trim();
             
             if (!ign) {
                 showError('Please enter a player IGN');
@@ -1198,7 +1208,10 @@
             
             try {
                 const startTime = performance.now();
-                const response = await fetch(`/api/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}`);
+                const matchupQuery = (!isNaN(parseFloat(teamOdds)) && !isNaN(parseFloat(oppOdds)))
+                    ? `&team_odds=${parseFloat(teamOdds)}&opp_odds=${parseFloat(oppOdds)}`
+                    : '';
+                const response = await fetch(`/api/prizepicks/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}${matchupQuery}`);
                 const data = await response.json();
                 const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
                 
@@ -1217,7 +1230,7 @@
                     if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
                         try {
                             const edgeResponse = await fetch(
-                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}`
+                                `/api/prizepicks/edge/${encodeURIComponent(ign)}?line=${killLine}&combo_maps=${comboMaps}&over_odds=${parsedOver}&under_odds=${parsedUnder}${matchupQuery}`
                             );
                             if (edgeResponse.ok) {
                                 edgeData = await edgeResponse.json();
@@ -1443,6 +1456,8 @@
                 ${renderMapAnalysis(analysis.map_analysis, analysis.kill_line)}
                 
                 ${renderPPOutcomeComboStats(analysis.two_map_outcome_stats, analysis.kill_line)}
+
+                ${renderPPMatchupAdjustment(analysis.matchup_adjusted_probabilities)}
                 
                 ${renderPPEdgeAnalysis(edgeData)}
             `;
@@ -1771,6 +1786,8 @@
                             </div>
                         </div>
 
+                        ${renderPPMatchupAdjustmentDetails(edgeData.matchup_adjustment)}
+
                         <div style="margin-top: 1rem; background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
                             <div style="font-size:0.9rem; color:#e4e4e7; margin-bottom:0.5rem;">Combined Kills Distribution: Model vs Market</div>
                             <div style="height: 260px;">
@@ -1823,6 +1840,45 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            `;
+        }
+
+        function renderPPMatchupAdjustment(adjusted) {
+            if (!adjusted) return '';
+            return `
+                <div class="analysis-section" style="margin-top: 2rem;">
+                    <h3 class="section-title">🎯 Matchup-Adjusted Hit Probability</h3>
+                    <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:12px; padding:1rem;">
+                        <div style="font-size:0.9rem; color:#a1a1aa; margin-bottom:0.6rem;">
+                            Team win probability: <strong style="color:#e4e4e7;">${(adjusted.team_win_prob * 100).toFixed(1)}%</strong>
+                            (${adjusted.input_method || 'user input'})
+                        </div>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Adj P(Over)</div>
+                                <div style="font-weight:700; color:#22c55e;">${(adjusted.p_over * 100).toFixed(2)}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Adj P(Under)</div>
+                                <div style="font-weight:700; color:#ef4444;">${(adjusted.p_under * 100).toFixed(2)}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Mean Multiplier</div>
+                                <div style="font-weight:700;">${adjusted.multiplier?.toFixed(3) || 'N/A'}x</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPPMatchupAdjustmentDetails(adjustment) {
+            if (!adjustment || !adjustment.applied) return '';
+            return `
+                <div style="margin-top:1rem; background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem; font-size:0.82rem; color:#a1a1aa;">
+                    Matchup adjustment applied: team win prob ${(adjustment.team_win_prob * 100).toFixed(1)}% •
+                    μ ${adjustment.mu_base.toFixed(2)} → ${adjustment.mu_adjusted.toFixed(2)} (${((adjustment.multiplier - 1) * 100).toFixed(1)}%)
                 </div>
             `;
         }

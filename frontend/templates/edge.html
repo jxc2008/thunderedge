@@ -409,6 +409,14 @@
                     <label for="under-odds">Under Odds</label>
                     <input type="number" id="under-odds" placeholder="e.g., -110" value="-110">
                 </div>
+                <div class="input-group">
+                    <label for="team-odds">Team Odds (optional)</label>
+                    <input type="number" id="team-odds" placeholder="e.g., 1.65 or -155">
+                </div>
+                <div class="input-group">
+                    <label for="opp-odds">Opponent Odds (optional)</label>
+                    <input type="number" id="opp-odds" placeholder="e.g., 2.25 or +140">
+                </div>
             </div>
             <button class="analyze-btn" onclick="analyzeEdge()">Analyze Edge</button>
             <div id="error" class="error-message" style="display: none;"></div>
@@ -489,6 +497,8 @@
             const line = parseFloat(document.getElementById('line').value);
             const overOdds = parseFloat(document.getElementById('over-odds').value);
             const underOdds = parseFloat(document.getElementById('under-odds').value);
+            const teamOddsVal = document.getElementById('team-odds').value;
+            const oppOddsVal = document.getElementById('opp-odds').value;
 
             // Validation
             if (!player || isNaN(line) || isNaN(overOdds) || isNaN(underOdds)) {
@@ -504,8 +514,13 @@
             document.getElementById('results').classList.remove('visible');
 
             try {
+                const teamOdds = parseFloat(teamOddsVal);
+                const oppOdds = parseFloat(oppOddsVal);
+                const matchupQuery = (!isNaN(teamOdds) && !isNaN(oppOdds))
+                    ? `&team_odds=${teamOdds}&opp_odds=${oppOdds}`
+                    : '';
                 const response = await fetch(
-                    `/api/edge/${encodeURIComponent(player)}?line=${line}&over_odds=${overOdds}&under_odds=${underOdds}`
+                    `/api/edge/${encodeURIComponent(player)}?line=${line}&over_odds=${overOdds}&under_odds=${underOdds}${matchupQuery}`
                 );
 
                 if (!response.ok) {
@@ -561,6 +576,11 @@
                 description = 'Model is more bullish than market → OVER has better value';
             } else {
                 description = 'Model is less bullish than market → UNDER has better value';
+            }
+
+            if (data.matchup_adjustment && data.matchup_adjustment.applied) {
+                const adj = data.matchup_adjustment;
+                description += ` • Matchup-adjusted μ ${adj.mu_base.toFixed(2)}→${adj.mu_adjusted.toFixed(2)} at ${(adj.team_win_prob * 100).toFixed(1)}% win probability`;
             }
             document.getElementById('rec-description').textContent = description;
 

@@ -1821,14 +1821,19 @@
             // Update table
             document.getElementById('agentStatsTableBody').innerHTML = renderAgentRows(sortedData, window.agentKillLine);
             
-            // Update sort indicators
-            document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => el.textContent = '');
+            // Update sort indicators — only clear agent table indicators, not map table ones
+            document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => {
+                if (!el.id.startsWith('map-') && !el.id.startsWith('map_name') &&
+                    !el.id.startsWith('times_played') && !el.id.startsWith('avg_kills_per_map')) {
+                    el.textContent = '';
+                }
+            });
             const indicator = document.getElementById(`${column}-sort-indicator`);
             if (indicator) {
                 indicator.textContent = agentSortDirection === 'desc' ? ' ↓' : ' ↑';
             }
         }
-        
+
         function renderMapStats(mapData, killLine) {
             if (!mapData || mapData.length === 0) {
                 return '';
@@ -1864,16 +1869,16 @@
                                         Avg K/Map <span id="avg_kills_per_map-sort-indicator"></span>
                                     </th>
                                     <th onclick="sortMapTable('kd_ratio')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        K/D <span id="kd_ratio-sort-indicator"></span>
+                                        K/D <span id="map-kd_ratio-sort-indicator"></span>
                                     </th>
                                     <th onclick="sortMapTable('avg_acs')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        ACS <span id="avg_acs-sort-indicator"></span>
+                                        ACS <span id="map-avg_acs-sort-indicator"></span>
                                     </th>
                                     <th onclick="sortMapTable('avg_adr')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        ADR <span id="avg_adr-sort-indicator"></span>
+                                        ADR <span id="map-avg_adr-sort-indicator"></span>
                                     </th>
                                     <th onclick="sortMapTable('avg_kast')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        KAST% <span id="avg_kast-sort-indicator"></span>
+                                        KAST% <span id="map-avg_kast-sort-indicator"></span>
                                     </th>
                                 </tr>
                             </thead>
@@ -1940,17 +1945,22 @@
             // Update table
             document.getElementById('mapStatsTableBody').innerHTML = renderMapRows(sortedData, window.mapKillLine);
             
-            // Update sort indicators (clear all map indicators first)
+            // Update sort indicators — only clear map table indicators
             document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => {
-                if (el.id.includes('map_name') || el.id.includes('times_played') || 
-                    el.id.includes('avg_kills_per_map') || (el.id.includes('kd_ratio') && el.id !== 'kd_ratio-sort-indicator') ||
-                    (el.id.includes('avg_acs') && el.id !== 'avg_acs-sort-indicator') || 
-                    (el.id.includes('avg_adr') && el.id !== 'avg_adr-sort-indicator') ||
-                    (el.id.includes('avg_kast') && el.id !== 'avg_kast-sort-indicator')) {
+                if (el.id.startsWith('map-') || el.id.startsWith('map_name') ||
+                    el.id.startsWith('times_played') || el.id.startsWith('avg_kills_per_map')) {
                     el.textContent = '';
                 }
             });
-            const indicator = document.getElementById(`${column}-sort-indicator`);
+            // Map column name to its prefixed indicator ID
+            const mapColToIndicatorId = {
+                kd_ratio: 'map-kd_ratio-sort-indicator',
+                avg_acs: 'map-avg_acs-sort-indicator',
+                avg_adr: 'map-avg_adr-sort-indicator',
+                avg_kast: 'map-avg_kast-sort-indicator'
+            };
+            const indicatorId = mapColToIndicatorId[column] || `${column}-sort-indicator`;
+            const indicator = document.getElementById(indicatorId);
             if (indicator) {
                 indicator.textContent = mapSortDirection === 'desc' ? ' ↓' : ' ↑';
             }

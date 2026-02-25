@@ -144,7 +144,37 @@
             color: var(--accent);
         }
         
-        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; overflow-x: hidden; }
+        .command-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: #0A1515;
+            border: 1px solid rgba(14, 207, 207, 0.2);
+            margin-bottom: 0;
+        }
+        .command-prefix { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 1.2rem; color: var(--accent); }
+        .command-bar #playerInput { flex: 1; font-family: 'Courier New', monospace; font-size: 1.1rem; background: transparent; color: #fff; border: none; outline: none; }
+        .command-bar #analyzeBtn { padding: 0.4rem 1rem; font-size: 0.8rem; opacity: 0.7; }
+        .command-bar-secondary { display: flex; flex-wrap: wrap; gap: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem; color: rgba(255,255,255,0.5); }
+        .command-bar-secondary input { width: 80px; padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+        .result-grid { display: grid; grid-template-columns: minmax(0, 58%) minmax(0, 42%); gap: 1.5rem; max-width: 100%; overflow: hidden; }
+        #resultLeft, #resultRight { min-width: 0; overflow-wrap: break-word; }
+        @media (max-width: 768px) { .result-grid { grid-template-columns: 1fr; } }
+        .event-timeline .event-card { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0 0.5rem 1rem; margin: 0.35rem 0 0.35rem 4px; background: transparent; border: none; border-left: 2px solid rgba(14, 207, 207, 0.2); flex-wrap: wrap; }
+        .event-timeline .event-card::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-left: -1.25rem; }
+        .event-timeline .event-name { font-weight: 600; min-width: 140px; }
+        .event-timeline .event-map-chips { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+        .event-timeline .event-ou { font-size: 0.75rem; color: rgba(255,255,255,0.5); }
+        .event-timeline .event-badge { font-size: 0.65rem; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: auto; }
+        .event-timeline .event-badge.cached { background: rgba(34,197,94,0.2); color: #22c55e; }
+        .event-timeline .event-badge.live { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .agent-cards-row { display: flex; gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; max-width: 100%; }
+        .agent-card { min-width: 120px; padding: 0.75rem; background: #0A1515; border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; text-align: center; }
+        .agent-card-name { font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 0.9rem; }
+        .agent-card-value { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 2rem; }
+        .agent-card-meta { font-family: Inter; font-size: 0.75rem; color: rgba(255,255,255,0.5); }
         .hero-section { text-align: center; padding: 3rem 0 2rem; }
         h1 {
             font-family: 'Barlow Condensed', sans-serif;
@@ -277,6 +307,16 @@
             color: rgba(255,255,255,0.6);
             margin: var(--space-2) 0;
         }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .skeleton { background: linear-gradient(90deg, #1a1a1a 25%, #252525 50%, #1a1a1a 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 4px; }
+        .empty-state { text-align: center; padding: 3rem 1rem; }
+        .empty-state .empty-icon { font-size: 2rem; opacity: 0.2; margin-bottom: 0.75rem; }
+        .empty-state .empty-msg { font-size: 0.875rem; color: rgba(255,255,255,0.25); }
+        .scroll-top-btn { position: fixed; bottom: 1.5rem; right: 1.5rem; width: 40px; height: 40px; background: rgba(14, 207, 207, 0.2); border: 1px solid var(--accent); color: var(--accent); font-size: 1.2rem; cursor: pointer; border-radius: 8px; display: none; z-index: 50; }
+        .scroll-top-btn:hover { background: rgba(14, 207, 207, 0.3); }
+        .copyable { cursor: pointer; position: relative; }
+        .copy-toast { position: absolute; top: -24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; pointer-events: none; animation: copyToastFade 1.2s forwards; }
+        @keyframes copyToastFade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
         
         .result {
             display: none;
@@ -1175,44 +1215,23 @@
     </header>
 
     <div class="container">
-        <div class="hero-section">
-            <h1>Challengers Kill Line Analytics</h1>
-            <p class="subtitle">Tier 2 (VCL) player analysis from cached Challengers events<br/>Run <code>python scripts/populate_challengers.py</code> to populate data</p>
+        <div class="command-bar">
+            <span class="command-prefix">></span>
+            <input type="text" id="playerInput" placeholder="enter player ign and press enter..." />
+            <button id="analyzeBtn" onclick="analyzePlayer()">Analyze</button>
         </div>
-        
-        <div class="search-section">
-            <div class="search-box">
-                <div class="input-group">
-                    <label>Player IGN</label>
-                    <input type="text" id="playerInput" placeholder="aspas, TenZ, Demon1..." />
-                </div>
-                <div class="input-group">
-                    <label>Kill Line (O/U)</label>
-                    <input type="number" id="killLine" step="0.5" value="15.5" placeholder="15.5" />
-                </div>
-                <div class="input-group">
-                    <label>Over Odds (optional - enables EV)</label>
-                    <input type="text" id="overOdds" placeholder="-110" />
-                </div>
-                <div class="input-group">
-                    <label>Under Odds (optional - enables EV)</label>
-                    <input type="text" id="underOdds" placeholder="-110" />
-                </div>
-                <div class="input-group">
-                    <label>Team Odds (optional)</label>
-                    <input type="number" id="teamOdds" placeholder="1.62 or -160" />
-                </div>
-                <div class="input-group">
-                    <label>Opponent Odds (optional)</label>
-                    <input type="number" id="oppOdds" placeholder="2.30 or +140" />
-                </div>
-                <button id="analyzeBtn" onclick="analyzePlayer()">Analyze Player</button>
-            </div>
+        <div class="command-bar-secondary">
+            <span>Kill Line: <input type="number" id="killLine" step="0.5" value="15.5" placeholder="15.5" /></span>
+            <span>Over Odds: <input type="text" id="overOdds" placeholder="-110" /></span>
+            <span>Under Odds: <input type="text" id="underOdds" placeholder="-110" /></span>
+            <span>Team Odds: <input type="number" id="teamOdds" placeholder="1.62 or -160" /></span>
+            <span>Opp Odds: <input type="number" id="oppOdds" placeholder="2.30 or +140" /></span>
         </div>
         
         <div id="loading" class="loading">
-            <p style="font-weight: 600; color: #e4e4e7;">Fetching Challengers Data</p>
-            <p>Loading from database (Challengers events)...</p>
+            <div class="skeleton" style="height:80px; margin-bottom:0.75rem;"></div>
+            <div class="skeleton" style="height:200px; margin-bottom:0.75rem;"></div>
+            <div class="skeleton" style="height:120px;"></div>
         </div>
         
         <div id="result" class="result">
@@ -1220,6 +1239,7 @@
         </div>
         
         <div id="error"></div>
+        <button id="scrollTopBtn" class="scroll-top-btn" title="Scroll to top">↑</button>
     </div>
 
     <script>
@@ -1341,47 +1361,24 @@
                 });
             }
             
-            // Build event cards HTML with map kills
+            // Build compact event timeline rows: [dot] [event name] [map kills chips] [O/U] [badge]
             let eventCardsHtml = '';
             if (analysis.event_details && analysis.event_details.length > 0) {
-                eventCardsHtml = analysis.event_details.map((event, index) => {
-                    // Build map kills chips
-                    let mapKillsHtml = '';
-                    if (event.map_kills && event.map_kills.length > 0) {
-                        const chips = event.map_kills.map(kills => {
-                            const isOver = kills > killLine;
-                            return `<span class="kill-chip ${isOver ? 'over' : 'under'}">${kills} ${isOver ? '✓' : '✗'}</span>`;
-                        }).join('');
-                        mapKillsHtml = `
-                            <div class="map-kills-display">
-                                <div class="map-kills-label">Kills per map (vs ${killLine} line):</div>
-                                <div class="map-kills-chips">${chips}</div>
-                            </div>
-                        `;
-                    }
-                    
-                    const overUnderText = event.event_maps > 0 
-                        ? `Over: ${event.event_over}/${event.event_maps} | Under: ${event.event_under}/${event.event_maps}`
-                        : '';
-                    
+                eventCardsHtml = analysis.event_details.map((event) => {
+                    const chips = (event.map_kills || []).map(kills => {
+                        const isOver = kills > killLine;
+                        return `<span class="kill-chip ${isOver ? 'over' : 'under'}">${kills} ${isOver ? '✓' : '✗'}</span>`;
+                    }).join('');
                     const isCached = event.cached;
                     const badgeClass = isCached ? 'cached' : 'live';
                     const badgeText = isCached ? 'CACHED' : 'LIVE';
-                    
+                    const overUnder = event.event_maps > 0 ? `O:${event.event_over}/${event.event_maps} U:${event.event_under}/${event.event_maps}` : '';
                     return `
                         <div class="event-card ${badgeClass}">
-                            <div class="event-header">
-                                <div class="event-name">${event.event_name}</div>
-                                <span class="event-badge ${badgeClass}">${badgeText}</span>
-                            </div>
-                            <div class="event-stats">
-                                <div class="event-stat">KPR: <span>${event.kpr}</span></div>
-                                <div class="event-stat">Rounds: <span>${event.rounds}</span></div>
-                                <div class="event-stat">Rating: <span>${event.rating}</span></div>
-                                <div class="event-stat">ACS: <span>${event.acs}</span></div>
-                                ${overUnderText ? `<div class="event-stat">${overUnderText}</div>` : ''}
-                            </div>
-                            ${mapKillsHtml}
+                            <span class="event-name">${event.event_name}</span>
+                            ${chips ? `<span class="event-map-chips">${chips}</span>` : ''}
+                            ${overUnder ? `<span class="event-ou">${overUnder}</span>` : ''}
+                            <span class="event-badge ${badgeClass}">${badgeText}</span>
                         </div>
                     `;
                 }).join('');
@@ -1474,12 +1471,28 @@
             }
             
             resultDiv.innerHTML = `
+                <div class="result-grid">
+                <div id="resultLeft">
                 <div class="performance-bar">
                     <div class="perf-item">Query Time: <span>${elapsed}s</span></div>
                     <div class="perf-item">Events: <span>${cachedCount} cached</span> / <span class="live-badge">${liveCount} live</span></div>
                     <div class="perf-item">Maps Analyzed: <span>${analysis.total_maps}</span></div>
                 </div>
-                
+                ${edgeData && edgeData.visualization ? `
+                <div class="edge-chart-container" style="margin: 1rem 0;">
+                    <div class="edge-chart-title">Kill Distribution: Model vs Market</div>
+                    <div class="edge-chart-wrapper"><canvas id="distributionChart"></canvas></div>
+                </div>
+                ` : ''}
+                <div class="events-section">
+                    <h3>VCT Events Analyzed</h3>
+                    <p>
+                        Total KPR: ${analysis.total_kpr || analysis.weighted_kpr} | Weighted KPR: ${analysis.weighted_kpr} | Total Rounds: ${analysis.total_rounds}
+                    </p>
+                    <div class="event-timeline">${eventCardsHtml || '<p style="color: #71717a;">No event details available</p>'}</div>
+                </div>
+                </div>
+                <div id="resultRight">
                 <div class="player-card">
                     <div class="player-header">
                         <div class="player-info">
@@ -1487,7 +1500,6 @@
                             <span class="team-name">${analysis.team || 'Unknown Team'}</span>
                         </div>
                     </div>
-                    
                     <div class="over-under-box">
                         <div class="over-under-title">Historical Over/Under vs ${analysis.kill_line} Kill Line</div>
                         <div class="over-under-display">
@@ -1503,25 +1515,19 @@
                         </div>
                         <div class="map-count">Based on ${analysis.total_maps} maps across ${analysis.events_analyzed} VCT events</div>
                     </div>
-                    
                     ${renderMarginStats(analysis.margin_stats, analysis.kill_line)}
-
                     ${renderMatchupAdjustment(analysis.matchup_adjusted_probabilities)}
-
                     ${oddsAnalysisHtml}
-
                     <div class="classification ${classificationClass}">
                         ${analysis.classification}
                         <div class="recommendation">${analysis.recommendation}</div>
                     </div>
                 </div>
-                
                 <div class="formula-box">
                     <div class="formula-label">Formula: Kill Line / Weighted KPR = Rounds Needed</div>
                     <div class="formula">${analysis.kill_line} / ${analysis.weighted_kpr} = </div>
                     <div class="formula-result">${analysis.rounds_needed} rounds</div>
                 </div>
-                
                 <div class="stats-grid">
                     <div class="stat-box">
                         <div class="stat-label">Kill Line</div>
@@ -1554,25 +1560,17 @@
                         <div class="stat-value" style="font-size: 1rem;">${analysis.confidence}</div>
                     </div>
                 </div>
-                
-                <div class="events-section">
-                    <h3>VCT Events Analyzed</h3>
-                    <p>
-                        Total KPR: ${analysis.total_kpr || analysis.weighted_kpr} | Weighted KPR: ${analysis.weighted_kpr} | Total Rounds: ${analysis.total_rounds}
-                    </p>
-                    ${eventCardsHtml || '<p style="color: #71717a;">No event details available</p>'}
+                ${renderAgentStats(agentStats, analysis.kill_line)}
+                ${renderMapStats(mapStats, analysis.kill_line)}
+                ${renderEdgeAnalysis(edgeData, analysis.kill_line, true)}
                 </div>
-                
+                </div>
                 ${analysis.all_map_kills && analysis.all_map_kills.length > 0 ? `
                 <details class="debug-section">
                     <summary>All Map Kills Data (${analysis.all_map_kills.length} maps)</summary>
                     <pre>${JSON.stringify(analysis.all_map_kills, null, 2)}</pre>
                 </details>
                 ` : ''}
-                
-                ${renderAgentStats(agentStats, analysis.kill_line)}
-                ${renderMapStats(mapStats, analysis.kill_line)}
-                ${renderEdgeAnalysis(edgeData, analysis.kill_line)}
             `;
             
             resultDiv.style.display = 'block';
@@ -1677,15 +1675,13 @@
                 return '';
             }
             
-            // Store data globally for sorting
             window.agentStatsData = agentData.map(agent => ({
                 ...agent,
                 avgKillsPerMap: (agent.total_kills / agent.maps_played).toFixed(1)
             }));
             window.agentKillLine = killLine;
             
-            const tableId = 'agentStatsTable';
-            const agentRows = renderAgentRows(window.agentStatsData, killLine);
+            const agentCardsHtml = renderAgentCards(window.agentStatsData, killLine);
             
             return `
                 <div class="analysis-section" style="margin-top: 2rem;">
@@ -1694,61 +1690,33 @@
                         Agent Performance Statistics
                     </h3>
                     <p style="color: #71717a; margin-bottom: 1rem; font-size: 0.875rem;">
-                        Detailed breakdown of performance by agent across all events • Click column headers to sort
+                        Performance by agent • Sort by:
+                        <select id="agentSortSelect" onchange="sortAgentCards()" style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; background: #18181b; border: 1px solid #27272a; border-radius: 4px; color: #e4e4e7; font-size: 0.8rem;">
+                            <option value="maps_played">Maps</option>
+                            <option value="avgKillsPerMap">Avg K/Map</option>
+                            <option value="kd_ratio">K/D</option>
+                            <option value="avg_acs">ACS</option>
+                            <option value="agent">Agent</option>
+                        </select>
                     </p>
-                    <div style="overflow-x: auto;">
-                        <table id="${tableId}" style="width: 100%; border-collapse: collapse; background: #18181b; border-radius: 8px; overflow: hidden;">
-                            <thead>
-                                <tr style="background: #27272a; color: #a1a1aa; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">
-                                    <th onclick="sortAgentTable('agent')" style="padding: 1rem; text-align: left; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        Agent <span id="agent-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('maps_played')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        Maps <span id="maps_played-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('avgKillsPerMap')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        Avg K/Map <span id="avgKillsPerMap-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('kd_ratio')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        K/D <span id="kd_ratio-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('avg_acs')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        ACS <span id="avg_acs-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('avg_adr')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        ADR <span id="avg_adr-sort-indicator"></span>
-                                    </th>
-                                    <th onclick="sortAgentTable('avg_kast')" style="padding: 1rem; text-align: center; font-weight: 600; cursor: pointer; user-select: none; transition: color 0.2s;" onmouseover="this.style.color='#ffffff'" onmouseout="this.style.color='#a1a1aa'">
-                                        KAST% <span id="avg_kast-sort-indicator"></span>
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody id="${tableId}Body">
-                                ${agentRows}
-                            </tbody>
-                        </table>
+                    <div class="agent-cards-row" id="agentCardsContainer">
+                        ${agentCardsHtml}
                     </div>
                 </div>
             `;
         }
         
-        function renderAgentRows(agentData, killLine) {
+        function renderAgentCards(agentData, killLine) {
             return agentData.map(agent => {
-                const kd = agent.kd_ratio;
-                const kdColor = kd >= 1.2 ? '#22c55e' : kd >= 1.0 ? '#f59e0b' : '#ef4444';
                 const avgKillsPerMap = agent.avgKillsPerMap;
-                const isOverLine = avgKillsPerMap > killLine;
-                
+                const isOverLine = parseFloat(avgKillsPerMap) > killLine;
+                const kd = agent.kd_ratio;
                 return `
-                    <tr>
-                        <td style="font-weight: 600; color: #e4e4e7;">${agent.agent}</td>
-                        <td style="text-align: center;">${agent.maps_played}</td>
-                        <td style="text-align: center; font-weight: 600; color: ${isOverLine ? '#22c55e' : '#ef4444'};">${avgKillsPerMap}</td>
-                        <td style="text-align: center; font-weight: 600; color: ${kdColor};">${kd}</td>
-                        <td style="text-align: center;">${agent.avg_acs}</td>
-                        <td style="text-align: center;">${agent.avg_adr}</td>
-                        <td style="text-align: center;">${agent.avg_kast}%</td>
-                    </tr>
+                    <div class="agent-card">
+                        <div class="agent-card-name">${agent.agent}</div>
+                        <div class="agent-card-value" style="color: ${isOverLine ? '#22c55e' : '#ef4444'}">${avgKillsPerMap}</div>
+                        <div class="agent-card-meta">${agent.maps_played} maps • K/D ${kd} • ACS ${agent.avg_acs}</div>
+                    </div>
                 `;
             }).join('');
         }
@@ -1756,43 +1724,24 @@
         let agentSortColumn = 'maps_played';
         let agentSortDirection = 'desc';
         
-        function sortAgentTable(column) {
-            // Toggle direction if same column, otherwise default to desc
-            if (agentSortColumn === column) {
-                agentSortDirection = agentSortDirection === 'desc' ? 'asc' : 'desc';
-            } else {
-                agentSortColumn = column;
-                agentSortDirection = 'desc';
-            }
+        function sortAgentCards() {
+            const select = document.getElementById('agentSortSelect');
+            const column = select ? select.value : agentSortColumn;
+            agentSortColumn = column;
             
-            // Sort the data
             const sortedData = [...window.agentStatsData].sort((a, b) => {
                 let aVal = a[column];
                 let bVal = b[column];
-                
-                // Handle string comparison for agent names
                 if (column === 'agent') {
-                    return agentSortDirection === 'desc' 
-                        ? bVal.localeCompare(aVal)
-                        : aVal.localeCompare(bVal);
+                    return agentSortDirection === 'desc' ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
                 }
-                
-                // Numeric comparison
                 aVal = parseFloat(aVal) || 0;
                 bVal = parseFloat(bVal) || 0;
-                
                 return agentSortDirection === 'desc' ? bVal - aVal : aVal - bVal;
             });
             
-            // Update table
-            document.getElementById('agentStatsTableBody').innerHTML = renderAgentRows(sortedData, window.agentKillLine);
-            
-            // Update sort indicators
-            document.querySelectorAll('[id$="-sort-indicator"]').forEach(el => el.textContent = '');
-            const indicator = document.getElementById(`${column}-sort-indicator`);
-            if (indicator) {
-                indicator.textContent = agentSortDirection === 'desc' ? ' ↓' : ' ↑';
-            }
+            const container = document.getElementById('agentCardsContainer');
+            if (container) container.innerHTML = renderAgentCards(sortedData, window.agentKillLine);
         }
         
         function renderMapStats(mapData, killLine) {
@@ -1955,7 +1904,7 @@
             `;
         }
 
-        function renderEdgeAnalysis(edgeData, killLine) {
+        function renderEdgeAnalysis(edgeData, killLine, skipChart = false) {
             if (!edgeData || !edgeData.success) {
                 return '';
             }
@@ -2037,12 +1986,14 @@
                         </div>
                     </div>
                     
+                    ${!skipChart ? `
                     <div class="edge-chart-container">
                         <div class="edge-chart-title">Kill Distribution: Model vs Market</div>
                         <div class="edge-chart-wrapper">
                             <canvas id="distributionChart"></canvas>
                         </div>
                     </div>
+                    ` : ''}
                     
                     <table class="edge-comparison-table">
                         <thead>
@@ -2210,8 +2161,44 @@
         
         // Allow Enter key to trigger search
         document.getElementById('playerInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                analyzePlayer();
+            if (e.key === 'Enter') analyzePlayer();
+        });
+
+        function countUp(el, target, duration) {
+            if (!el) return;
+            const start = performance.now();
+            const from = parseFloat(el.textContent) || 0;
+            function step(now) {
+                const p = Math.min((now - start) / (duration || 600), 1);
+                el.textContent = (from + (target - from) * p).toFixed(1) + '%';
+                if (p < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        }
+
+        // Scroll-to-top button
+        const scrollTopBtn = document.getElementById('scrollTopBtn');
+        if (scrollTopBtn) {
+            window.addEventListener('scroll', function() {
+                scrollTopBtn.style.display = window.scrollY > 300 ? 'block' : 'none';
+            });
+            scrollTopBtn.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Copy on click for .copyable elements
+        document.addEventListener('click', function(e) {
+            const el = e.target.closest('.copyable');
+            if (!el) return;
+            const text = el.dataset.copy || el.textContent.trim();
+            if (text && navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    const toast = document.createElement('span');
+                    toast.className = 'copy-toast';
+                    toast.textContent = 'Copied!';
+                    el.style.position = 'relative';
+                    el.appendChild(toast);
+                    setTimeout(() => toast.remove(), 1200);
+                });
             }
         });
     </script>

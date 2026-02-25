@@ -140,23 +140,24 @@ class RibScraper:
     # Database-first lookups (uses existing populate_challengers data)
     # ------------------------------------------------------------------
 
-    def _get_match_combos_from_db(self, ign: str, tier: Optional[int] = None) -> Tuple[List[dict], str]:
+    def _get_match_combos_from_db(self, ign: str, tier: Optional[int] = None) -> Tuple[List[dict], str, List[dict]]:
         """
         Query existing player_map_stats / player_event_stats tables for a player.
-        Returns (match_combinations, team_name).
+        Returns (match_combinations, team_name, events_with_kpr).
         Works for any tier: 1=VCT, 2=Challengers, 3=GC, None=all.
         Case-insensitive name matching (same as DB queries).
         """
         if not self.db:
-            return [], 'Unknown'
+            return [], 'Unknown', []
 
         # get_player_all_event_stats uses LOWER() — case insensitive
         db_events = self.db.get_player_all_event_stats(ign, tier=tier)
         if not db_events:
-            return [], 'Unknown'
+            return [], 'Unknown', []
 
         match_combinations: List[dict] = []
         team = db_events[0].get('team', 'Unknown') if db_events else 'Unknown'
+        events_for_kpr: List[dict] = []
 
         for db_event in db_events:
             event_db = self.db.get_vct_event(db_event['event_url'])
@@ -167,8 +168,19 @@ class RibScraper:
             for m in matches:
                 if m.get('map_kills') and len(m['map_kills']) >= 1:
                     match_combinations.append(m)
+            # Build event dict with kpr/rounds_played for PrizePicksProcessor.calculate_weighted_kpr
+            kpr = db_event.get('kpr') or 0
+            rounds = db_event.get('rounds_played') or 0
+            if kpr > 0 and rounds > 0:
+                events_for_kpr.append({
+                    'kpr': kpr,
+                    'rounds_played': rounds,
+                    'event_name': db_event.get('event_name', ''),
+                    'rating': db_event.get('rating', 0),
+                    'acs': db_event.get('acs', 0),
+                })
 
-        return match_combinations, team
+        return match_combinations, team, events_for_kpr
 
     # ------------------------------------------------------------------
     # Event → series link parsing (session-cached)
@@ -513,11 +525,16 @@ class RibScraper:
     # ------------------------------------------------------------------
 
     def _build_player_result(self, ign: str, team: str, match_combinations: List[dict],
-                              kill_line: float, event_name: str = '') -> dict:
+                              kill_line: float, event_name: str = '',
+                              events_with_kpr: Optional[List[dict]] = None) -> dict:
+        # events_with_kpr: list of {kpr, rounds_played, event_name, ...} for PrizePicksProcessor
+        events = events_with_kpr if events_with_kpr else (
+            [{'event_name': event_name, 'cached': True}] if event_name else []
+        )
         return {
             'ign': ign,
             'team': team,
-            'events': [{'event_name': event_name, 'cached': True}] if event_name else [],
+            'events': events,
             'kill_line': kill_line,
             'match_combinations': match_combinations,
             'overall_stats': {},
@@ -532,18 +549,20 @@ class RibScraper:
         logger.info(f"RIB: PrizePicks VCT lookup: {ign}")
 
         # 1. Try DB with tier=1 (VCT) first
-        combos, team = self._get_match_combos_from_db(ign, tier=1)
+        result = self._get_match_combos_from_db(ign, tier=1)
+        combos, team, events_kpr = result[0], result[1], result[2]
         if combos:
             logger.info(f"RIB: DB hit (VCT) for '{ign}' — {len(combos)} matches")
-            return self._build_player_result(ign, team, combos, kill_line, 'DB (VCT)')
+            return self._build_player_result(ign, team, combos, kill_line, 'DB (VCT)', events_kpr)
 
         # 2. Try DB without tier filter (catches mixed-tier data)
-        combos, team = self._get_match_combos_from_db(ign, tier=None)
+        result = self._get_match_combos_from_db(ign, tier=None)
+        combos, team, events_kpr = result[0], result[1], result[2]
         if combos:
             logger.info(f"RIB: DB hit (any tier) for '{ign}' — {len(combos)} matches")
-            return self._build_player_result(ign, team, combos, kill_line, 'DB')
+            return self._build_player_result(ign, team, combos, kill_line, 'DB', events_kpr)
 
-        # 3. Live rib.gg scrape — VCT events only
+        # 3. Live rib.gg scrape — VCT events only (no KPR from rib.gg, processor may fail)
         player_info = self._find_player_info(ign, self.VCT_2026_KICKOFF_EVENTS)
         if not player_info:
             logger.warning(f"RIB: '{ign}' not found in VCT events")
@@ -553,8 +572,21 @@ class RibScraper:
         if not combos:
             return {}
 
+        # Live scrape: compute KPR from map kills for processor
+        events_kpr = []
+        for m in combos:
+            kills = m.get('map_kills', [])
+            if kills:
+                total_k = sum(kills)
+                total_rounds = len(kills) * 24  # approx rounds per map
+                if total_rounds > 0:
+                    events_kpr.append({
+                        'kpr': total_k / total_rounds,
+                        'rounds_played': total_rounds,
+                        'event_name': m.get('event_name', ''),
+                    })
         result = self._build_player_result(ign, player_info.get('team_name', 'Unknown'),
-                                            combos, kill_line, player_info['event_name'])
+                                            combos, kill_line, player_info['event_name'], events_kpr)
         if self.db:
             self.db.save_player_data_cache(ign, result)
         return result
@@ -572,10 +604,11 @@ class RibScraper:
 
         # 1. Try DB across ALL tiers (Challengers DB has tier 2; VCT DB has tier 1)
         #    get_player_all_event_stats uses LOWER() — case insensitive
-        combos, team = self._get_match_combos_from_db(ign, tier=None)
+        result = self._get_match_combos_from_db(ign, tier=None)
+        combos, team, events_kpr = result[0], result[1], result[2]
         if combos:
             logger.info(f"RIB: DB hit for '{ign}' — {len(combos)} matches, team={team}")
-            return self._build_player_result(ign, team, combos, kill_line, 'DB')
+            return self._build_player_result(ign, team, combos, kill_line, 'DB', events_kpr)
 
         # 2. Live rib.gg — search ALL events: VCT + Challengers + GC
         player_info = self._find_player_info(ign, self.ALL_EVENTS)
@@ -587,8 +620,20 @@ class RibScraper:
         if not combos:
             return {}
 
+        events_kpr = []
+        for m in combos:
+            kills = m.get('map_kills', [])
+            if kills:
+                total_k = sum(kills)
+                total_rounds = len(kills) * 24
+                if total_rounds > 0:
+                    events_kpr.append({
+                        'kpr': total_k / total_rounds,
+                        'rounds_played': total_rounds,
+                        'event_name': m.get('event_name', ''),
+                    })
         result = self._build_player_result(ign, player_info.get('team_name', 'Unknown'),
-                                            combos, kill_line, player_info['event_name'])
+                                            combos, kill_line, player_info['event_name'], events_kpr)
         if self.db:
             self.db.save_player_data_cache_challengers(ign, result)
         return result

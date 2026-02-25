@@ -1711,7 +1711,9 @@
                 ${renderMapAnalysis(analysis.map_analysis, analysis.kill_line)}
                 
                 ${renderPPOutcomeComboStats(analysis.two_map_outcome_stats, analysis.kill_line)}
-                
+
+                ${renderPPMatchupAdjustment(analysis.matchup_adjusted_probabilities)}
+
                 ${renderPPEdgeAnalysis(edgeData)}
             `;
             
@@ -2039,6 +2041,8 @@
                             </div>
                         </div>
 
+                        ${renderPPMatchupAdjustmentDetails(edgeData.matchup_adjustment)}
+
                         <div style="margin-top: 1rem; background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem;">
                             <div style="font-size:0.9rem; color:#e4e4e7; margin-bottom:0.5rem;">Combined Kills Distribution: Model vs Market</div>
                             <div style="height: 260px;">
@@ -2091,6 +2095,45 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            `;
+        }
+
+        function renderPPMatchupAdjustment(adjusted) {
+            if (!adjusted) return '';
+            return `
+                <div class="analysis-section" style="margin-top: 2rem;">
+                    <h3 class="section-title">🎯 Matchup-Adjusted Hit Probability</h3>
+                    <div style="background:#0a0a0a; border:1px solid #27272a; border-radius:12px; padding:1rem;">
+                        <div style="font-size:0.9rem; color:#a1a1aa; margin-bottom:0.6rem;">
+                            Team win probability: <strong style="color:#e4e4e7;">${(adjusted.team_win_prob * 100).toFixed(1)}%</strong>
+                            (${adjusted.input_method || 'user input'})
+                        </div>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Adj P(Over)</div>
+                                <div style="font-weight:700; color:#22c55e;">${(adjusted.p_over * 100).toFixed(2)}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Adj P(Under)</div>
+                                <div style="font-weight:700; color:#ef4444;">${(adjusted.p_under * 100).toFixed(2)}%</div>
+                            </div>
+                            <div style="background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.7rem 0.9rem;">
+                                <div style="font-size:0.72rem; color:#71717a;">Mean Multiplier</div>
+                                <div style="font-weight:700;">${adjusted.multiplier?.toFixed(3) || 'N/A'}x</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPPMatchupAdjustmentDetails(adjustment) {
+            if (!adjustment || !adjustment.applied) return '';
+            return `
+                <div style="margin-top:1rem; background:#18181b; border:1px solid #27272a; border-radius:8px; padding:0.75rem; font-size:0.82rem; color:#a1a1aa;">
+                    Matchup adjustment applied: team win prob ${(adjustment.team_win_prob * 100).toFixed(1)}% •
+                    μ ${adjustment.mu_base.toFixed(2)} → ${adjustment.mu_adjusted.toFixed(2)} (${((adjustment.multiplier - 1) * 100).toFixed(1)}%)
                 </div>
             `;
         }

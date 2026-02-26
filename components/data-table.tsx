@@ -15,7 +15,7 @@ export interface Column<T> {
   render?: (value: T[keyof T], row: T) => React.ReactNode
 }
 
-interface DataTableProps<T extends Record<string, unknown>> {
+interface DataTableProps<T extends object> {
   columns: Column<T>[]
   data: T[]
   filterPlaceholder?: string
@@ -31,7 +31,7 @@ function SortIcon({ dir }: { dir: SortDir }) {
   return <ChevronsUpDown size={13} style={{ color: '#3f3f46' }} />
 }
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
   columns,
   data,
   filterPlaceholder = 'Filter...',

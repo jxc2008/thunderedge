@@ -18,7 +18,7 @@ const NAV_GROUPS = [
     label: 'Props',
     links: [
       { label: 'PrizePicks', href: '/prizepicks' },
-      { label: 'Challengers PP', href: '/challengers-prizepicks' },
+      { label: 'Challengers PP', href: '/challengers/prizepicks' },
     ],
   },
   {

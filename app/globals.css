@@ -125,6 +125,12 @@ body {
   background-clip: text;
 }
 
+/* Placeholder styling for dark inputs */
+input::placeholder,
+textarea::placeholder {
+  color: #71717a;
+}
+
 /* CSS-based focus styles — replaces inline JS onFocus/onBlur handlers */
 input:focus-visible,
 textarea:focus-visible {

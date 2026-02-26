@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+@layer base {
+  :root {
   /* ThunderEdge design tokens */
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
@@ -56,6 +57,7 @@
   --input: 240 4% 16%;
   --ring: 217 91% 60%;
   --radius: 0.625rem;
+  }
 }
 
 * {

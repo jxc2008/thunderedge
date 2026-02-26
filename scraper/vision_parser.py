@@ -123,18 +123,24 @@ def parse_prizepicks_image_vision(image_bytes: bytes) -> Tuple[List[dict], int]:
 
 MATCHUP_ODDS_PROMPT = """Extract team matchup moneyline odds from this sports betting screenshot.
 
-For each match shown, extract both teams and their moneyline odds.
+LAYOUT: Each match row typically has:
+- Left: Team 1 name and logo
+- Center: Two moneyline numbers in DARK GRAY boxes, flanking a "VS" separator (team1 odds | VS | team2 odds)
+- Right: Team 2 logo and name
+- Far right: IGNORE this column — it may show "LIVE" or numbers in LIGHT BLUE boxes (+299, +6, +120). These are NOT moneylines.
+
+CRITICAL: Extract ONLY the two moneyline odds in dark gray boxes between the two teams. Do NOT use numbers from the far-right light blue column.
 
 Return ONLY valid JSON array. Format:
 [
-  {"team1": "Sentinels", "team1_odds": -150, "team2": "NRG", "team2_odds": 130},
-  {"team1": "Team Liquid", "team1_odds": -110, "team2": "Fnatic", "team2_odds": -110}
+  {"team1": "ULF Esports", "team1_odds": -217, "team2": "UCAM Esports Club", "team2_odds": 159},
+  {"team1": "9z Team", "team1_odds": 140, "team2": "ShindeN", "team2_odds": -200}
 ]
 
 Rules:
-- Extract team names exactly as shown in the screenshot
-- American odds: favorites have negative numbers (e.g. -150), underdogs have positive (e.g. +130 → use 130 without the + sign)
-- Decimal odds: use the exact decimal number (e.g. 1.65, 2.20)
+- Extract team names exactly as shown (left team = team1, right team = team2)
+- American odds: negative for favorites (e.g. -217, -200), positive for underdogs (e.g. +159 → use 159, +140 → use 140)
+- The two moneylines are the numbers in dark gray boxes next to each team's logo, flanking "VS"
 - Include ALL matches visible in the screenshot
 - Return ONLY valid JSON, no other text or explanation"""
 
@@ -166,7 +172,7 @@ def parse_matchup_odds_image_vision(image_bytes: bytes) -> List[dict]:
     try:
         response = model.generate_content(
             [image_part, MATCHUP_ODDS_PROMPT],
-            generation_config=genai.types.GenerationConfig(temperature=0.1, max_output_tokens=1024),
+            generation_config=genai.types.GenerationConfig(temperature=0.1, max_output_tokens=2048),
         )
         text = (response.text or '').strip()
         if not text:

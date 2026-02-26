@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 interface SearchFormProps {
   onSubmit?: (data: SearchFormData) => void
@@ -45,27 +45,45 @@ export function SearchForm({
     }
   }
 
-  // Shared input style — focus ring is handled by globals.css :focus-visible
   const inputStyle: React.CSSProperties = {
-    background: '#18181b',
-    borderColor: '#3f3f46',
+    background: '#0a0a0a',
+    border: '1px solid rgba(255,255,255,0.1)',
     color: '#ffffff',
+    padding: '0.75rem 1rem',
+    fontSize: '0.875rem',
+    fontFamily: 'inherit',
+    transition: 'border-color 0.15s',
+    outline: 'none',
+    borderRadius: 0,
+    width: '100%',
+  }
+
+  const labelStyle: React.CSSProperties = {
+    fontFamily: 'inherit',
+    fontSize: '0.7rem',
+    fontWeight: 500,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.12em',
+    color: 'rgba(255,255,255,0.4)',
+    display: 'block',
+    marginBottom: '0.5rem',
   }
 
   return (
     <div
-      className="w-full max-w-[640px] mx-auto rounded-[12px] border p-6"
-      style={{ background: '#0a0a0a', borderColor: '#27272a' }}
+      className="w-full"
+      style={{
+        background: '#0D0D0D',
+        border: '1px solid rgba(240,224,64,0.15)',
+        borderLeft: '3px solid #F0E040',
+        padding: '2rem',
+      }}
     >
       <form onSubmit={handleSubmit} onKeyDown={handleKey} noValidate>
         <div className="flex flex-col gap-4">
           {/* Player IGN */}
-          <div className="flex flex-col gap-1.5">
-            <label
-              htmlFor="player-ign"
-              className="text-[0.7rem] uppercase tracking-[0.12em] font-medium"
-              style={{ color: '#71717a' }}
-            >
+          <div>
+            <label htmlFor="player-ign" style={labelStyle}>
               Player IGN
             </label>
             <input
@@ -75,19 +93,14 @@ export function SearchForm({
               onChange={(e) => setForm((f) => ({ ...f, player: e.target.value }))}
               placeholder={placeholder}
               required
-              className="h-11 px-3 rounded-[8px] border text-sm outline-none transition-all duration-150"
               style={inputStyle}
             />
           </div>
 
           {/* Kill Line + Over Odds row */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="kill-line"
-                className="text-[0.7rem] uppercase tracking-[0.12em] font-medium"
-                style={{ color: '#71717a' }}
-              >
+            <div>
+              <label htmlFor="kill-line" style={labelStyle}>
                 Kill Line
               </label>
               <input
@@ -99,17 +112,12 @@ export function SearchForm({
                 onChange={(e) => setForm((f) => ({ ...f, killLine: e.target.value }))}
                 placeholder="19.5"
                 required
-                className="h-11 px-3 rounded-[8px] border text-sm outline-none transition-all duration-150 tabular-nums"
-                style={inputStyle}
+                style={{ ...inputStyle, fontVariantNumeric: 'tabular-nums' }}
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="over-odds"
-                className="text-[0.7rem] uppercase tracking-[0.12em] font-medium"
-                style={{ color: '#71717a' }}
-              >
+            <div>
+              <label htmlFor="over-odds" style={labelStyle}>
                 Over Odds
               </label>
               <input
@@ -118,24 +126,26 @@ export function SearchForm({
                 value={form.overOdds}
                 onChange={(e) => setForm((f) => ({ ...f, overOdds: e.target.value }))}
                 placeholder="-110"
-                className="h-11 px-3 rounded-[8px] border text-sm outline-none transition-all duration-150 tabular-nums"
-                style={inputStyle}
+                style={{ ...inputStyle, fontVariantNumeric: 'tabular-nums' }}
               />
             </div>
           </div>
 
-          {/* Under Odds (optional) */}
+          {/* Under Odds */}
           {showUnderOdds && (
-            <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="under-odds"
-                className="text-[0.7rem] uppercase tracking-[0.12em] font-medium flex items-center gap-2"
-                style={{ color: '#71717a' }}
-              >
+            <div>
+              <label htmlFor="under-odds" style={labelStyle}>
                 Under Odds{' '}
                 <span
-                  className="text-[0.65rem] px-1.5 py-0.5 rounded-[4px] normal-case tracking-normal"
-                  style={{ background: '#27272a', color: '#71717a', marginLeft: 6 }}
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    color: 'rgba(255,255,255,0.4)',
+                    fontSize: '0.65rem',
+                    padding: '0.1rem 0.4rem',
+                    marginLeft: 6,
+                    textTransform: 'none',
+                    letterSpacing: 'normal',
+                  }}
                 >
                   Optional
                 </span>
@@ -146,20 +156,36 @@ export function SearchForm({
                 value={form.underOdds}
                 onChange={(e) => setForm((f) => ({ ...f, underOdds: e.target.value }))}
                 placeholder="-110"
-                className="h-11 px-3 rounded-[8px] border text-sm outline-none transition-all duration-150 tabular-nums"
-                style={inputStyle}
+                style={{ ...inputStyle, fontVariantNumeric: 'tabular-nums' }}
               />
             </div>
           )}
 
-          {/* CTA Button */}
+          {/* CTA Button — yellow, sharp corners, Barlow Condensed */}
           <div className="flex flex-col gap-1.5">
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full h-11 rounded-[8px] text-sm font-semibold text-white transition-opacity duration-150 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2"
               style={{
-                background: 'linear-gradient(135deg, #3b82f6, #0ea5e9)',
+                fontFamily: 'var(--font-display)',
+                fontWeight: 700,
+                fontSize: '0.9rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                padding: '0.75rem 2rem',
+                background: isLoading ? 'rgba(240,224,64,0.5)' : '#F0E040',
+                color: '#000000',
+                border: 'none',
+                borderRadius: 0,
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                transition: 'background 0.15s, transform 0.15s',
+              }}
+              onMouseEnter={(e) => {
+                if (!isLoading) (e.currentTarget as HTMLButtonElement).style.background = '#ffffff'
+              }}
+              onMouseLeave={(e) => {
+                if (!isLoading) (e.currentTarget as HTMLButtonElement).style.background = '#F0E040'
               }}
             >
               {isLoading ? (
@@ -168,13 +194,9 @@ export function SearchForm({
                   <span>Analyzing...</span>
                 </>
               ) : (
-                <>
-                  <Search size={15} />
-                  <span>{submitLabel}</span>
-                </>
+                <span>{submitLabel}</span>
               )}
             </button>
-            {/* Keyboard shortcut hint — separate line so it never overlaps button text */}
             <p
               className="text-right text-[0.65rem] select-none"
               style={{ color: 'rgba(255,255,255,0.2)' }}
@@ -189,12 +211,12 @@ export function SearchForm({
       {lastQuery && (
         <div
           className="mt-4 pt-3 border-t text-[0.75rem] flex items-center gap-1.5"
-          style={{ borderColor: '#27272a', color: '#71717a' }}
+          style={{ borderColor: 'rgba(255,255,255,0.08)', color: '#71717a' }}
         >
           <span>Last query:</span>
           <span style={{ color: '#a1a1aa' }}>{lastQuery.player}</span>
           <span>—</span>
-          <span className="tabular-nums">{lastQuery.ms}ms</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{lastQuery.ms}ms</span>
         </div>
       )}
     </div>

@@ -33,9 +33,11 @@ export function OverUnderDisplay({
           <div
             className="flex items-center gap-2 tabular-nums"
             style={{
-              fontSize: '4rem',
+              fontFamily: 'var(--font-display)',
+              fontSize: '4.5rem',
               fontWeight: 900,
               lineHeight: 1,
+              letterSpacing: '-0.02em',
               color: '#22c55e',
             }}
           >
@@ -74,9 +76,11 @@ export function OverUnderDisplay({
           <div
             className="flex items-center gap-2 tabular-nums"
             style={{
-              fontSize: '4rem',
+              fontFamily: 'var(--font-display)',
+              fontSize: '4.5rem',
               fontWeight: 900,
               lineHeight: 1,
+              letterSpacing: '-0.02em',
               color: '#ef4444',
             }}
           >

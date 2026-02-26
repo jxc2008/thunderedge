@@ -263,25 +263,34 @@ export default function ShowcasePage() {
         {/* Hero */}
         <div className="text-center py-8">
           <div
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[0.75rem] font-medium mb-5"
+            className="inline-flex items-center gap-2 px-3 py-1 text-[0.7rem] font-medium mb-5 uppercase tracking-[0.06em]"
             style={{
-              background: 'rgba(59,130,246,0.1)',
-              border: '1px solid rgba(59,130,246,0.2)',
-              color: '#3b82f6',
+              background: 'rgba(240,224,64,0.12)',
+              border: '1px solid rgba(240,224,64,0.25)',
+              color: '#F0E040',
+              fontFamily: 'var(--font-display)',
             }}
           >
             <BarChart2 size={12} />
-            React Component Library — Design Reference
+            Valorant Kill Line Analytics — Design Reference
           </div>
           <h1
-            className="font-bold tracking-tight text-balance mb-3"
-            style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', color: '#ffffff' }}
+            className="font-display uppercase text-balance mb-3"
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 900,
+              fontSize: 'clamp(3rem, 7vw, 5rem)',
+              letterSpacing: '-0.02em',
+              lineHeight: 1.05,
+              color: '#ffffff',
+              textShadow: '0 0 1px #F0E040',
+            }}
           >
-            Thunder<span className="gradient-text">Edge</span> Design System
+            Thunder<span style={{ color: '#F0E040' }}>Edge</span>
           </h1>
-          <p className="text-sm max-w-lg mx-auto text-pretty" style={{ color: '#71717a' }}>
+          <p className="text-sm max-w-lg mx-auto text-pretty mt-1" style={{ color: 'rgba(255,255,255,0.5)' }}>
             Production-ready React components for the ThunderEdge Valorant analytics platform.
-            Built with shadcn/ui + Tailwind, faithful to the established dark design language.
+            Kill line analytics · EV calculators · Team analysis · MoneyLine strategy.
           </p>
           {/* Demo controls */}
           <div
@@ -290,36 +299,36 @@ export default function ShowcasePage() {
           >
             <button
               onClick={() => toast('success', 'BET OVER recommended', 'TenZ +9.2pp edge vs market')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.25)', color: '#22c55e' }}
+              className="font-display text-[0.85rem] font-bold uppercase tracking-[0.06em] px-4 py-2 border transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.25)', color: '#22c55e', borderRadius: 0 }}
             >
               Toast: Success
             </button>
             <button
               onClick={() => toast('error', 'Player not found', 'Could not locate TenZ in VLR database')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.25)', color: '#ef4444' }}
+              className="font-display text-[0.85rem] font-bold uppercase tracking-[0.06em] px-4 py-2 border transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.25)', color: '#ef4444', borderRadius: 0 }}
             >
               Toast: Error
             </button>
             <button
               onClick={() => toast('warning', 'Rate limit approaching', '4 of 5 API calls used')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)', color: '#f59e0b' }}
+              className="font-display text-[0.85rem] font-bold uppercase tracking-[0.06em] px-4 py-2 border transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)', color: '#f59e0b', borderRadius: 0 }}
             >
               Toast: Warning
             </button>
             <button
               onClick={() => toast('info', 'Cache hit', 'Returning cached result from 5m ago')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(59,130,246,0.1)', borderColor: 'rgba(59,130,246,0.25)', color: '#3b82f6' }}
+              className="font-display text-[0.85rem] font-bold uppercase tracking-[0.06em] px-4 py-2 border transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(59,130,246,0.1)', borderColor: 'rgba(59,130,246,0.25)', color: '#3b82f6', borderRadius: 0 }}
             >
               Toast: Info
             </button>
             <button
               onClick={() => setShowError((v) => !v)}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(113,113,122,0.1)', borderColor: '#3f3f46', color: '#a1a1aa' }}
+              className="font-display text-[0.85rem] font-bold uppercase tracking-[0.06em] px-4 py-2 border transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(113,113,122,0.1)', borderColor: '#3f3f46', color: '#a1a1aa', borderRadius: 0 }}
             >
               Toggle Error State
             </button>

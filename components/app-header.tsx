@@ -3,33 +3,42 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, X } from 'lucide-react'
+import { ChevronDown, Menu, X } from 'lucide-react'
 
-const NAV_GROUPS = [
+// Dropdown nav items matching original HTML nav structure
+const NAV_DROPDOWNS = [
   {
-    label: 'VCT',
+    label: 'Thunderpick Kill Line',
     links: [
-      { label: 'Player', href: '/' },
-      { label: 'Edge', href: '/edge' },
-      { label: 'Team', href: '/team' },
+      { label: 'VCT Player', href: '/' },
+      { label: 'Challengers', href: '/challengers' },
     ],
   },
   {
-    label: 'Props',
+    label: 'PrizePicks',
     links: [
       { label: 'PrizePicks', href: '/prizepicks' },
       { label: 'Challengers PP', href: '/challengers-prizepicks' },
     ],
   },
-  {
-    label: 'Challengers',
-    links: [{ label: 'Challengers Player', href: '/challengers' }],
-  },
-  {
-    label: 'Strategy',
-    links: [{ label: 'MoneyLines', href: '/moneylines' }],
-  },
 ]
+
+const NAV_DIRECT = [
+  { label: 'Team', href: '/team' },
+  { label: 'MoneyLine', href: '/moneylines' },
+  { label: 'Edge', href: '/edge' },
+]
+
+// Page badge labels, matched to route
+const PAGE_BADGES: Record<string, string> = {
+  '/': 'Kill Line',
+  '/challengers': 'Challengers',
+  '/prizepicks': 'PrizePicks',
+  '/challengers-prizepicks': 'Challengers PP',
+  '/team': 'Team',
+  '/moneylines': 'MoneyLine',
+  '/edge': 'Edge',
+}
 
 interface AppHeaderProps {
   activePage?: string
@@ -38,12 +47,15 @@ interface AppHeaderProps {
 export function AppHeader({ activePage }: AppHeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isClosingMobile, setIsClosingMobile] = useState(false)
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null)
   const pathname = usePathname()
 
-  const isActive = (href: string) => {
-    if (activePage) return activePage === href
-    return pathname === href
-  }
+  const currentPath = activePage ?? pathname
+
+  const isActive = (href: string) => currentPath === href
+
+  const isDropdownActive = (links: { href: string }[]) =>
+    links.some((l) => currentPath === l.href)
 
   const handleToggleMobile = () => {
     if (mobileOpen) {
@@ -65,72 +77,143 @@ export function AppHeader({ activePage }: AppHeaderProps) {
     }, 180)
   }
 
+  const pageBadge = PAGE_BADGES[currentPath]
+
   return (
     <header
-      className="sticky top-0 z-50 h-16 border-b"
+      className="sticky top-0 z-50"
       style={{
-        background: 'rgba(10,10,10,0.95)',
+        background: 'rgba(0,0,0,0.85)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        borderColor: '#27272a',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        padding: '1rem 0',
       }}
     >
-      <div className="page-container h-full flex items-center justify-between">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
+      <div className="page-container flex items-center justify-between">
+        {/* Logo — ⚡ THUNDEREDGE in Barlow Condensed */}
+        <Link href="/" className="flex items-center gap-3 shrink-0" style={{ textDecoration: 'none' }}>
           <span
-            className="w-8 h-8 flex items-center justify-center text-white font-bold text-base shrink-0"
-            style={{
-              background: 'linear-gradient(135deg, #3b82f6, #0ea5e9)',
-              borderRadius: '6px',
-            }}
+            className="font-display font-extrabold text-white"
+            style={{ fontSize: '1.4rem', letterSpacing: '-0.01em', lineHeight: 1 }}
           >
-            T
-          </span>
-          <span className="text-white font-semibold text-[1.05rem] tracking-tight whitespace-nowrap">
-            Thunder<span className="gradient-text">Edge</span>
+            <span style={{ color: '#F0E040' }}>⚡</span>{' '}
+            THUNDEREDGE
           </span>
         </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
-          {NAV_GROUPS.map((group, gi) => (
-            <div key={group.label} className="flex items-center">
-              {gi > 0 && (
-                <span
-                  className="mx-2 w-px h-4 shrink-0"
-                  style={{ background: '#27272a' }}
-                  aria-hidden="true"
-                />
-              )}
-              <span
-                className="text-[0.65rem] uppercase tracking-widest mr-1.5 shrink-0"
-                style={{ color: '#3f3f46', letterSpacing: '0.12em' }}
+          {/* Dropdown groups */}
+          {NAV_DROPDOWNS.map((group) => {
+            const active = isDropdownActive(group.links)
+            return (
+              <div
+                key={group.label}
+                className="relative"
+                onMouseEnter={() => setOpenDropdown(group.label)}
+                onMouseLeave={() => setOpenDropdown(null)}
               >
-                {group.label}
-              </span>
-              {group.links.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="relative px-3 py-1 rounded-[6px] text-[0.8rem] font-medium transition-colors duration-150 whitespace-nowrap"
+                <button
+                  className="flex items-center gap-1 px-3 py-2 text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150"
                   style={{
-                    color: isActive(link.href) ? '#ffffff' : '#a1a1aa',
-                    background: isActive(link.href) ? '#18181b' : 'transparent',
+                    color: active ? '#ffffff' : 'rgba(255,255,255,0.55)',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: active ? '2px solid #F0E040' : '2px solid transparent',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
                   }}
-                  aria-current={isActive(link.href) ? 'page' : undefined}
                 >
-                  {link.label}
-                </Link>
-              ))}
-            </div>
+                  {group.label}
+                  <ChevronDown size={12} style={{ opacity: 0.6 }} />
+                </button>
+
+                {/* Dropdown menu */}
+                {openDropdown === group.label && (
+                  <div
+                    className="absolute top-full left-0 z-50 py-2"
+                    style={{
+                      minWidth: '180px',
+                      background: 'rgba(0,0,0,0.95)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    {group.links.map((link) => (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className="block px-4 py-2.5 text-[0.8rem] transition-colors duration-100"
+                        style={{
+                          color: isActive(link.href) ? '#F0E040' : 'rgba(255,255,255,0.7)',
+                          background: isActive(link.href) ? 'rgba(255,255,255,0.04)' : 'transparent',
+                          borderLeft: isActive(link.href) ? '3px solid #F0E040' : '3px solid transparent',
+                          textDecoration: 'none',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isActive(link.href)) {
+                            e.currentTarget.style.color = '#ffffff'
+                            e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
+                            e.currentTarget.style.borderLeftColor = '#F0E040'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isActive(link.href)) {
+                            e.currentTarget.style.color = 'rgba(255,255,255,0.7)'
+                            e.currentTarget.style.background = 'transparent'
+                            e.currentTarget.style.borderLeftColor = 'transparent'
+                          }
+                        }}
+                      >
+                        {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Direct nav links */}
+          {NAV_DIRECT.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className="px-3 py-2 text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150 whitespace-nowrap"
+              style={{
+                color: isActive(link.href) ? '#ffffff' : 'rgba(255,255,255,0.55)',
+                borderBottom: isActive(link.href) ? '2px solid #F0E040' : '2px solid transparent',
+                textDecoration: 'none',
+              }}
+              aria-current={isActive(link.href) ? 'page' : undefined}
+            >
+              {link.label}
+            </Link>
           ))}
+
+          {/* Page badge */}
+          {pageBadge && (
+            <span
+              className="font-display font-semibold uppercase ml-2"
+              style={{
+                fontSize: '0.75rem',
+                letterSpacing: '0.06em',
+                padding: '0.35rem 0.65rem',
+                background: 'rgba(240, 224, 64, 0.15)',
+                border: '1px solid rgba(240, 224, 64, 0.3)',
+                color: '#F0E040',
+              }}
+            >
+              {pageBadge}
+            </span>
+          )}
         </nav>
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden flex items-center justify-center w-9 h-9 rounded-[6px] transition-colors"
-          style={{ color: '#a1a1aa' }}
+          className="md:hidden flex items-center justify-center w-9 h-9 transition-colors"
+          style={{ color: '#a1a1aa', background: 'none', border: 'none', cursor: 'pointer' }}
           onClick={handleToggleMobile}
           aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
           aria-expanded={mobileOpen}
@@ -139,23 +222,23 @@ export function AppHeader({ activePage }: AppHeaderProps) {
         </button>
       </div>
 
-      {/* Mobile drawer — always rendered while open so close animation can play */}
+      {/* Mobile drawer */}
       {mobileOpen && (
         <div
-          className={`md:hidden border-t ${isClosingMobile ? 'mobile-drawer-close' : 'mobile-drawer-open'}`}
+          className={`md:hidden ${isClosingMobile ? 'mobile-drawer-close' : 'mobile-drawer-open'}`}
           style={{
-            background: 'rgba(10,10,10,0.98)',
-            borderColor: '#27272a',
+            background: 'rgba(0,0,0,0.98)',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
           }}
           role="navigation"
           aria-label="Mobile navigation"
         >
           <div className="max-w-[1400px] mx-auto px-6 py-4 flex flex-col gap-4">
-            {NAV_GROUPS.map((group) => (
+            {NAV_DROPDOWNS.map((group) => (
               <div key={group.label}>
                 <p
-                  className="text-[0.65rem] uppercase tracking-widest mb-2"
-                  style={{ color: '#3f3f46', letterSpacing: '0.12em' }}
+                  className="text-[0.7rem] uppercase tracking-[0.1em] font-medium mb-2"
+                  style={{ color: 'rgba(255,255,255,0.35)' }}
                 >
                   {group.label}
                 </p>
@@ -165,12 +248,12 @@ export function AppHeader({ activePage }: AppHeaderProps) {
                       key={link.href}
                       href={link.href}
                       onClick={handleNavLinkClick}
-                      className="px-3 py-2 rounded-[6px] text-sm font-medium transition-colors"
+                      className="px-3 py-2 text-sm font-medium transition-colors"
                       style={{
-                        color: isActive(link.href) ? '#ffffff' : '#a1a1aa',
-                        background: isActive(link.href) ? '#18181b' : 'transparent',
+                        color: isActive(link.href) ? '#F0E040' : 'rgba(255,255,255,0.7)',
+                        borderLeft: isActive(link.href) ? '3px solid #F0E040' : '3px solid transparent',
+                        textDecoration: 'none',
                       }}
-                      aria-current={isActive(link.href) ? 'page' : undefined}
                     >
                       {link.label}
                     </Link>
@@ -178,6 +261,31 @@ export function AppHeader({ activePage }: AppHeaderProps) {
                 </div>
               </div>
             ))}
+            <div>
+              <p
+                className="text-[0.7rem] uppercase tracking-[0.1em] font-medium mb-2"
+                style={{ color: 'rgba(255,255,255,0.35)' }}
+              >
+                Pages
+              </p>
+              <div className="flex flex-col gap-0.5">
+                {NAV_DIRECT.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={handleNavLinkClick}
+                    className="px-3 py-2 text-sm font-medium transition-colors"
+                    style={{
+                      color: isActive(link.href) ? '#F0E040' : 'rgba(255,255,255,0.7)',
+                      borderLeft: isActive(link.href) ? '3px solid #F0E040' : '3px solid transparent',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

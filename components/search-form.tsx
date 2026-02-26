@@ -132,10 +132,10 @@ export function SearchForm({
                 className="text-[0.7rem] uppercase tracking-[0.12em] font-medium flex items-center gap-2"
                 style={{ color: '#71717a' }}
               >
-                Under Odds
+                Under Odds{' '}
                 <span
                   className="text-[0.65rem] px-1.5 py-0.5 rounded-[4px] normal-case tracking-normal"
-                  style={{ background: '#27272a', color: '#71717a' }}
+                  style={{ background: '#27272a', color: '#71717a', marginLeft: 6 }}
                 >
                   Optional
                 </span>

@@ -258,7 +258,7 @@ export default function ShowcasePage() {
     <>
       <AppHeader activePage="/" />
 
-      <main className="max-w-[1400px] mx-auto px-6 py-10 flex flex-col gap-14">
+      <main className="page-container w-full py-10 flex flex-col gap-14">
 
         {/* Hero */}
         <div className="text-center py-8">
@@ -284,7 +284,10 @@ export default function ShowcasePage() {
             Built with shadcn/ui + Tailwind, faithful to the established dark design language.
           </p>
           {/* Demo controls */}
-          <div className="flex items-center justify-center gap-3 mt-6 flex-wrap">
+          <div
+            className="flex items-center justify-center gap-3 mt-6 flex-wrap"
+            style={{ columnGap: 12, rowGap: 12 }}
+          >
             <button
               onClick={() => toast('success', 'BET OVER recommended', 'TenZ +9.2pp edge vs market')}
               className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"

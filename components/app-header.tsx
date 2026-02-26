@@ -75,7 +75,7 @@ export function AppHeader({ activePage }: AppHeaderProps) {
         borderColor: '#27272a',
       }}
     >
-      <div className="max-w-[1400px] mx-auto px-6 h-full flex items-center justify-between">
+      <div className="page-container h-full flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 shrink-0 no-underline">
           <span

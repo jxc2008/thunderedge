@@ -1,3 +1,6 @@
+@config "../tailwind.config.js";
+@source "../app/**/*.{ts,tsx,js,jsx}";
+@source "../components/**/*.{ts,tsx,js,jsx}";
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
@@ -87,6 +90,14 @@ body {
     linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+.page-container {
+  width: min(1400px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
 }
 
 /* Tabular numerics for all number-heavy UI */

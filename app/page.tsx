@@ -1,451 +1,681 @@
 'use client'
 
 import { useState } from 'react'
+import { Search, Loader2, ChevronDown, ChevronRight, TrendingUp, TrendingDown } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
-import { SearchForm, type SearchFormData } from '@/components/search-form'
 import { OverUnderDisplay } from '@/components/over-under-display'
 import { StatsGrid, type StatCardData } from '@/components/stats-grid'
-import { DataTable, type Column } from '@/components/data-table'
-import { EventCard, type EventCardData } from '@/components/event-card'
-import { RecommendationCard } from '@/components/recommendation-card'
-import { DistributionChart } from '@/components/distribution-chart'
-import { TeamPage, type TeamData } from '@/components/team-page'
-import { MoneylinePage, type MoneylinePageProps } from '@/components/moneyline-page'
-import {
-  ToastProvider,
-  useToast,
-  EmptyState,
-  ErrorState,
-  SkeletonOverUnder,
-  SkeletonStatsGrid,
-  SkeletonTable,
-  SkeletonEventCards,
-} from '@/components/ux-patterns'
-import { BarChart2 } from 'lucide-react'
 
-/* ─── Sample data ────────────────────────────────────────── */
-const SAMPLE_STATS: StatCardData[] = [
-  { label: 'Model Mean', value: '21.4', delta: 'kills / map', semantic: 'positive' },
-  { label: 'Market-Implied Mean', value: '19.5', delta: 'kill line', semantic: 'neutral' },
-  { label: 'Sample Size', value: 47, delta: 'maps analyzed', semantic: 'neutral' },
-  { label: 'Kill / Map Avg', value: '20.8', delta: 'last 20 maps', semantic: 'neutral' },
-  { label: 'Edge', value: '+9.2pp', delta: 'vs market', semantic: 'positive' },
-  { label: 'Rating', value: '1.34', delta: 'VLR rating', semantic: 'neutral' },
-]
-
-interface AgentRow { agent: string; maps: number; killsPerMap: number; overPct: number }
-const AGENT_COLS: Column<AgentRow>[] = [
-  { key: 'agent', label: 'Agent', sortable: true },
-  { key: 'maps', label: 'Maps', sortable: true, align: 'right' },
-  { key: 'killsPerMap', label: 'K/Map', sortable: true, align: 'right', killRateBar: true, barMax: 30 },
-  {
-    key: 'overPct',
-    label: 'Over %',
-    sortable: true,
-    align: 'right',
-    render: (v) => (
-      <span style={{ color: (v as number) >= 55 ? '#22c55e' : (v as number) <= 45 ? '#ef4444' : '#a1a1aa' }}>
-        {(v as number).toFixed(1)}%
-      </span>
-    ),
-  },
-]
-const AGENT_DATA: AgentRow[] = [
-  { agent: 'Jett', maps: 14, killsPerMap: 23.4, overPct: 71.4 },
-  { agent: 'Neon', maps: 12, killsPerMap: 21.1, overPct: 58.3 },
-  { agent: 'Raze', maps: 10, killsPerMap: 19.8, overPct: 50.0 },
-  { agent: 'Reyna', maps: 7, killsPerMap: 18.6, overPct: 42.9 },
-  { agent: 'Iso', maps: 4, killsPerMap: 16.3, overPct: 25.0 },
-]
-
-const EVENTS: EventCardData[] = [
-  {
-    id: '1',
-    eventName: 'VCT Americas 2025 — Masters',
-    date: 'Feb 2025',
-    isCached: true,
-    overCount: 6,
-    underCount: 2,
-    maps: [
-      { map: 'Ascent', kills: 22, line: 19.5 },
-      { map: 'Bind', kills: 25, line: 19.5 },
-      { map: 'Haven', kills: 18, line: 19.5 },
-    ],
-    defaultOpen: true,
-  },
-  {
-    id: '2',
-    eventName: 'VCT Americas 2025 — Kickoff',
-    date: 'Jan 2025',
-    isCached: true,
-    overCount: 4,
-    underCount: 3,
-    maps: [
-      { map: 'Pearl', kills: 21, line: 19.5 },
-      { map: 'Icebox', kills: 17, line: 19.5 },
-      { map: 'Lotus', kills: 20, line: 19.5 },
-    ],
-  },
-  {
-    id: '3',
-    eventName: 'Champions 2024',
-    date: 'Aug 2024',
-    isLive: false,
-    isCached: true,
-    overCount: 5,
-    underCount: 1,
-    maps: [
-      { map: 'Split', kills: 23, line: 19.5 },
-      { map: 'Fracture', kills: 24, line: 19.5 },
-    ],
-  },
-]
-
-const DIST_DATA = Array.from({ length: 15 }, (_, i) => {
-  const k = i + 12
-  const modelPct = Math.exp(-Math.pow(k - 21, 2) / 18) * 18
-  const marketPct = Math.exp(-Math.pow(k - 19.5, 2) / 20) * 16
-  return { kills: k, modelPct: parseFloat(modelPct.toFixed(2)), marketPct: parseFloat(marketPct.toFixed(2)) }
-})
-
-const TEAM: TeamData = {
-  name: 'Sentinels',
-  region: 'NA',
-  players: [
-    { ign: 'TenZ', role: 'Duelist' },
-    { ign: 'Zellsis', role: 'Initiator' },
-    { ign: 'Sacy', role: 'Initiator' },
-    { ign: 'Pryze', role: 'Controller' },
-    { ign: 'Zekken', role: 'Sentinel' },
-  ],
-  fprAvg: 0.842,
-  totalMatches: 48,
-  avgKillsPerRound: 0.74,
-  events: [
-    {
-      id: 'e1',
-      eventName: 'VCT Americas 2025 — Masters',
-      date: 'Feb 2025',
-      defaultOpen: true,
-      stats: {
-        fpr: 0.871,
-        kills: 512,
-        deaths: 487,
-        rounds: 624,
-        matchesPlayed: 12,
-        maps: [
-          { map: 'Ascent', rate: 45, type: 'first-pick' },
-          { map: 'Bind', rate: 32, type: 'second-pick' },
-          { map: 'Haven', rate: 28, type: 'first-ban' },
-          { map: 'Icebox', rate: 18, type: 'second-ban' },
-          { map: 'Pearl', rate: 22, type: 'first-pick' },
-          { map: 'Lotus', rate: 15, type: 'second-ban' },
-        ],
-      },
-    },
-    {
-      id: 'e2',
-      eventName: 'VCT Americas 2025 — Kickoff',
-      date: 'Jan 2025',
-      stats: {
-        fpr: 0.813,
-        kills: 340,
-        deaths: 358,
-        rounds: 416,
-        matchesPlayed: 8,
-        maps: [
-          { map: 'Split', rate: 38, type: 'first-pick' },
-          { map: 'Fracture', rate: 25, type: 'first-ban' },
-          { map: 'Breeze', rate: 20, type: 'second-pick' },
-        ],
-      },
-    },
-  ],
+/* ─── API response types ─────────────────────────────────── */
+interface EventDetail {
+  event_name: string
+  map_kills: number[]
+  event_maps: number
+  event_over: number
+  event_under: number
+  cached: boolean
 }
 
-const MONEYLINE: MoneylinePageProps = {
-  roi: 12.3,
-  record: '47W-31L',
-  activeBetsToday: 3,
-  upcomingPicks: [
-    { teamA: 'Sentinels', teamB: 'NRG', marketOdds: '-150', modelPFair: 0.62, recommendation: 'BET' },
-    { teamA: 'Cloud9', teamB: 'EG', marketOdds: '+120', modelPFair: 0.44, recommendation: 'SKIP' },
-    { teamA: 'LOUD', teamB: '100T', marketOdds: '-105', modelPFair: 0.53, recommendation: 'MONITOR' },
-  ],
-  betLog: [
-    { date: '2025-02-20', matchup: 'SEN vs NRG', odds: '-140', result: 'W', profit: 0.71 },
-    { date: '2025-02-18', matchup: 'C9 vs EG', odds: '+110', result: 'L', profit: -1.0 },
-    { date: '2025-02-15', matchup: 'LOUD vs 100T', odds: '-120', result: 'W', profit: 0.83, flagged: true },
-    { date: '2025-02-12', matchup: 'T1 vs FNATIC', odds: '+200', result: 'P', profit: 0 },
-  ],
-  walkForward: [
-    { year: 2022, bets: 38, record: '21W-17L', roi: 4.2, avgOdds: '-112' },
-    { year: 2023, bets: 51, record: '29W-22L', roi: 8.7, avgOdds: '-118' },
-    { year: 2024, bets: 67, record: '39W-28L', roi: 14.1, avgOdds: '-115' },
-    { year: 2025, bets: 22, record: '13W-9L', roi: 11.4, avgOdds: '-121' },
-    { year: 'Total', bets: 178, record: '102W-76L', roi: 10.4, avgOdds: '-116', isTotal: true },
-  ],
-  monthly: [
-    { month: 'Jan 2025', bets: 11, roi: 9.1, record: '7W-4L' },
-    { month: 'Feb 2025', bets: 11, roi: 13.8, record: '6W-5L' },
-    { month: 'Dec 2024', bets: 14, roi: 18.4, record: '9W-5L' },
-    { month: 'Nov 2024', bets: 12, roi: -2.1, record: '5W-7L' },
-  ],
-  consistency: {
-    currentStreak: { type: 'W', count: 5 },
-    longestWin: 9,
-    longestLoss: 4,
-    winRate: 60.2,
-    avgReturn: 0.41,
-    stdDev: 1.12,
-  },
-  calibration: [
-    { range: '-200 to -151', modelPct: 68.0, actualPct: 71.4, bets: 28 },
-    { range: '-150 to -121', modelPct: 60.0, actualPct: 58.3, bets: 36 },
-    { range: '-120 to -101', modelPct: 54.5, actualPct: 56.1, bets: 41 },
-    { range: '-100 to +100', modelPct: 50.0, actualPct: 47.8, bets: 23 },
-    { range: '+101 to +150', modelPct: 42.0, actualPct: 40.0, bets: 15 },
-    { range: '+151 to +200', modelPct: 36.0, actualPct: 33.3, bets: 9 },
-  ],
-  strategy: {
-    method: 'Kelly Quarter',
-    baseStake: 1.0,
-    maxStake: 3.0,
-    minEdgePct: 5.0,
-    minOdds: '+100',
-    maxOdds: '-200',
-  },
+interface MarginStats {
+  total_maps: number
+  total_wins: number
+  total_losses: number
+  wins_over_pct: number
+  wins_under_pct: number
+  losses_over_pct: number
+  losses_under_pct: number
+  wins: { close: { count: number; over_pct: number }; regular: { count: number; over_pct: number }; blowout: { count: number; over_pct: number } }
+  losses: { close: { count: number; over_pct: number }; regular: { count: number; over_pct: number }; blowout: { count: number; over_pct: number } }
 }
 
-/* ─── Section wrapper ────────────────────────────────────── */
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+interface MatchupAdjustedProbabilities {
+  p_over: number
+  p_under: number
+  team_win_prob: number
+  mu_base: number
+  mu_adjusted: number
+  multiplier: number
+  input_method: string
+}
+
+interface PlayerAnalysis {
+  player_ign: string
+  team: string
+  kill_line: number
+  over_percentage: number
+  under_percentage: number
+  over_count: number
+  under_count: number
+  total_maps: number
+  events_analyzed: number
+  total_kpr: number
+  weighted_kpr: number
+  rounds_needed: number
+  classification: string
+  recommendation: string
+  confidence: string
+  all_map_kills: number[]
+  event_details: EventDetail[]
+  margin_stats?: MarginStats
+  matchup_adjusted_probabilities?: MatchupAdjustedProbabilities
+}
+
+interface AgentStat {
+  agent: string
+  maps: number
+  avg_kills: number
+  over_count: number
+  under_count: number
+}
+
+interface MapStat {
+  map: string
+  maps: number
+  avg_kills: number
+  over_count: number
+  under_count: number
+}
+
+interface EdgeData {
+  success: boolean
+  edge: {
+    recommended: string
+    ev_over: number
+    ev_under: number
+    best_ev: number
+    roi_over_pct: number
+    roi_under_pct: number
+    prob_edge_over: number
+    prob_edge_under: number
+  }
+  model: { mu: number; var: number; dist: string; p_over: number; p_under: number }
+  market: { p_over_vigfree: number; p_under_vigfree: number; vig_percentage: number; mu_implied: number }
+  player: { sample_size: number; confidence: string }
+}
+
+/* ─── Event card ─────────────────────────────────────────── */
+function EventRow({
+  event,
+  killLine,
+  defaultOpen = false,
+}: {
+  event: EventDetail
+  killLine: number
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
   return (
-    <section className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <span
-          className="text-[0.65rem] uppercase tracking-[0.15em] font-semibold"
-          style={{ color: '#3f3f46' }}
-        >
-          {label}
+    <div
+      className="rounded-[8px] border overflow-hidden"
+      style={{
+        borderColor: event.cached ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)',
+        background: '#0a0a0a',
+        borderLeft: `3px solid ${event.cached ? '#22c55e' : '#f59e0b'}`,
+      }}
+    >
+      <button
+        className="w-full flex items-center gap-3 px-4 py-2.5 text-left"
+        onClick={() => setOpen((v) => !v)}
+        style={{ background: open ? '#111111' : 'transparent' }}
+      >
+        <span style={{ color: '#52525b' }}>
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
-        <div className="flex-1 h-px" style={{ background: '#27272a' }} />
-      </div>
-      {children}
-    </section>
+        <span className="text-sm font-medium flex-1 min-w-0 truncate" style={{ color: '#e4e4e7' }}>
+          {event.event_name}
+        </span>
+        {event.event_maps > 0 && (
+          <span className="text-[0.7rem] shrink-0" style={{ color: '#52525b' }}>
+            O:{event.event_over}/{event.event_maps} &nbsp; U:{event.event_under}/{event.event_maps}
+          </span>
+        )}
+        <span
+          className="text-[0.6rem] font-semibold uppercase tracking-wider px-1.5 py-0.5 shrink-0"
+          style={{
+            background: event.cached ? 'rgba(34,197,94,0.12)' : 'rgba(245,158,11,0.12)',
+            color: event.cached ? '#22c55e' : '#f59e0b',
+            border: `1px solid ${event.cached ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.25)'}`,
+          }}
+        >
+          {event.cached ? 'CACHED' : 'LIVE'}
+        </span>
+      </button>
+      {open && event.map_kills.length > 0 && (
+        <div className="px-4 pb-3 pt-1 border-t flex flex-wrap gap-2" style={{ borderColor: '#1a1a1a' }}>
+          {event.map_kills.map((k, i) => {
+            const isOver = k > killLine
+            return (
+              <span
+                key={i}
+                className="text-[0.8rem] font-bold px-2.5 py-1 tabular-nums"
+                style={{
+                  background: isOver ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                  color: isOver ? '#22c55e' : '#ef4444',
+                  border: `1px solid ${isOver ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                }}
+              >
+                {k} {isOver ? '✓' : '✗'}
+              </span>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
-/* ─── Page ───────────────────────────────────────────────── */
-export default function ShowcasePage() {
-  const { toasts, dismiss, toast } = useToast()
-  const [isLoading, setIsLoading] = useState(false)
-  const [lastQuery, setLastQuery] = useState<{ player: string; ms: number } | null>(null)
-  const [showSkeletons, setShowSkeletons] = useState(false)
-  const [showError, setShowError] = useState(false)
+/* ─── Edge summary ───────────────────────────────────────── */
+function EdgeSummary({ edge }: { edge: EdgeData }) {
+  const rec = edge.edge.recommended
+  const isBetOver = rec === 'OVER'
+  const isBetUnder = rec === 'UNDER'
+  const accentColor = isBetOver ? '#22c55e' : isBetUnder ? '#ef4444' : '#71717a'
+  const bestEV = edge.edge.best_ev * 100
 
-  const handleSearch = (data: SearchFormData) => {
-    setIsLoading(true)
-    setShowSkeletons(true)
-    setTimeout(() => {
-      setIsLoading(false)
-      setShowSkeletons(false)
-      setLastQuery({ player: data.player || 'TenZ#NA1', ms: 342 })
-      toast('success', 'Analysis complete', `Results loaded for ${data.player || 'TenZ#NA1'}`)
-    }, 1800)
+  return (
+    <div
+      className="rounded-[10px] border p-4 flex items-center justify-between gap-4 flex-wrap"
+      style={{
+        background: '#0a0a0a',
+        borderColor: '#27272a',
+        borderLeft: `4px solid ${accentColor}`,
+      }}
+    >
+      <div>
+        <p className="text-[0.65rem] uppercase tracking-[0.1em]" style={{ color: '#71717a' }}>
+          Edge Recommendation
+        </p>
+        <p className="font-bold mt-0.5" style={{ fontSize: '1.25rem', color: accentColor }}>
+          {rec === 'NO BET' ? 'NO BET' : `BET ${rec}`}
+        </p>
+        {edge.edge.recommended !== 'NO BET' && (
+          <p className="text-[0.75rem] mt-0.5" style={{ color: '#a1a1aa' }}>
+            Model: {(edge.model.p_over * 100).toFixed(1)}% over vs market: {(edge.market.p_over_vigfree * 100).toFixed(1)}%
+          </p>
+        )}
+      </div>
+      <div className="text-right">
+        <p
+          className="font-extrabold tabular-nums"
+          style={{ fontSize: '1.75rem', color: bestEV >= 0 ? '#22c55e' : '#ef4444' }}
+        >
+          {bestEV >= 0 ? '+' : ''}{bestEV.toFixed(1)}%
+        </p>
+        <p className="text-[0.65rem] uppercase tracking-wide mt-0.5" style={{ color: '#52525b' }}>
+          Expected ROI
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Main page ──────────────────────────────────────────── */
+export default function PlayerPage() {
+  const [form, setForm] = useState({
+    player: '',
+    killLine: '15.5',
+    overOdds: '',
+    underOdds: '',
+    teamOdds: '',
+    oppOdds: '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<PlayerAnalysis | null>(null)
+  const [agentStats, setAgentStats] = useState<AgentStat[]>([])
+  const [mapStats, setMapStats] = useState<MapStat[]>([])
+  const [edgeData, setEdgeData] = useState<EdgeData | null>(null)
+  const [elapsed, setElapsed] = useState<number | null>(null)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const ign = form.player.trim()
+    if (!ign) { setError('Please enter a player IGN'); return }
+    const killLine = parseFloat(form.killLine)
+    if (!form.killLine || killLine <= 0) { setError('Please enter a valid kill line'); return }
+
+    setLoading(true)
+    setError(null)
+    setAnalysis(null)
+    setEdgeData(null)
+
+    const teamOdds = parseFloat(form.teamOdds)
+    const oppOdds = parseFloat(form.oppOdds)
+    const matchupQuery = (!isNaN(teamOdds) && !isNaN(oppOdds))
+      ? `&team_odds=${teamOdds}&opp_odds=${oppOdds}`
+      : ''
+
+    try {
+      const t0 = performance.now()
+      const res = await fetch(`/api/player/${encodeURIComponent(ign)}?line=${killLine}${matchupQuery}`)
+      const data = await res.json()
+      const ms = performance.now() - t0
+      setElapsed(ms / 1000)
+
+      if (data.error) { setError(data.error); return }
+
+      setAnalysis(data.analysis)
+      setAgentStats(data.agent_stats || [])
+      setMapStats(data.map_stats || [])
+
+      // Optionally fetch edge analysis if odds are provided
+      const overOdds = parseFloat(form.overOdds)
+      const underOdds = parseFloat(form.underOdds)
+      if (!isNaN(overOdds) && !isNaN(underOdds)) {
+        try {
+          const edgeRes = await fetch(
+            `/api/edge/${encodeURIComponent(ign)}?line=${killLine}&over_odds=${overOdds}&under_odds=${underOdds}${matchupQuery}`
+          )
+          if (edgeRes.ok) {
+            const ed = await edgeRes.json()
+            setEdgeData(ed)
+          }
+        } catch {
+          // edge analysis is optional — ignore failures
+        }
+      }
+    } catch (err) {
+      setError('Error connecting to server: ' + (err as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  /* build stat cards from analysis */
+  function buildStats(a: PlayerAnalysis): StatCardData[] {
+    return [
+      { label: 'Kill Line', value: a.kill_line, delta: 'target', semantic: 'neutral' },
+      { label: 'Total KPR', value: a.total_kpr ?? a.weighted_kpr, delta: 'kills per round', semantic: 'neutral' },
+      { label: 'Weighted KPR', value: a.weighted_kpr, delta: '1.5x recent event', semantic: 'warning' },
+      { label: 'Rounds Needed', value: a.rounds_needed, delta: 'to hit line', semantic: 'neutral' },
+      { label: 'Over Rate', value: `${a.over_percentage}%`, delta: `${a.over_count} maps`, semantic: 'positive' },
+      { label: 'Under Rate', value: `${a.under_percentage}%`, delta: `${a.under_count} maps`, semantic: 'negative' },
+      { label: 'Maps Analyzed', value: a.total_maps, delta: `${a.events_analyzed} events`, semantic: 'neutral' },
+      { label: 'Confidence', value: a.confidence, delta: 'sample quality', semantic: 'neutral' },
+    ]
+  }
+
+  function classificationColor(c: string): string {
+    const l = c.toLowerCase()
+    if (l.includes('underpriced')) return '#22c55e'
+    if (l.includes('overpriced')) return '#ef4444'
+    return '#f59e0b'
   }
 
   return (
     <>
       <AppHeader activePage="/" />
 
-      <main className="page-container w-full py-10 flex flex-col gap-14">
+      <main className="page-container py-8 flex flex-col gap-6">
 
         {/* Hero */}
-        <div className="text-center py-8">
-          <div
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[0.75rem] font-medium mb-5"
-            style={{
-              background: 'rgba(59,130,246,0.1)',
-              border: '1px solid rgba(59,130,246,0.2)',
-              color: '#3b82f6',
-            }}
-          >
-            <BarChart2 size={12} />
-            React Component Library — Design Reference
-          </div>
+        <div className="text-center pt-4 pb-2">
           <h1
-            className="font-bold tracking-tight text-balance mb-3"
-            style={{ fontSize: 'clamp(2rem, 5vw, 3.5rem)', color: '#ffffff' }}
+            className="font-bold uppercase tracking-tight text-balance"
+            style={{ fontFamily: '"Barlow Condensed", sans-serif', fontSize: 'clamp(2.5rem, 8vw, 5rem)', color: '#ffffff' }}
           >
-            Thunder<span className="gradient-text">Edge</span> Design System
+            Thunder<span style={{ color: '#F0E040' }}>Edge</span>
           </h1>
-          <p className="text-sm max-w-lg mx-auto text-pretty" style={{ color: '#71717a' }}>
-            Production-ready React components for the ThunderEdge Valorant analytics platform.
-            Built with shadcn/ui + Tailwind, faithful to the established dark design language.
+          <p className="text-sm mt-1 text-pretty" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            Valorant kill line analytics — enter a player IGN to analyze
           </p>
-          {/* Demo controls */}
-          <div
-            className="flex items-center justify-center gap-3 mt-6 flex-wrap"
-            style={{ columnGap: 12, rowGap: 12 }}
-          >
-            <button
-              onClick={() => toast('success', 'BET OVER recommended', 'TenZ +9.2pp edge vs market')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.25)', color: '#22c55e' }}
-            >
-              Toast: Success
-            </button>
-            <button
-              onClick={() => toast('error', 'Player not found', 'Could not locate TenZ in VLR database')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.25)', color: '#ef4444' }}
-            >
-              Toast: Error
-            </button>
-            <button
-              onClick={() => toast('warning', 'Rate limit approaching', '4 of 5 API calls used')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.25)', color: '#f59e0b' }}
-            >
-              Toast: Warning
-            </button>
-            <button
-              onClick={() => toast('info', 'Cache hit', 'Returning cached result from 5m ago')}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(59,130,246,0.1)', borderColor: 'rgba(59,130,246,0.25)', color: '#3b82f6' }}
-            >
-              Toast: Info
-            </button>
-            <button
-              onClick={() => setShowError((v) => !v)}
-              className="text-sm font-medium px-4 py-2 rounded-[8px] border transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(113,113,122,0.1)', borderColor: '#3f3f46', color: '#a1a1aa' }}
-            >
-              Toggle Error State
-            </button>
-          </div>
         </div>
 
-        {/* 1. Search Form */}
-        <Section label="Search Form">
-          <SearchForm
-            onSubmit={handleSearch}
-            isLoading={isLoading}
-            lastQuery={lastQuery}
-          />
-        </Section>
-
-        {/* 2. Over/Under Display */}
-        <Section label="Over / Under Hero Display">
-          {showSkeletons ? (
-            <SkeletonOverUnder />
-          ) : (
-            <OverUnderDisplay
-              overPct={63.8}
-              underPct={36.2}
-              sampleSize={47}
-              killLine={19.5}
-            />
-          )}
-        </Section>
-
-        {/* 3. Recommendation Card */}
-        <Section label="Recommendation Card">
-          <RecommendationCard
-            type="BET_OVER"
-            ev={0.092}
-            confidence="HIGH"
-            reason="Model mean 21.4 exceeds market-implied mean 19.5 by 9.7%. Positive EV across all line scenarios."
-          />
-          <RecommendationCard
-            type="NO_BET"
-            ev={-0.024}
-            confidence="LOW"
-            reason="Insufficient edge to justify bet. Market appears efficiently priced."
-          />
-          <RecommendationCard
-            type="BET_UNDER"
-            ev={0.041}
-            confidence="MED"
-            reason="Player underperforming on large maps. Under has hit in 4 of last 5."
-          />
-        </Section>
-
-        {/* 4. Stats Grid */}
-        <Section label="Stats Grid">
-          {showSkeletons ? (
-            <SkeletonStatsGrid count={6} columns={3} />
-          ) : (
-            <StatsGrid stats={SAMPLE_STATS} columns={3} />
-          )}
-        </Section>
-
-        {/* 5. Kill Distribution Chart */}
-        <Section label="Kill Distribution Chart">
-          <DistributionChart
-            data={DIST_DATA}
-            killLine={19.5}
-            modelOverPct={63.8}
-            marketOverPct={54.6}
-          />
-        </Section>
-
-        {/* 6. Agent Stats Table */}
-        <Section label="Agent Stats Table">
-          {showSkeletons ? (
-            <SkeletonTable rows={5} cols={4} />
-          ) : (
-            <DataTable<AgentRow>
-              columns={AGENT_COLS}
-              data={AGENT_DATA}
-              filterPlaceholder="Filter agents..."
-              filterKey="agent"
-            />
-          )}
-        </Section>
-
-        {/* 7. Event Cards */}
-        <Section label="Event Cards">
-          {showSkeletons ? (
-            <SkeletonEventCards count={3} />
-          ) : showError ? (
-            <ErrorState
-              message="Failed to fetch match history from VLR. API returned 503."
-              onRetry={() => setShowError(false)}
-            />
-          ) : (
-            <div className="flex flex-col gap-2">
-              {EVENTS.map((ev) => (
-                <EventCard key={ev.id} {...ev} />
-              ))}
-            </div>
-          )}
-        </Section>
-
-        {/* 8. Empty State */}
-        <Section label="Empty State">
+        {/* Search bar (command bar style matching index.html) */}
+        <form onSubmit={handleSubmit}>
           <div
-            className="rounded-[12px] border"
-            style={{ background: '#0a0a0a', borderColor: '#27272a' }}
+            className="flex items-center gap-2 px-4 py-3 mb-0"
+            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)', borderBottom: 'none' }}
           >
-            <EmptyState />
+            <span style={{ fontFamily: '"Barlow Condensed", sans-serif', fontWeight: 700, fontSize: '1.2rem', color: '#F0E040' }}>{'>'}</span>
+            <input
+              type="text"
+              value={form.player}
+              onChange={(e) => setForm((f) => ({ ...f, player: e.target.value }))}
+              placeholder="enter player ign and press enter..."
+              className="flex-1 bg-transparent text-white outline-none text-base"
+              style={{ fontFamily: '"Courier New", monospace', fontSize: '1rem' }}
+            />
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex items-center gap-2 px-4 py-1.5 text-sm font-bold uppercase tracking-wide disabled:opacity-50"
+              style={{ background: '#F0E040', color: '#000', fontFamily: '"Barlow Condensed", sans-serif' }}
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Analyze
+            </button>
           </div>
-        </Section>
 
-        {/* 9. Team Page */}
-        <Section label="Team Analysis Page">
-          <TeamPage team={TEAM} />
-        </Section>
+          {/* Secondary options row */}
+          <div
+            className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-2 text-sm"
+            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)', color: 'rgba(255,255,255,0.5)' }}
+          >
+            <label className="flex items-center gap-2 whitespace-nowrap">
+              Kill Line:
+              <input
+                type="number"
+                step="0.5"
+                value={form.killLine}
+                onChange={(e) => setForm((f) => ({ ...f, killLine: e.target.value }))}
+                className="w-16 px-2 py-0.5 text-white bg-transparent border rounded outline-none text-sm tabular-nums"
+                style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              />
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap">
+              Over Odds:
+              <input
+                type="text"
+                placeholder="-110"
+                value={form.overOdds}
+                onChange={(e) => setForm((f) => ({ ...f, overOdds: e.target.value }))}
+                className="w-20 px-2 py-0.5 text-white bg-transparent border rounded outline-none text-sm tabular-nums"
+                style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              />
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap">
+              Under Odds:
+              <input
+                type="text"
+                placeholder="-110"
+                value={form.underOdds}
+                onChange={(e) => setForm((f) => ({ ...f, underOdds: e.target.value }))}
+                className="w-20 px-2 py-0.5 text-white bg-transparent border rounded outline-none text-sm tabular-nums"
+                style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              />
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap">
+              Team Odds:
+              <input
+                type="number"
+                placeholder="1.62 or -160"
+                value={form.teamOdds}
+                onChange={(e) => setForm((f) => ({ ...f, teamOdds: e.target.value }))}
+                className="w-28 px-2 py-0.5 text-white bg-transparent border rounded outline-none text-sm tabular-nums"
+                style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              />
+            </label>
+            <label className="flex items-center gap-2 whitespace-nowrap">
+              Opp Odds:
+              <input
+                type="number"
+                placeholder="2.30 or +140"
+                value={form.oppOdds}
+                onChange={(e) => setForm((f) => ({ ...f, oppOdds: e.target.value }))}
+                className="w-28 px-2 py-0.5 text-white bg-transparent border rounded outline-none text-sm tabular-nums"
+                style={{ borderColor: 'rgba(255,255,255,0.15)' }}
+              />
+            </label>
+          </div>
+        </form>
 
-        {/* 10. Moneyline Strategy Page */}
-        <Section label="MoneyLine Strategy Page">
-          <MoneylinePage {...MONEYLINE} />
-        </Section>
+        {/* Error */}
+        {error && (
+          <div
+            className="px-4 py-3 text-sm font-semibold"
+            style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Loading skeleton */}
+        {loading && (
+          <div className="flex flex-col gap-3">
+            <div className="skeleton-shimmer h-20 rounded-[8px]" />
+            <div className="skeleton-shimmer h-48 rounded-[8px]" />
+            <div className="skeleton-shimmer h-32 rounded-[8px]" />
+          </div>
+        )}
+
+        {/* Results */}
+        {analysis && !loading && (
+          <>
+            {/* Performance bar */}
+            <div
+              className="flex flex-wrap gap-x-6 gap-y-1 px-4 py-2.5 text-sm"
+              style={{ background: '#0D0D0D', border: '1px solid rgba(240,224,64,0.15)', borderLeft: '3px solid #F0E040' }}
+            >
+              {elapsed !== null && (
+                <span style={{ color: 'rgba(255,255,255,0.5)' }}>
+                  Query Time: <span style={{ color: '#F0E040', fontWeight: 700 }}>{elapsed.toFixed(2)}s</span>
+                </span>
+              )}
+              <span style={{ color: 'rgba(255,255,255,0.5)' }}>
+                Events: <span style={{ color: '#22c55e', fontWeight: 700 }}>
+                  {analysis.event_details?.filter((e) => e.cached).length ?? 0} cached
+                </span>
+                {' / '}
+                <span style={{ color: '#f59e0b', fontWeight: 700 }}>
+                  {analysis.event_details?.filter((e) => !e.cached).length ?? 0} live
+                </span>
+              </span>
+              <span style={{ color: 'rgba(255,255,255,0.5)' }}>
+                Maps Analyzed: <span style={{ color: '#F0E040', fontWeight: 700 }}>{analysis.total_maps}</span>
+              </span>
+            </div>
+
+            {/* Two-column layout */}
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'minmax(0,58%) minmax(0,42%)' }}>
+
+              {/* LEFT — events */}
+              <div className="flex flex-col gap-4">
+                {/* Edge summary if available */}
+                {edgeData && <EdgeSummary edge={edgeData} />}
+
+                {/* Events section */}
+                <div
+                  className="p-5"
+                  style={{ background: '#0D0D0D', border: '1px solid rgba(240,224,64,0.15)', borderLeft: '3px solid #F0E040' }}
+                >
+                  <h3
+                    className="font-bold mb-1 pb-3 border-b"
+                    style={{ fontFamily: '"Barlow Condensed", sans-serif', fontSize: '1.1rem', color: '#ffffff', borderColor: 'rgba(255,255,255,0.06)' }}
+                  >
+                    VCT Events Analyzed
+                  </h3>
+                  <p className="text-sm mb-4" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    Total KPR: {analysis.total_kpr ?? analysis.weighted_kpr} &nbsp;|&nbsp; Weighted KPR: {analysis.weighted_kpr} &nbsp;|&nbsp; Total Rounds: {analysis.total_maps}
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {analysis.event_details && analysis.event_details.length > 0 ? (
+                      analysis.event_details.map((ev, i) => (
+                        <EventRow key={i} event={ev} killLine={analysis.kill_line} defaultOpen={i === 0} />
+                      ))
+                    ) : (
+                      <p className="text-sm" style={{ color: '#71717a' }}>No event details available</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT — player card */}
+              <div className="flex flex-col gap-4">
+                {/* Player header */}
+                <div
+                  className="p-5"
+                  style={{ background: '#0D0D0D', border: '1px solid rgba(240,224,64,0.15)', borderLeft: '3px solid #F0E040' }}
+                >
+                  <div className="flex justify-between items-start mb-5 flex-wrap gap-3">
+                    <div>
+                      <h2 className="font-bold" style={{ fontFamily: '"Barlow Condensed", sans-serif', fontSize: 'clamp(1.5rem, 4vw, 2.25rem)', color: '#ffffff' }}>
+                        {analysis.player_ign}
+                      </h2>
+                      <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                        {analysis.team || 'Unknown Team'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Over/Under */}
+                  <OverUnderDisplay
+                    overPct={analysis.over_percentage}
+                    underPct={analysis.under_percentage}
+                    sampleSize={analysis.total_maps}
+                    killLine={analysis.kill_line}
+                  />
+
+                  {/* Matchup-adjusted probabilities if available */}
+                  {analysis.matchup_adjusted_probabilities && (
+                    <div
+                      className="mt-4 p-3 rounded-[8px]"
+                      style={{ background: '#0a0a0a', border: '1px solid rgba(59,130,246,0.25)' }}
+                    >
+                      <p className="text-[0.65rem] uppercase tracking-[0.1em] mb-2" style={{ color: '#71717a' }}>
+                        Matchup Adjusted (Win Prob: {(analysis.matchup_adjusted_probabilities.team_win_prob * 100).toFixed(1)}%)
+                      </p>
+                      <div className="flex gap-4">
+                        <div>
+                          <p className="text-[0.7rem]" style={{ color: '#71717a' }}>Adj. Over</p>
+                          <p className="font-bold tabular-nums" style={{ fontSize: '1.25rem', color: '#22c55e' }}>
+                            {(analysis.matchup_adjusted_probabilities.p_over * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[0.7rem]" style={{ color: '#71717a' }}>Adj. Under</p>
+                          <p className="font-bold tabular-nums" style={{ fontSize: '1.25rem', color: '#ef4444' }}>
+                            {(analysis.matchup_adjusted_probabilities.p_under * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[0.7rem]" style={{ color: '#71717a' }}>Multiplier</p>
+                          <p className="font-bold tabular-nums" style={{ fontSize: '1.25rem', color: '#f59e0b' }}>
+                            {analysis.matchup_adjusted_probabilities.multiplier?.toFixed(3) ?? '—'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Classification */}
+                  <div
+                    className="mt-4 p-4 text-center"
+                    style={{
+                      border: `1px solid ${classificationColor(analysis.classification)}40`,
+                      background: `${classificationColor(analysis.classification)}10`,
+                    }}
+                  >
+                    <p
+                      className="font-bold uppercase tracking-wide"
+                      style={{ fontFamily: '"Barlow Condensed", sans-serif', fontSize: '1.3rem', color: classificationColor(analysis.classification) }}
+                    >
+                      {analysis.classification}
+                    </p>
+                    <p className="text-sm mt-1 font-medium" style={{ color: '#a1a1aa' }}>
+                      {analysis.recommendation}
+                    </p>
+                  </div>
+
+                  {/* Formula */}
+                  <div
+                    className="mt-4 p-4 text-center"
+                    style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.15)', borderLeft: '3px solid #F0E040' }}
+                  >
+                    <p className="text-[0.65rem] uppercase tracking-[0.12em] mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      Formula: Kill Line / Weighted KPR = Rounds Needed
+                    </p>
+                    <p className="font-mono text-sm" style={{ color: '#F0E040' }}>
+                      {analysis.kill_line} / {analysis.weighted_kpr} =
+                    </p>
+                    <p className="font-bold tabular-nums mt-1" style={{ fontFamily: '"Barlow Condensed", sans-serif', fontSize: '2rem', color: '#ffffff' }}>
+                      {analysis.rounds_needed} rounds
+                    </p>
+                  </div>
+                </div>
+
+                {/* Stats grid */}
+                <StatsGrid stats={buildStats(analysis)} columns={2} />
+
+                {/* Agent stats */}
+                {agentStats.length > 0 && (
+                  <div
+                    className="p-4"
+                    style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.06)' }}
+                  >
+                    <h4 className="font-bold mb-3 text-sm uppercase tracking-wider" style={{ color: '#ffffff', fontFamily: '"Barlow Condensed", sans-serif' }}>
+                      Agent Breakdown
+                    </h4>
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr>
+                          {['Agent', 'Maps', 'Avg K', 'Over', 'Under'].map((h) => (
+                            <th key={h} className="text-left pb-2 text-[0.65rem] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {agentStats.map((a, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td className="py-2" style={{ color: '#e4e4e7' }}>{a.agent}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#a1a1aa' }}>{a.maps}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#ffffff' }}>{a.avg_kills?.toFixed(1) ?? '—'}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#22c55e' }}>{a.over_count}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#ef4444' }}>{a.under_count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Map stats */}
+                {mapStats.length > 0 && (
+                  <div
+                    className="p-4"
+                    style={{ background: '#0D0D0D', border: '1px solid rgba(255,255,255,0.06)' }}
+                  >
+                    <h4 className="font-bold mb-3 text-sm uppercase tracking-wider" style={{ color: '#ffffff', fontFamily: '"Barlow Condensed", sans-serif' }}>
+                      Map Breakdown
+                    </h4>
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr>
+                          {['Map', 'Maps', 'Avg K', 'Over', 'Under'].map((h) => (
+                            <th key={h} className="text-left pb-2 text-[0.65rem] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mapStats.map((m, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td className="py-2" style={{ color: '#e4e4e7' }}>{m.map}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#a1a1aa' }}>{m.maps}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#ffffff' }}>{m.avg_kills?.toFixed(1) ?? '—'}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#22c55e' }}>{m.over_count}</td>
+                            <td className="py-2 tabular-nums" style={{ color: '#ef4444' }}>{m.under_count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Empty state — shown before any query */}
+        {!analysis && !loading && !error && (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div style={{ fontSize: '3rem', opacity: 0.1 }}>
+              <TrendingUp size={64} style={{ color: '#ffffff' }} />
+            </div>
+            <p className="text-sm" style={{ color: 'rgba(255,255,255,0.25)' }}>
+              Enter a player IGN above to start analysis
+            </p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.15)' }}>
+              e.g. TenZ, aspas, cNed, Zekken
+            </p>
+          </div>
+        )}
 
       </main>
-
-      {/* Toast notifications */}
-      <ToastProvider toasts={toasts} onDismiss={dismiss} />
     </>
   )
 }

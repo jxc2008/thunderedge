@@ -76,8 +76,8 @@ export function DataTable<T extends Record<string, unknown>>({
 
   return (
     <div
-      className="rounded-[12px] border overflow-hidden"
-      style={{ background: '#0a0a0a', borderColor: '#27272a' }}
+      className="rounded-[12px] border"
+      style={{ background: '#0a0a0a', borderColor: '#27272a', overflow: 'visible' }}
     >
       {/* Filter */}
       {filterKey && (
@@ -103,15 +103,13 @@ export function DataTable<T extends Record<string, unknown>>({
                 color: '#ffffff',
                 width: '180px',
               }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = '#3b82f6')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = '#3f3f46')}
             />
           </div>
         </div>
       )}
 
-      {/* Table scroll container */}
-      <div style={{ maxHeight, overflowY: 'auto' }}>
+      {/* Table scroll container — horizontal on mobile, vertical when tall */}
+      <div className="table-scroll rounded-b-[12px]" style={{ maxHeight, overflowY: 'auto' }}>
         <table className="w-full border-collapse text-sm">
           {/* Sticky header */}
           <thead className="sticky top-0 z-10" style={{ background: '#18181b' }}>
@@ -152,17 +150,10 @@ export function DataTable<T extends Record<string, unknown>>({
             {processed.map((row, ri) => (
               <tr
                 key={ri}
-                className="transition-colors duration-100"
+                className="data-row transition-colors duration-100"
                 style={{
                   background: ri % 2 === 0 ? '#0a0a0a' : '#111113',
                   borderBottom: '1px solid rgba(39,39,42,0.5)',
-                }}
-                onMouseEnter={(e) => {
-                  ;(e.currentTarget as HTMLTableRowElement).style.background = '#18181b'
-                }}
-                onMouseLeave={(e) => {
-                  ;(e.currentTarget as HTMLTableRowElement).style.background =
-                    ri % 2 === 0 ? '#0a0a0a' : '#111113'
                 }}
               >
                 {columns.map((col, ci) => {

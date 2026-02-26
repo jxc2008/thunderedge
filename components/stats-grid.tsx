@@ -22,16 +22,10 @@ function StatCard({ label, value, delta, icon, semantic = 'neutral', monospace }
 
   return (
     <div
-      className="rounded-[10px] border p-4 flex flex-col gap-1 transition-colors duration-150 group"
+      className="rounded-[10px] border p-4 flex flex-col gap-1 transition-colors duration-150 stat-card"
       style={{
         background: '#0a0a0a',
         borderColor: '#27272a',
-      }}
-      onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLDivElement).style.borderColor = '#3f3f46'
-      }}
-      onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLDivElement).style.borderColor = '#27272a'
       }}
     >
       {/* Label row */}
@@ -73,13 +67,13 @@ interface StatsGridProps {
 }
 
 export function StatsGrid({ stats, columns = 3 }: StatsGridProps) {
+  const colClass =
+    columns === 2
+      ? 'grid-cols-2 sm:grid-cols-2'
+      : 'grid-cols-2 sm:grid-cols-3'
+
   return (
-    <div
-      className="grid gap-3"
-      style={{
-        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-      }}
-    >
+    <div className={`grid gap-3 ${colClass}`}>
       {stats.map((stat, i) => (
         <StatCard key={i} {...stat} />
       ))}

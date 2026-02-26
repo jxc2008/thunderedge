@@ -17,8 +17,8 @@ export function OverUnderDisplay({
 
   return (
     <div
-      className="w-full rounded-[16px] border overflow-hidden"
-      style={{ background: '#0a0a0a', borderColor: '#27272a' }}
+      className="w-full rounded-[16px] border"
+      style={{ background: '#0a0a0a', borderColor: '#27272a', overflow: 'visible' }}
     >
       {/* Two panels */}
       <div className="flex">
@@ -104,15 +104,18 @@ export function OverUnderDisplay({
 
       {/* Hit-rate progress bar */}
       <div className="px-6 pb-5 pt-4 border-t" style={{ borderColor: '#27272a' }}>
-        <div
-          className="flex justify-between mb-1.5 text-[0.7rem] tabular-nums flex-wrap gap-2"
-          style={{ color: '#52525b', columnGap: 12, rowGap: 4 }}
-        >
-          <span style={{ color: '#22c55e' }}>{overPct.toFixed(1)}% Over</span>
+        <div className="flex items-center justify-between mb-1.5 gap-3 min-w-0">
+          <span className="text-[0.7rem] tabular-nums shrink-0" style={{ color: '#22c55e' }}>
+            {overPct.toFixed(1)}% Over
+          </span>
           {killLine !== undefined && (
-            <span style={{ color: '#71717a' }}>Line: {killLine}</span>
+            <span className="text-[0.7rem] tabular-nums" style={{ color: '#71717a' }}>
+              Line:&nbsp;{killLine}
+            </span>
           )}
-          <span style={{ color: '#ef4444' }}>{underPct.toFixed(1)}% Under</span>
+          <span className="text-[0.7rem] tabular-nums shrink-0" style={{ color: '#ef4444' }}>
+            {underPct.toFixed(1)}% Under
+          </span>
         </div>
         <div
           className="relative w-full rounded-full overflow-hidden"

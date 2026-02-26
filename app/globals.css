@@ -96,8 +96,42 @@ body {
   width: min(1400px, 100%);
   margin-left: auto;
   margin-right: auto;
-  padding-left: 24px;
-  padding-right: 24px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+@media (min-width: 640px) {
+  .page-container {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+/* Shared table scroll wrapper — prevents squishing on mobile */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Stat card hover border */
+.stat-card:hover {
+  border-color: #3f3f46;
+}
+
+/* Data table row hover */
+.data-row:hover {
+  background: #18181b !important;
+}
+
+/* Shared section heading */
+.section-heading {
+  font-family: "Barlow Condensed", sans-serif;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #ffffff;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* Tabular numerics for all number-heavy UI */

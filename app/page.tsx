@@ -348,10 +348,14 @@ export default function PlayerPage() {
             </button>
           </div>
 
-          {/* Secondary options row */}
+          {/* Secondary options row — scrollable on mobile */}
           <div
-            className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-2 text-sm"
-            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)', color: 'rgba(255,255,255,0.5)' }}
+            className="overflow-x-auto"
+            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)' }}
+          >
+          <div
+            className="flex items-center gap-x-5 gap-y-0 px-4 py-2 text-sm min-w-max"
+            style={{ color: 'rgba(255,255,255,0.5)' }}
           >
             <label className="flex items-center gap-2 whitespace-nowrap">
               Kill Line:
@@ -409,6 +413,7 @@ export default function PlayerPage() {
               />
             </label>
           </div>
+          </div>
         </form>
 
         {/* Error */}
@@ -457,8 +462,8 @@ export default function PlayerPage() {
               </span>
             </div>
 
-            {/* Two-column layout */}
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'minmax(0,58%) minmax(0,42%)' }}>
+            {/* Two-column layout — stacks on mobile */}
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,58%)_minmax(0,42%)] gap-6">
 
               {/* LEFT — events */}
               <div className="flex flex-col gap-4">

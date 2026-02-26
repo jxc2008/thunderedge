@@ -151,27 +151,29 @@ export function MoneylinePage({
         </div>
       </div>
 
-      {/* Pill tab nav */}
-      <div
-        className="inline-flex rounded-[10px] p-1"
-        style={{ background: '#18181b', border: '1px solid #27272a' }}
-        role="tablist"
-      >
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            role="tab"
-            aria-selected={activeTab === tab}
-            onClick={() => setActiveTab(tab)}
-            className="px-4 py-2 rounded-[8px] text-sm font-medium transition-colors duration-150 whitespace-nowrap"
-            style={{
-              background: activeTab === tab ? '#27272a' : 'transparent',
-              color: activeTab === tab ? '#ffffff' : '#71717a',
-            }}
-          >
-            {tab}
-          </button>
-        ))}
+      {/* Pill tab nav — scrollable on mobile */}
+      <div className="overflow-x-auto -mx-1 px-1 pb-0.5">
+        <div
+          className="inline-flex rounded-[10px] p-1 min-w-max"
+          style={{ background: '#18181b', border: '1px solid #27272a' }}
+          role="tablist"
+        >
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              role="tab"
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className="px-3 py-1.5 rounded-[8px] text-[0.8rem] font-medium transition-colors duration-150 whitespace-nowrap"
+              style={{
+                background: activeTab === tab ? '#27272a' : 'transparent',
+                color: activeTab === tab ? '#ffffff' : '#71717a',
+              }}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Tab panels */}
@@ -205,6 +207,7 @@ export function MoneylinePage({
               Scrape VLR
             </button>
           </div>
+          <div className="table-scroll">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ borderBottom: '1px solid #27272a' }}>
@@ -225,17 +228,11 @@ export function MoneylinePage({
                 return (
                   <tr
                     key={i}
+                    className="data-row"
                     style={{
                       background: i % 2 === 0 ? '#0a0a0a' : '#111113',
                       borderBottom: '1px solid rgba(39,39,42,0.4)',
                     }}
-                    onMouseEnter={(e) =>
-                      ((e.currentTarget as HTMLTableRowElement).style.background = '#18181b')
-                    }
-                    onMouseLeave={(e) =>
-                      ((e.currentTarget as HTMLTableRowElement).style.background =
-                        i % 2 === 0 ? '#0a0a0a' : '#111113')
-                    }
                   >
                     <td className="px-4 py-3 font-medium" style={{ color: '#ffffff' }}>
                       {pick.teamA}{' '}
@@ -267,6 +264,7 @@ export function MoneylinePage({
               )}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -275,6 +273,7 @@ export function MoneylinePage({
           className="rounded-[12px] border overflow-hidden"
           style={{ background: '#0a0a0a', borderColor: '#27272a' }}
         >
+          <div className="table-scroll">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ borderBottom: '1px solid #27272a', background: '#18181b' }}>
@@ -329,6 +328,7 @@ export function MoneylinePage({
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -337,6 +337,7 @@ export function MoneylinePage({
           className="rounded-[12px] border overflow-hidden"
           style={{ background: '#0a0a0a', borderColor: '#27272a' }}
         >
+          <div className="table-scroll">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr style={{ borderBottom: '1px solid #27272a', background: '#18181b' }}>
@@ -379,6 +380,7 @@ export function MoneylinePage({
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

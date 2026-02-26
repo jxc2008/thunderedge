@@ -1,25 +1,118 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
 import { OverUnderDisplay } from '@/components/over-under-display'
 import { StatsGrid, type StatCardData } from '@/components/stats-grid'
 import { DataTable, type Column } from '@/components/data-table'
-import { EventCard, type EventCardData } from '@/components/event-card'
 import { RecommendationCard } from '@/components/recommendation-card'
 import { DistributionChart } from '@/components/distribution-chart'
-import { EmptyState } from '@/components/ux-patterns'
 
 const ACCENT = '#0ECFCF'
 
-interface AgentRow { agent: string; maps: number; killsPerMap: number; overPct: number }
-const AGENT_COLS: Column<AgentRow>[] = [
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface EventDetail {
+  event_name: string
+  map_kills: number[]
+  event_over: number
+  event_under: number
+  event_maps: number
+  cached: boolean
+  kpr?: number
+  rounds?: number
+  is_recent?: boolean
+}
+
+interface Analysis {
+  player_ign: string
+  team: string
+  kill_line: number
+  over_percentage: number
+  under_percentage: number
+  over_count: number
+  under_count: number
+  total_maps: number
+  events_analyzed: number
+  classification: string
+  recommendation: string
+  confidence: string
+  total_kpr: number
+  weighted_kpr: number
+  rounds_needed: number
+  total_rounds?: number
+  event_details: EventDetail[]
+  matchup_adjusted_probabilities?: {
+    p_over: number
+    p_under: number
+    team_win_prob: number
+    mu_base: number
+    mu_adjusted: number
+    multiplier: number
+    input_method: string
+  }
+  all_map_kills?: number[]
+}
+
+interface AgentStat {
+  agent: string
+  maps: number
+  avg_kills: number
+  over_count: number
+  under_count: number
+  over_pct: number
+}
+
+interface EdgeData {
+  edge: {
+    recommended: string
+    ev_over: number
+    ev_under: number
+    prob_edge_over: number
+    prob_edge_under: number
+    roi_over_pct: number
+    roi_under_pct: number
+  }
+  model: { p_over: number; p_under: number; mu: number }
+  market: { p_over_vigfree: number; p_under_vigfree: number; mu_implied: number }
+  player: { confidence: string; sample_size: number }
+  visualization: { x: number[]; model_pmf: number[]; market_pmf: number[] }
+}
+
+interface Result {
+  analysis: Analysis
+  agentStats: AgentStat[]
+  edgeData: EdgeData | null
+  elapsed: string
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function classificationToType(cls?: string): 'BET_OVER' | 'BET_UNDER' | 'NO_BET' {
+  if (!cls) return 'NO_BET'
+  const l = cls.toLowerCase()
+  if (l.includes('underpriced')) return 'BET_OVER'
+  if (l.includes('overpriced')) return 'BET_UNDER'
+  return 'NO_BET'
+}
+
+function parseConfidence(c?: string): 'HIGH' | 'MED' | 'LOW' {
+  if (!c) return 'LOW'
+  const u = c.toUpperCase()
+  if (u.startsWith('HIGH') || u.includes('STRONG')) return 'HIGH'
+  if (u.startsWith('MEDIUM') || u.startsWith('MED') || u.includes('LEAN')) return 'MED'
+  return 'LOW'
+}
+
+const AGENT_COLS: Column<AgentStat>[] = [
   { key: 'agent', label: 'Agent', sortable: true },
   { key: 'maps', label: 'Maps', sortable: true, align: 'right' },
-  { key: 'killsPerMap', label: 'K/Map', sortable: true, align: 'right', killRateBar: true, barMax: 30 },
+  { key: 'avg_kills', label: 'Avg K', sortable: true, align: 'right', render: (v) => (v as number).toFixed(1) },
+  { key: 'over_count', label: 'Over', sortable: true, align: 'right' },
+  { key: 'under_count', label: 'Under', sortable: true, align: 'right' },
   {
-    key: 'overPct',
+    key: 'over_pct',
     label: 'Over %',
     sortable: true,
     align: 'right',
@@ -31,311 +124,533 @@ const AGENT_COLS: Column<AgentRow>[] = [
   },
 ]
 
-function buildResult(player: string) {
-  const stats: StatCardData[] = [
-    { label: 'Model Mean', value: '18.7', delta: 'kills / map', semantic: 'positive' },
-    { label: 'Market Implied', value: '17.5', delta: 'kill line', semantic: 'neutral' },
-    { label: 'Sample Size', value: 32, delta: 'maps analyzed', semantic: 'neutral' },
-    { label: 'K/Map Avg', value: '18.2', delta: 'last 15 maps', semantic: 'neutral' },
-    { label: 'Edge', value: '+6.9pp', delta: 'vs market', semantic: 'positive' },
-    { label: 'VLR Rating', value: '1.21', delta: 'overall rating', semantic: 'neutral' },
-  ]
-  const agents: AgentRow[] = [
-    { agent: 'Jett', maps: 10, killsPerMap: 20.1, overPct: 70.0 },
-    { agent: 'Raze', maps: 9, killsPerMap: 18.4, overPct: 55.6 },
-    { agent: 'Neon', maps: 7, killsPerMap: 17.6, overPct: 42.9 },
-    { agent: 'Phoenix', maps: 4, killsPerMap: 16.2, overPct: 25.0 },
-    { agent: 'Reyna', maps: 2, killsPerMap: 15.5, overPct: 50.0 },
-  ]
-  const events: EventCardData[] = [
-    {
-      id: '1', eventName: 'VCT Challengers Americas 2025', date: 'Feb 2025',
-      isCached: true, overCount: 5, underCount: 2, defaultOpen: true,
-      maps: [
-        { map: 'Ascent', kills: 19, line: 17.5 },
-        { map: 'Bind', kills: 22, line: 17.5 },
-        { map: 'Pearl', kills: 16, line: 17.5 },
-      ],
-    },
-    {
-      id: '2', eventName: 'VCT Challengers Americas — Kickoff', date: 'Jan 2025',
-      isCached: true, overCount: 3, underCount: 2,
-      maps: [
-        { map: 'Haven', kills: 18, line: 17.5 },
-        { map: 'Icebox', kills: 15, line: 17.5 },
-      ],
-    },
-  ]
-  const dist = Array.from({ length: 15 }, (_, i) => {
-    const k = i + 10
-    return {
-      kills: k,
-      modelPct: parseFloat((Math.exp(-Math.pow(k - 18.7, 2) / 18) * 17).toFixed(2)),
-      marketPct: parseFloat((Math.exp(-Math.pow(k - 17.5, 2) / 20) * 15).toFixed(2)),
-    }
-  })
-  return { player, stats, agents, events, dist }
+// ─── Kill chip row ──────────────────────────────────────────────────────────
+
+function KillChips({ kills, line }: { kills: number[]; line: number }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.5rem' }}>
+      {kills.map((k, i) => {
+        const over = k > line
+        return (
+          <span
+            key={i}
+            style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 700,
+              fontSize: '0.875rem',
+              padding: '0.3rem 0.6rem',
+              border: `1px solid ${over ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}`,
+              background: over ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+              color: over ? '#22c55e' : '#ef4444',
+            }}
+          >
+            {k} {over ? '✓' : '✗'}
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
-const inputStyle: React.CSSProperties = {
-  background: '#0A1515',
-  border: '1px solid rgba(14,207,207,0.2)',
-  color: '#ffffff',
-  padding: '0.75rem 1rem',
-  fontSize: '0.875rem',
-  fontFamily: 'inherit',
-  outline: 'none',
-  borderRadius: 0,
-  width: '100%',
-  transition: 'border-color 0.15s',
+// ─── Event timeline ─────────────────────────────────────────────────────────
+
+function EventTimeline({ events, line }: { events: EventDetail[]; line: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {events.map((ev, i) => {
+        const ou = ev.event_maps > 0 ? `O:${ev.event_over}/${ev.event_maps} U:${ev.event_under}/${ev.event_maps}` : ''
+        return (
+          <div
+            key={i}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem',
+              padding: '0.5rem 0 0.5rem 1rem',
+              marginLeft: 4,
+              borderLeft: `2px solid ${ev.cached ? 'rgba(34,197,94,0.25)' : 'rgba(245,158,11,0.35)'}`,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div
+              style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: ev.cached ? '#22c55e' : '#f59e0b',
+                flexShrink: 0, marginLeft: -20, marginTop: 4,
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: 600, color: '#e4e4e7', fontSize: '0.875rem' }}>{ev.event_name}</span>
+                {ou && <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)' }}>{ou}</span>}
+                <span
+                  style={{
+                    fontSize: '0.65rem', padding: '0.15rem 0.4rem', fontWeight: 700,
+                    background: ev.cached ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)',
+                    color: ev.cached ? '#22c55e' : '#f59e0b',
+                    border: `1px solid ${ev.cached ? 'rgba(34,197,94,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                    textTransform: 'uppercase', letterSpacing: '0.04em',
+                  }}
+                >
+                  {ev.cached ? 'CACHED' : 'LIVE'}
+                </span>
+                {ev.is_recent && (
+                  <span style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem', background: `rgba(14,207,207,0.15)`, color: ACCENT, border: `1px solid rgba(14,207,207,0.3)`, fontWeight: 700 }}>
+                    RECENT
+                  </span>
+                )}
+              </div>
+              {ev.map_kills && ev.map_kills.length > 0 && (
+                <KillChips kills={ev.map_kills} line={line} />
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
-const labelStyle: React.CSSProperties = {
-  fontSize: '0.7rem',
-  fontWeight: 500,
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.12em',
-  color: 'rgba(255,255,255,0.4)',
-  display: 'block',
-  marginBottom: '0.5rem',
+// ─── Matchup adjustment box ────────────────────────────────────────────────
+
+function MatchupBox({ adj }: { adj: NonNullable<Analysis['matchup_adjusted_probabilities']> }) {
+  return (
+    <div style={{
+      background: `rgba(14,207,207,0.05)`,
+      border: `1px solid rgba(14,207,207,0.2)`,
+      borderLeft: `3px solid ${ACCENT}`,
+      padding: '1rem 1.5rem',
+    }}>
+      <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
+        Matchup Adjustment Applied
+      </div>
+      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.875rem' }}>
+        <span style={{ color: 'rgba(255,255,255,0.5)' }}>Win Prob: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{(adj.team_win_prob * 100).toFixed(1)}%</span></span>
+        <span style={{ color: 'rgba(255,255,255,0.5)' }}>μ Base: <span style={{ color: '#e4e4e7', fontWeight: 600 }}>{adj.mu_base?.toFixed(2)}</span></span>
+        <span style={{ color: 'rgba(255,255,255,0.5)' }}>μ Adj: <span style={{ color: '#e4e4e7', fontWeight: 600 }}>{adj.mu_adjusted?.toFixed(2)}</span></span>
+        <span style={{ color: 'rgba(255,255,255,0.5)' }}>×<span style={{ color: '#e4e4e7', fontWeight: 600 }}>{adj.multiplier?.toFixed(3)}</span></span>
+        <span style={{ color: 'rgba(255,255,255,0.5)' }}>Adj P(Over): <span style={{ color: '#22c55e', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{(adj.p_over * 100).toFixed(1)}%</span></span>
+      </div>
+    </div>
+  )
 }
+
+// ─── Edge section ──────────────────────────────────────────────────────────
+
+function EdgeSection({ edge, line }: { edge: EdgeData; line: number }) {
+  const { edge: e, model, market } = edge
+  const recommended = e.recommended
+  const isOver = recommended === 'OVER'
+  const isUnder = recommended === 'UNDER'
+  const accentColor = isOver ? '#22c55e' : isUnder ? '#ef4444' : 'rgba(255,255,255,0.4)'
+
+  const dist = (edge.visualization.x || []).map((x, i) => ({
+    kills: x,
+    modelPct: +(edge.visualization.model_pmf[i] * 100).toFixed(3),
+    marketPct: +(edge.visualization.market_pmf[i] * 100).toFixed(3),
+  }))
+
+  return (
+    <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`, padding: '2rem', marginTop: '1.5rem' }}>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '1.5rem' }}>
+        Mathematical Edge Analysis
+      </div>
+
+      <div style={{
+        background: isOver ? 'rgba(34,197,94,0.05)' : isUnder ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${isOver ? 'rgba(34,197,94,0.3)' : isUnder ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.15)'}`,
+        padding: '1.5rem', textAlign: 'center', marginBottom: '1.5rem',
+      }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '1.5rem', color: accentColor, marginBottom: '0.5rem' }}>
+          {recommended === 'NO BET' ? 'NO EDGE' : `BET ${recommended}`}
+        </div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '3rem', color: ACCENT, lineHeight: 1, margin: '0.75rem 0' }}>
+          {recommended !== 'NO BET'
+            ? `+${Math.max(e.roi_over_pct, e.roi_under_pct).toFixed(1)}% ROI`
+            : `${Math.max(e.ev_over, e.ev_under).toFixed(3)} EV`}
+        </div>
+        <span style={{
+          fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em',
+          padding: '0.25rem 0.6rem',
+          background: edge.player.confidence === 'HIGH' ? 'rgba(34,197,94,0.15)' : edge.player.confidence === 'MED' ? 'rgba(234,179,8,0.15)' : 'rgba(239,68,68,0.15)',
+          color: edge.player.confidence === 'HIGH' ? '#22c55e' : edge.player.confidence === 'MED' ? '#eab308' : '#ef4444',
+          border: `1px solid ${edge.player.confidence === 'HIGH' ? 'rgba(34,197,94,0.3)' : edge.player.confidence === 'MED' ? 'rgba(234,179,8,0.3)' : 'rgba(239,68,68,0.3)'}`,
+        }}>
+          {edge.player.confidence} CONFIDENCE — {edge.player.sample_size} maps
+        </span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+        {[
+          { label: 'Model P(Over)', value: `${(model.p_over * 100).toFixed(1)}%`, positive: model.p_over > 0.5 },
+          { label: 'Market P(Over)', value: `${(market.p_over_vigfree * 100).toFixed(1)}%`, positive: false },
+          { label: 'Prob Edge Over', value: `${e.prob_edge_over > 0 ? '+' : ''}${(e.prob_edge_over * 100).toFixed(1)}pp`, positive: e.prob_edge_over > 0 },
+          { label: 'EV Over', value: `${e.ev_over > 0 ? '+' : ''}${e.ev_over.toFixed(4)}`, positive: e.ev_over > 0 },
+          { label: 'Model P(Under)', value: `${(model.p_under * 100).toFixed(1)}%`, positive: model.p_under > 0.5 },
+          { label: 'Market P(Under)', value: `${(market.p_under_vigfree * 100).toFixed(1)}%`, positive: false },
+          { label: 'Prob Edge Under', value: `${e.prob_edge_under > 0 ? '+' : ''}${(e.prob_edge_under * 100).toFixed(1)}pp`, positive: e.prob_edge_under > 0 },
+          { label: 'EV Under', value: `${e.ev_under > 0 ? '+' : ''}${e.ev_under.toFixed(4)}`, positive: e.ev_under > 0 },
+        ].map((m) => (
+          <div key={m.label} style={{ background: '#0a0a0a', border: `1px solid rgba(14,207,207,0.1)`, borderLeft: `3px solid ${ACCENT}`, padding: '1.25rem' }}>
+            <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.5rem' }}>{m.label}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.5rem', color: m.positive ? '#22c55e' : m.value.startsWith('-') ? '#ef4444' : '#e4e4e7' }}>{m.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {dist.length > 0 && (
+        <div style={{ background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.06)', padding: '1.5rem' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, textAlign: 'center', marginBottom: '1rem', color: '#e4e4e7', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Kill Distribution: Model vs Market
+          </div>
+          <DistributionChart data={dist} killLine={line} modelOverPct={model.p_over * 100} marketOverPct={market.p_over_vigfree * 100} />
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto', marginTop: '1.5rem' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 280 }}>
+          <thead>
+            <tr>
+              {['Side', 'Model Prob', 'Market Prob', 'Edge (pp)', 'EV', 'ROI %'].map((h) => (
+                <th key={h} style={{ padding: '1rem', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              { side: 'OVER', modelP: model.p_over, mktP: market.p_over_vigfree, edgePP: e.prob_edge_over, ev: e.ev_over, roi: e.roi_over_pct },
+              { side: 'UNDER', modelP: model.p_under, mktP: market.p_under_vigfree, edgePP: e.prob_edge_under, ev: e.ev_under, roi: e.roi_under_pct },
+            ].map((row) => (
+              <tr key={row.side} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <td style={{ padding: '1rem', fontWeight: 700, color: row.side === 'OVER' ? '#22c55e' : '#ef4444', fontFamily: 'var(--font-display)' }}>{row.side}</td>
+                <td style={{ padding: '1rem', color: '#e4e4e7' }}>{(row.modelP * 100).toFixed(1)}%</td>
+                <td style={{ padding: '1rem', color: '#e4e4e7' }}>{(row.mktP * 100).toFixed(1)}%</td>
+                <td style={{ padding: '1rem', color: row.edgePP > 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{row.edgePP > 0 ? '+' : ''}{(row.edgePP * 100).toFixed(1)}pp</td>
+                <td style={{ padding: '1rem', color: row.ev > 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{row.ev > 0 ? '+' : ''}{row.ev.toFixed(4)}</td>
+                <td style={{ padding: '1rem', color: row.roi > 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{row.roi > 0 ? '+' : ''}{row.roi.toFixed(2)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main page ─────────────────────────────────────────────────────────────
 
 export default function ChallengersPage() {
   const [playerInput, setPlayerInput] = useState('')
-  const [lineInput, setLineInput] = useState('')
+  const [killLine, setKillLine] = useState('18.5')
+  const [overOdds, setOverOdds] = useState('')
+  const [underOdds, setUnderOdds] = useState('')
+  const [teamOdds, setTeamOdds] = useState('')
+  const [oppOdds, setOppOdds] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [result, setResult] = useState<ReturnType<typeof buildResult> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<Result | null>(null)
+  const playerRef = useRef<HTMLInputElement>(null)
 
-  const handleAnalyze = () => {
-    if (!playerInput.trim()) return
+  async function handleAnalyze() {
+    const ign = playerInput.trim()
+    if (!ign) return
+    const line = parseFloat(killLine) || 18.5
+
+    const teamQ = teamOdds && oppOdds ? `&team_odds=${teamOdds}&opp_odds=${oppOdds}` : ''
+
     setIsLoading(true)
+    setError(null)
     setResult(null)
-    setTimeout(() => {
-      setResult(buildResult(playerInput.trim()))
+
+    try {
+      const t0 = performance.now()
+      const res = await fetch(`/api/challengers/player/${encodeURIComponent(ign)}?line=${line}${teamQ}`)
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'API error')
+
+      // Fetch edge data if odds provided
+      let edgeData: EdgeData | null = null
+      const parsedOver = parseFloat(overOdds)
+      const parsedUnder = parseFloat(underOdds)
+      if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
+        try {
+          const er = await fetch(`/api/challengers/edge/${encodeURIComponent(ign)}?line=${line}&over_odds=${parsedOver}&under_odds=${parsedUnder}${teamQ}`)
+          if (er.ok) {
+            const ed = await er.json()
+            if (ed.success) edgeData = ed
+          }
+        } catch { /* edge is optional */ }
+      }
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2)
+      setResult({ analysis: data.analysis, agentStats: data.agent_stats || [], edgeData, elapsed })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to connect to backend')
+    } finally {
       setIsLoading(false)
-    }, 1200)
+    }
   }
 
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleAnalyze()
-  }
+  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleAnalyze() }
+
+  const analysis = result?.analysis
+  const edgeData = result?.edgeData
+
+  const stats: StatCardData[] = analysis ? [
+    { label: 'Kill Line', value: analysis.kill_line, delta: 'Challengers', semantic: 'neutral' },
+    { label: 'Total KPR', value: (analysis.total_kpr || analysis.weighted_kpr || 0).toFixed(3), delta: 'Weighted by rounds', semantic: 'neutral' },
+    { label: 'Weighted KPR', value: (analysis.weighted_kpr || 0).toFixed(3), delta: '1.5× recent event', semantic: 'neutral' },
+    { label: 'Rounds Needed', value: (analysis.rounds_needed || 0).toFixed(1), delta: 'to hit line', semantic: 'neutral' },
+    { label: 'Maps Analyzed', value: analysis.total_maps, delta: `${analysis.events_analyzed} events`, semantic: 'neutral' },
+    { label: 'Confidence', value: analysis.confidence, delta: 'Sample quality', semantic: parseConfidence(analysis.confidence) === 'HIGH' ? 'positive' : parseConfidence(analysis.confidence) === 'LOW' ? 'negative' : 'neutral' },
+  ] : []
+
+  const recType = analysis ? classificationToType(analysis.classification) : 'NO_BET'
+  const recEV = edgeData
+    ? (edgeData.edge.recommended === 'OVER' ? edgeData.edge.ev_over : edgeData.edge.recommended === 'UNDER' ? edgeData.edge.ev_under : 0)
+    : 0
+  const recConfidence = parseConfidence(edgeData?.player.confidence || analysis?.confidence)
+
+  const cachedCount = analysis?.event_details?.filter((e) => e.cached).length ?? 0
+  const liveCount = (analysis?.event_details?.length ?? 0) - cachedCount
 
   return (
     <>
       <AppHeader activePage="/challengers" />
 
-      <div className="page-container" style={{ padding: '0 24px 3rem' }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '0 24px 3rem' }}>
+
         {/* Hero */}
-        <div style={{ textAlign: 'center', padding: '3rem 0 2rem' }}>
-          <h1
-            className="font-display uppercase"
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 900,
-              fontSize: 'clamp(2.5rem, 6vw, 5rem)',
-              letterSpacing: '-0.02em',
-              lineHeight: 1.05,
-              color: '#ffffff',
-              marginBottom: '1rem',
-            }}
-          >
+        <div style={{ textAlign: 'center', padding: '2.5rem 0 1.5rem' }}>
+          <h1 style={{
+            fontFamily: 'var(--font-display)', fontWeight: 900,
+            fontSize: 'clamp(2.5rem, 6vw, 5rem)', letterSpacing: '-0.02em', lineHeight: 1.05,
+            color: '#ffffff', marginBottom: '0.75rem', textTransform: 'uppercase',
+          }}>
             Challengers <span style={{ color: ACCENT }}>Kill Line</span>
           </h1>
-          <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', maxWidth: 600, margin: '0 auto 2rem' }}>
-            Kill-line analytics for VCT Challengers circuit players — powered by negative binomial modelling.
+          <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', maxWidth: 600, margin: '0 auto' }}>
+            Negative binomial kill-line analytics for VCT Challengers players — live data from VLR.gg
           </p>
         </div>
 
-        {/* Search section */}
-        <div
-          style={{
-            background: '#0A1515',
-            border: '1px solid rgba(14,207,207,0.15)',
-            borderLeft: `3px solid ${ACCENT}`,
-            padding: '2rem',
-            marginBottom: '2rem',
-          }}
-        >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={labelStyle}>Player IGN</label>
-              <input
-                type="text"
-                value={playerInput}
-                onChange={(e) => setPlayerInput(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder="e.g. s0m#NA1"
-                style={inputStyle}
-              />
-            </div>
-            <div style={{ flex: '0 1 160px' }}>
-              <label style={labelStyle}>Kill Line <span style={{ textTransform: 'none', letterSpacing: 'normal', color: 'rgba(255,255,255,0.25)' }}>(optional)</span></label>
-              <input
-                type="number"
-                step="0.5"
-                value={lineInput}
-                onChange={(e) => setLineInput(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder="17.5"
-                style={inputStyle}
-              />
-            </div>
+        {/* ── Command bar ──────────────────────────────────────────────────── */}
+        <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.15)`, borderLeft: `3px solid ${ACCENT}`, marginBottom: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1rem' }}>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.2rem', color: ACCENT, flexShrink: 0 }}>{'>'}</span>
+            <input
+              ref={playerRef}
+              type="text"
+              value={playerInput}
+              onChange={(e) => setPlayerInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="enter challengers player ign and press enter..."
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                fontFamily: "'Courier New', monospace", fontSize: '1.1rem', color: '#ffffff',
+              }}
+            />
             <button
               onClick={handleAnalyze}
               disabled={isLoading || !playerInput.trim()}
               style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 700,
-                fontSize: '0.9rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                padding: '0.75rem 2rem',
-                background: isLoading || !playerInput.trim() ? `rgba(14,207,207,0.4)` : ACCENT,
-                color: '#000000',
-                border: 'none',
-                borderRadius: 0,
-                cursor: isLoading || !playerInput.trim() ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                flexShrink: 0,
-                alignSelf: 'flex-end',
+                fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem',
+                textTransform: 'uppercase', letterSpacing: '0.06em',
+                padding: '0.4rem 1.1rem',
+                background: isLoading || !playerInput.trim() ? 'rgba(14,207,207,0.4)' : ACCENT,
+                color: '#000',
+                border: 'none', borderRadius: 0, cursor: isLoading || !playerInput.trim() ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
               }}
             >
-              {isLoading ? <><Loader2 size={14} className="animate-spin" /> Analyzing...</> : 'Analyze Player'}
+              {isLoading ? <><Loader2 size={12} className="animate-spin" /> Analyzing</> : 'Analyze'}
             </button>
+          </div>
+
+          {/* Secondary params bar */}
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center',
+            padding: '0.5rem 1rem',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)',
+          }}>
+            {[
+              { label: 'Kill Line', val: killLine, set: setKillLine, type: 'number', step: '0.5', placeholder: '18.5', width: 80 },
+              { label: 'Over Odds', val: overOdds, set: setOverOdds, type: 'text', placeholder: '-110', width: 80 },
+              { label: 'Under Odds', val: underOdds, set: setUnderOdds, type: 'text', placeholder: '-110', width: 80 },
+              { label: 'Team Odds', val: teamOdds, set: setTeamOdds, type: 'number', placeholder: '1.62', width: 80 },
+              { label: 'Opp Odds', val: oppOdds, set: setOppOdds, type: 'number', placeholder: '2.30', width: 80 },
+            ].map((f) => (
+              <span key={f.label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {f.label}:
+                <input
+                  type={f.type}
+                  step={(f as { step?: string }).step}
+                  value={f.val}
+                  onChange={(e) => f.set(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder={f.placeholder}
+                  style={{
+                    width: f.width, padding: '0.25rem 0.5rem', fontSize: '0.8rem',
+                    background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.12)',
+                    color: '#fff', outline: 'none', borderRadius: 0,
+                  }}
+                />
+              </span>
+            ))}
           </div>
         </div>
 
-        {/* Loading */}
+        {/* Error */}
+        {error && (
+          <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', padding: '1rem 1.5rem', marginTop: '1rem', fontWeight: 600 }}>
+            ✗ {error}
+          </div>
+        )}
+
+        {/* Loading skeleton */}
         {isLoading && (
-          <div style={{ textAlign: 'center', padding: '3rem', color: '#71717a' }}>
-            <div style={{
-              width: 40, height: 40,
-              border: '3px solid #27272a',
-              borderTop: `3px solid ${ACCENT}`,
-              borderRadius: '50%',
-              animation: 'spin 0.8s linear infinite',
-              margin: '0 auto 1rem',
-            }} />
-            <p style={{ fontWeight: 600, color: '#e4e4e7', marginBottom: 4 }}>Analyzing Player</p>
-            <p style={{ fontSize: '0.875rem' }}>Fetching Challengers data from VLR.gg...</p>
-            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {[80, 200, 120].map((h, i) => (
+              <div key={i} style={{ height: h, background: 'linear-gradient(90deg,#1a1a1a 25%,#252525 50%,#1a1a1a 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+            ))}
+            <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
           </div>
         )}
 
-        {/* Empty state */}
-        {!isLoading && !result && (
-          <div style={{ background: '#0a0a0a', border: '1px solid #27272a', borderRadius: 12 }}>
-            <EmptyState />
+        {/* Analysis-level error (insufficient data) */}
+        {!isLoading && result && analysis && !analysis.player_ign && (
+          <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', padding: '1rem 1.5rem', marginTop: '1rem', fontWeight: 600 }}>
+            ✗ {(analysis as unknown as Record<string, string>).error || 'Insufficient data for this player'}
           </div>
         )}
 
-        {/* Results */}
-        {!isLoading && result && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* ── Results ──────────────────────────────────────────────────────── */}
+        {!isLoading && result && analysis && analysis.player_ign && (
+          <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
             {/* Performance bar */}
-            <div
-              style={{
-                background: '#0A1515',
-                border: '1px solid rgba(14,207,207,0.15)',
-                borderLeft: `3px solid ${ACCENT}`,
-                padding: '0.875rem 1.5rem',
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '1.5rem',
-                fontSize: '0.875rem',
-                color: 'rgba(255,255,255,0.5)',
-              }}
-            >
-              <span>
-                Player:{' '}
-                <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                  {result.player}
-                </span>
-              </span>
-              <span>
-                Circuit:{' '}
-                <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                  Challengers
-                </span>
-              </span>
-              <span>
-                Model:{' '}
-                <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                  Neg. Binomial
-                </span>
-              </span>
-              <span style={{ marginLeft: 'auto', color: '#22c55e' }}>✓ Cached</span>
+            <div style={{
+              background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`,
+              padding: '0.875rem 1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem',
+              fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)',
+            }}>
+              <span>Query Time: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{result.elapsed}s</span></span>
+              <span>Events: <span style={{ color: '#22c55e', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{cachedCount} cached</span> / <span style={{ color: '#f59e0b', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{liveCount} live</span></span>
+              <span>Maps Analyzed: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{analysis.total_maps}</span></span>
+              <span style={{ color: 'rgba(255,255,255,0.4)' }}>Circuit: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>Challengers</span></span>
+              {edgeData && <span style={{ marginLeft: 'auto', color: '#22c55e', fontWeight: 600 }}>✓ Edge data loaded</span>}
             </div>
 
-            {/* Two-column results grid */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 58%) minmax(0, 42%)',
-                gap: '1.5rem',
-              }}
-              className="result-grid"
-            >
-              {/* Left */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <OverUnderDisplay overPct={60.2} underPct={39.8} sampleSize={32} killLine={parseFloat(lineInput) || 17.5} />
-                <RecommendationCard
-                  type="BET_OVER"
-                  ev={0.069}
-                  confidence="MED"
-                  reason="Model mean 18.7 exceeds market-implied 17.5. Positive EV on over."
-                />
-                <StatsGrid stats={result.stats} columns={3} />
-              </div>
+            {/* Two-column grid */}
+            <div className="result-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,58%) minmax(0,42%)', gap: '1.5rem' }}>
 
-              {/* Right */}
+              {/* Left column */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <DistributionChart
-                  data={result.dist}
-                  killLine={parseFloat(lineInput) || 17.5}
-                  modelOverPct={60.2}
-                  marketOverPct={52.1}
-                />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {result.events.map((ev) => (
-                    <EventCard key={ev.id} {...ev} />
-                  ))}
+
+                {/* Player card */}
+                <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`, padding: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 'clamp(1.5rem,4vw,2.25rem)', color: '#fff', marginBottom: '0.25rem' }}>
+                        {analysis.player_ign}
+                      </h2>
+                      <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)' }}>{analysis.team || 'Unknown Team'}</div>
+                    </div>
+                    <div style={{
+                      fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.75rem',
+                      padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em',
+                      background: recType === 'BET_OVER' ? 'rgba(34,197,94,0.12)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.12)' : `rgba(14,207,207,0.12)`,
+                      color: recType === 'BET_OVER' ? '#22c55e' : recType === 'BET_UNDER' ? '#ef4444' : ACCENT,
+                      border: `1px solid ${recType === 'BET_OVER' ? 'rgba(34,197,94,0.3)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.3)' : 'rgba(14,207,207,0.3)'}`,
+                    }}>
+                      {analysis.classification}
+                    </div>
+                  </div>
+
+                  <OverUnderDisplay
+                    overPct={analysis.over_percentage}
+                    underPct={analysis.under_percentage}
+                    sampleSize={analysis.total_maps}
+                    killLine={analysis.kill_line}
+                  />
+
+                  <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: '1rem' }}>
+                    Based on {analysis.total_maps} maps across {analysis.events_analyzed} Challengers events
+                  </div>
+
+                  {/* Formula box */}
+                  <div style={{ marginTop: '1.5rem', background: '#0a0a0a', border: `1px solid rgba(14,207,207,0.1)`, padding: '1.5rem', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
+                      Formula: Kill Line / Weighted KPR = Rounds Needed
+                    </div>
+                    <div style={{ fontFamily: 'monospace', fontSize: '1rem', color: ACCENT, margin: '0.5rem 0' }}>
+                      {analysis.kill_line} / {(analysis.weighted_kpr || 0).toFixed(3)} =
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '2.5rem', color: '#fff' }}>
+                      {(analysis.rounds_needed || 0).toFixed(1)} rounds
+                    </div>
+                  </div>
+
+                  {/* Recommendation */}
+                  <div style={{ marginTop: '1.5rem' }}>
+                    <RecommendationCard
+                      type={recType}
+                      ev={recEV || 0}
+                      confidence={recConfidence}
+                      reason={analysis.recommendation}
+                    />
+                  </div>
                 </div>
+
+                {/* Stats grid */}
+                <StatsGrid stats={stats} columns={3} />
+
+                {/* Matchup adjustment */}
+                {analysis.matchup_adjusted_probabilities && (
+                  <MatchupBox adj={analysis.matchup_adjusted_probabilities} />
+                )}
+
+                {/* Events timeline */}
+                {analysis.event_details && analysis.event_details.length > 0 && (
+                  <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`, padding: '1.5rem' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: '#fff', marginBottom: '0.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
+                      Challengers Events Analyzed
+                    </h3>
+                    <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', margin: '0.75rem 0 1rem' }}>
+                      Total KPR: {(analysis.total_kpr || analysis.weighted_kpr || 0).toFixed(3)} · Weighted KPR: {(analysis.weighted_kpr || 0).toFixed(3)} · Rounds: {analysis.total_rounds ?? '—'}
+                    </p>
+                    <EventTimeline events={analysis.event_details} line={analysis.kill_line} />
+                  </div>
+                )}
+              </div>
+
+              {/* Right column – agent table */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {result.agentStats && result.agentStats.length > 0 && (
+                  <div>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
+                      Agent Breakdown
+                    </h3>
+                    <DataTable<AgentStat>
+                      columns={AGENT_COLS}
+                      data={result.agentStats}
+                      filterPlaceholder="Filter agents..."
+                      filterKey="agent"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Agent breakdown */}
-            <div>
-              <h3
-                style={{
-                  fontFamily: 'var(--font-display)',
-                  fontWeight: 700,
-                  fontSize: '1rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.08em',
-                  color: 'rgba(255,255,255,0.4)',
-                  marginBottom: '0.75rem',
-                }}
-              >
-                Agent Breakdown
-              </h3>
-              <DataTable<AgentRow>
-                columns={AGENT_COLS}
-                data={result.agents}
-                filterPlaceholder="Filter agents..."
-                filterKey="agent"
-              />
-            </div>
+            {/* Edge section (full-width, below grid) */}
+            {edgeData && <EdgeSection edge={edgeData} line={analysis.kill_line} />}
           </div>
         )}
       </div>
 
       <style>{`
-        @media (max-width: 768px) {
-          .result-grid { grid-template-columns: 1fr !important; }
-        }
+        @media (max-width: 768px) { .result-grid { grid-template-columns: 1fr !important; } }
       `}</style>
     </>
   )

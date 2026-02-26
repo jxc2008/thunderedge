@@ -101,7 +101,7 @@ export function AppHeader({ activePage }: AppHeaderProps) {
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-0" aria-label="Main navigation">
+        <nav className="hidden md:flex items-center gap-2" aria-label="Main navigation">
           {/* Dropdown groups */}
           {NAV_DROPDOWNS.map((group) => {
             const active = isDropdownActive(group.links)

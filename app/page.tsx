@@ -89,11 +89,20 @@ interface Result {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function classificationToType(cls: string): 'BET_OVER' | 'BET_UNDER' | 'NO_BET' {
+function classificationToType(cls?: string): 'BET_OVER' | 'BET_UNDER' | 'NO_BET' {
+  if (!cls) return 'NO_BET'
   const l = cls.toLowerCase()
   if (l.includes('underpriced')) return 'BET_OVER'
   if (l.includes('overpriced')) return 'BET_UNDER'
   return 'NO_BET'
+}
+
+function parseConfidence(c?: string): 'HIGH' | 'MED' | 'LOW' {
+  if (!c) return 'LOW'
+  const u = c.toUpperCase()
+  if (u.startsWith('HIGH') || u.includes('STRONG')) return 'HIGH'
+  if (u.startsWith('MEDIUM') || u.startsWith('MED') || u.includes('LEAN')) return 'MED'
+  return 'LOW'
 }
 
 const AGENT_COLS: Column<AgentStat>[] = [
@@ -398,7 +407,7 @@ export default function HomePage() {
     { label: 'Weighted KPR', value: (analysis.weighted_kpr || 0).toFixed(3), delta: '1.5× recent event', semantic: 'neutral' },
     { label: 'Rounds Needed', value: (analysis.rounds_needed || 0).toFixed(1), delta: 'to hit line', semantic: 'neutral' },
     { label: 'Maps Analyzed', value: analysis.total_maps, delta: `${analysis.events_analyzed} events`, semantic: 'neutral' },
-    { label: 'Confidence', value: analysis.confidence, delta: 'Sample quality', semantic: analysis.confidence === 'HIGH' ? 'positive' : analysis.confidence === 'LOW' ? 'negative' : 'neutral' },
+    { label: 'Confidence', value: analysis.confidence, delta: 'Sample quality', semantic: parseConfidence(analysis.confidence) === 'HIGH' ? 'positive' : parseConfidence(analysis.confidence) === 'LOW' ? 'negative' : 'neutral' },
   ] : []
 
   // Determine recommendation type + EV
@@ -406,7 +415,7 @@ export default function HomePage() {
   const recEV = edgeData
     ? (edgeData.edge.recommended === 'OVER' ? edgeData.edge.ev_over : edgeData.edge.recommended === 'UNDER' ? edgeData.edge.ev_under : 0)
     : 0
-  const recConfidence = (edgeData?.player.confidence || analysis?.confidence || 'LOW') as 'HIGH' | 'MED' | 'LOW'
+  const recConfidence = parseConfidence(edgeData?.player.confidence || analysis?.confidence)
 
   // Count cached/live events
   const cachedCount = analysis?.event_details?.filter((e) => e.cached).length ?? 0
@@ -517,8 +526,15 @@ export default function HomePage() {
         )}
 
 
+        {/* Backend returned an analysis-level error (insufficient data etc.) */}
+        {!isLoading && result && analysis && !analysis.player_ign && (
+          <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', padding: '1rem 1.5rem', marginTop: '1rem', fontWeight: 600 }}>
+            ✗ {(analysis as unknown as Record<string, string>).error || 'Insufficient data for this player'}
+          </div>
+        )}
+
         {/* ── Results ──────────────────────────────────────────────────────── */}
-        {!isLoading && result && analysis && (
+        {!isLoading && result && analysis && analysis.player_ign && (
           <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
             {/* Performance bar */}

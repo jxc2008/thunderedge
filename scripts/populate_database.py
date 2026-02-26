@@ -1,15 +1,24 @@
 # scripts/populate_database.py
 """
-One-time population script to cache all 2025 VCT event data.
+Comprehensive database population script for 2025 VCT event data.
 
 This script:
 1. Scrapes all 2025 VCT events from VLR.gg
 2. For each event, gets all matches
-3. For each match, extracts all player stats per map
-4. Stores everything in the SQLite database
+3. For each match, extracts comprehensive player stats per map:
+   - Map name (Bind, Haven, etc.)
+   - Agent played
+   - Kills, Deaths, Assists
+   - ACS (Average Combat Score)
+   - ADR (Average Damage per Round)
+   - KAST (Kill, Assist, Survive, Trade %)
+   - First Bloods
+   - Map score (e.g., "13-6")
+4. Extracts match pick/ban sequences (first_ban, second_ban, first_pick, second_pick, decider)
+5. Stores everything in the SQLite database
 
-Run once to populate the cache, then the main app will use cached data
-for completed events and only scrape ongoing events.
+Run this to populate/repopulate the cache with comprehensive stats.
+The main app will use cached data for completed events and only scrape ongoing events.
 """
 
 import sys
@@ -203,7 +212,7 @@ class DatabasePopulator:
             return []
     
     def process_match(self, match: dict, event_id: int):
-        """Process a single match and save all player map stats"""
+        """Process a single match and save all comprehensive player map stats + pick/bans"""
         match_url = match['url']
         full_url = f"{self.base_url}{match_url}"
         
@@ -224,6 +233,18 @@ class DatabasePopulator:
                 logger.error(f"    Failed to save match: {match_url}")
                 return
             
+            # Extract and save pick/ban data
+            pick_bans = self._extract_pick_bans(soup)
+            if pick_bans:
+                self.db.save_match_pick_bans(
+                    match_id=match_id,
+                    first_ban=pick_bans.get('first_ban'),
+                    second_ban=pick_bans.get('second_ban'),
+                    first_pick=pick_bans.get('first_pick'),
+                    second_pick=pick_bans.get('second_pick'),
+                    decider=pick_bans.get('decider')
+                )
+            
             # Find all map stat sections
             game_sections = soup.find_all('div', class_='vm-stats-game')
             map_number = 0
@@ -234,6 +255,31 @@ class DatabasePopulator:
                     continue
                 
                 map_number += 1
+                
+                # Extract map name and score from header
+                map_name = 'Unknown'
+                map_score = 'N/A'
+                header = section.find('div', class_='map')
+                if header:
+                    # Map name
+                    map_name_div = header.find('div', style=lambda x: x and 'font-weight' in str(x) and '700' in str(x))
+                    if map_name_div:
+                        # Get text from first span
+                        first_span = map_name_div.find('span')
+                        if first_span:
+                            map_name = first_span.get_text(strip=True)
+                        else:
+                            map_name = map_name_div.get_text(strip=True)
+                        # Clean up whitespace and remove PICK/BAN keywords
+                        map_name = ' '.join(map_name.split())
+                        map_name = re.sub(r'(PICK|BAN|pick|ban)', '', map_name).strip()
+                    
+                    # Score - look for div.score elements in the entire section (not just header!)
+                    score_divs = section.find_all('div', class_='score')
+                    if len(score_divs) >= 2:
+                        team1_score = score_divs[0].get_text(strip=True)
+                        team2_score = score_divs[1].get_text(strip=True)
+                        map_score = f"{team1_score}-{team2_score}"
                 
                 # Find ALL stats tables (one per team - usually 2)
                 tables = section.find_all('table')
@@ -253,43 +299,71 @@ class DatabasePopulator:
                         if not player_link:
                             continue
                         
-                        # Extract just the player IGN, not the team name
-                        # The player name is typically in a div with class 'text-of'
+                        # Extract just the player IGN
                         name_div = player_link.find('div', class_='text-of')
                         if name_div:
                             player_name = name_div.get_text(strip=True)
                         else:
-                            # Fallback: look for div with font-weight style
                             name_div = player_link.find('div', style=lambda x: x and 'font-weight' in str(x))
                             if name_div:
                                 player_name = name_div.get_text(strip=True)
                             else:
-                                # Last resort: take first part of text (before team name)
                                 full_text = player_link.get_text(strip=True)
-                                # Team names are often in CAPS or at the end
                                 player_name = full_text.split()[0] if full_text else ''
                         
+                        # Extract agent
+                        agent = 'Unknown'
+                        agent_td = row.find('td', class_='mod-agents')
+                        if agent_td:
+                            agent_img = agent_td.find('img')
+                            if agent_img:
+                                agent_alt = agent_img.get('alt', '')
+                                agent_title = agent_img.get('title', '')
+                                agent = agent_title or agent_alt or 'Unknown'
+                                # Clean up agent name
+                                agent = agent.split()[0] if agent else 'Unknown'
+                        
                         # Get stats from cells
+                        # VLR table structure: Rating, ACS, K, D, A, +/-, KAST, ADR, HS%, FK, FD, +/-
                         stat_cells = row.find_all('td', class_='mod-stat')
                         
-                        if len(stat_cells) >= 4:
-                            # Column order: R, ACS, K, D, A, ...
-                            kills = self._extract_stat_value(stat_cells[2])  # K column
-                            deaths = self._extract_stat_value(stat_cells[3])  # D column
-                            assists = self._extract_stat_value(stat_cells[4]) if len(stat_cells) > 4 else 0
+                        if len(stat_cells) >= 11:
+                            # Helper to extract stat value properly from mod-both span
+                            def extract_cell_stat(cell):
+                                both_span = cell.find('span', class_='mod-both')
+                                if both_span:
+                                    return both_span.get_text(strip=True)
+                                return cell.get_text(strip=True)
                             
-                            # Save to database
+                            # Extract all stats
+                            acs = self._extract_stat_value(stat_cells[1])
+                            kills = self._extract_stat_value(stat_cells[2])
+                            deaths = self._extract_stat_value(stat_cells[3])
+                            assists = self._extract_stat_value(stat_cells[4])
+                            kast_text = extract_cell_stat(stat_cells[6]).replace('%', '')
+                            kast = self._parse_float(kast_text)
+                            adr = self._extract_stat_value(stat_cells[7])
+                            first_bloods = self._extract_stat_value(stat_cells[9])
+                            
+                            # Save to database with all new fields
                             self.db.save_player_map_stat(
                                 match_id=match_id,
                                 player_name=player_name,
                                 map_number=map_number,
                                 kills=kills,
                                 deaths=deaths,
-                                assists=assists
+                                assists=assists,
+                                map_name=map_name,
+                                agent=agent,
+                                acs=acs,
+                                adr=adr,
+                                kast=kast,
+                                first_bloods=first_bloods,
+                                map_score=map_score
                             )
                             self.stats['player_stats_saved'] += 1
             
-            logger.info(f"    Saved {map_number} maps with player stats")
+            logger.info(f"    Saved {map_number} maps with comprehensive stats + pick/bans")
             
         except Exception as e:
             logger.error(f"    Error processing match {match_url}: {e}")
@@ -405,6 +479,78 @@ class DatabasePopulator:
             return float(cleaned) if cleaned else 0.0
         except:
             return 0.0
+    
+    def _extract_pick_bans(self, soup: BeautifulSoup) -> dict:
+        """Extract pick/ban sequence from match page"""
+        result = {
+            'first_ban': None,
+            'second_ban': None,
+            'first_pick': None,
+            'second_pick': None,
+            'decider': None
+        }
+        
+        try:
+            # Find pick/ban text in header
+            candidate_texts = []
+            for cls in ['match-header-note', 'match-header-vs-note', 'match-header']:
+                for el in soup.find_all('div', class_=cls):
+                    t = el.get_text(" ", strip=True)
+                    if t and ('ban' in t.lower() or 'pick' in t.lower()):
+                        candidate_texts.append(t)
+            
+            header_text = ''
+            if candidate_texts:
+                # Pick the one with most ban/pick mentions
+                header_text = max(
+                    candidate_texts,
+                    key=lambda t: (t.lower().count('ban') + t.lower().count('pick')),
+                )
+            
+            if header_text:
+                # Extract bans and picks in order
+                action_pattern = re.compile(
+                    r'([A-Za-z0-9\s]+?)\s+(ban|bans|pick|picks)\s+([A-Za-z]+)',
+                    re.IGNORECASE,
+                )
+                
+                bans = []
+                picks = []
+                
+                matches = action_pattern.findall(header_text)
+                for team_str, action, map_name in matches:
+                    action = action.lower()
+                    map_name = map_name.strip()
+                    
+                    # Check if valid Valorant map
+                    valorant_maps = ['Bind', 'Haven', 'Split', 'Ascent', 'Icebox', 'Breeze', 
+                                    'Fracture', 'Pearl', 'Lotus', 'Sunset', 'Abyss', 'Corrode']
+                    
+                    if any(m.lower() == map_name.lower() for m in valorant_maps):
+                        if action.startswith('ban'):
+                            bans.append(map_name)
+                        else:
+                            picks.append(map_name)
+                
+                # Assign to result
+                if len(bans) >= 1:
+                    result['first_ban'] = bans[0]
+                if len(bans) >= 2:
+                    result['second_ban'] = bans[1]
+                if len(picks) >= 1:
+                    result['first_pick'] = picks[0]
+                if len(picks) >= 2:
+                    result['second_pick'] = picks[1]
+                
+                # Decider: look for "remains" keyword
+                remains_match = re.search(r'([A-Za-z]+)\s+remains', header_text, re.IGNORECASE)
+                if remains_match:
+                    result['decider'] = remains_match.group(1).strip()
+                    
+        except Exception as e:
+            logger.warning(f"Error extracting pick/bans: {e}")
+        
+        return result
 
 
 def main():

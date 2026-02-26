@@ -7,32 +7,31 @@
     <title>ThunderEdge | Team Analysis</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --accent: #F97316;
+            --secondary: #FCD34D;
+            --page-bg: #0C0A08;
         }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: #000000;
+            background: var(--page-bg);
             color: #e4e4e7;
             line-height: 1.6;
             min-height: 100vh;
         }
-        
         .page-header {
-            background: linear-gradient(180deg, #0a0a0a 0%, #000000 100%);
-            border-bottom: 1px solid #27272a;
+            background: rgba(12, 10, 8, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
             padding: 1rem 0;
             position: sticky;
             top: 0;
             z-index: 100;
-            backdrop-filter: blur(10px);
         }
-        
         .header-content {
             max-width: 1400px;
             margin: 0 auto;
@@ -41,48 +40,102 @@
             justify-content: space-between;
             align-items: center;
         }
-        
         .logo {
             display: flex;
             align-items: center;
             gap: 0.75rem;
-            font-size: 1.25rem;
-            font-weight: 700;
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 800;
+            font-size: 1.4rem;
+            letter-spacing: -0.01em;
             color: #ffffff;
-            letter-spacing: -0.02em;
             text-decoration: none;
         }
-        
-        .logo-icon {
-            width: 32px;
-            height: 32px;
-            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 18px;
-        }
-        
+        .logo-icon { color: var(--accent); }
         .header-nav {
             display: flex;
             gap: 0.5rem;
-            font-size: 0.875rem;
+            align-items: center;
         }
-        
         .header-nav a {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.55);
             padding: 0.5rem 0.75rem;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.2s;
             text-decoration: none;
-            color: #a1a1aa;
+            transition: color 0.15s, border-color 0.15s;
+            border-bottom: 2px solid transparent;
         }
-        
-        .header-nav a:hover, .header-nav a.active {
+        .header-nav a:hover { color: #ffffff; }
+        .header-nav a.active {
             color: #ffffff;
-            background: #18181b;
+            border-bottom-color: var(--accent);
+        }
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-trigger {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.55);
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .nav-dropdown:hover .nav-dropdown-trigger,
+        .nav-dropdown.active .nav-dropdown-trigger { color: #ffffff; }
+        .nav-dropdown.active .nav-dropdown-trigger { border-bottom-color: var(--accent); }
+        .nav-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 180px;
+            background: rgba(0,0,0,0.95);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 0.5rem 0;
+            display: none;
+            z-index: 200;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a {
+            display: block;
+            padding: 0.6rem 1rem;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            border: none;
+            border-radius: 0;
+            border-left: 3px solid transparent;
+        }
+        .nav-dropdown-menu a:hover {
+            color: #ffffff;
+            background: rgba(255,255,255,0.06);
+            border-left-color: var(--accent);
+        }
+        .nav-dropdown-menu a.active {
+            color: var(--accent);
+            background: rgba(255,255,255,0.04);
+            border-left-color: var(--accent);
+        }
+        .page-badge {
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 0.35rem 0.65rem;
+            background: rgba(249, 115, 22, 0.15);
+            border: 1px solid rgba(249, 115, 22, 0.3);
+            color: var(--accent);
         }
         
         .container {
@@ -97,29 +150,23 @@
         }
         
         h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 900;
+            font-size: 5rem;
+            color: #ffffff;
             margin-bottom: 0.5rem;
         }
-        
         .subtitle {
-            font-size: 1.125rem;
-            color: #71717a;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.875rem;
+            color: rgba(255,255,255,0.5);
             margin-bottom: 2rem;
         }
-        
-        .search-section {
-            margin: 2rem 0;
-        }
-        
+        .search-section { margin: 2rem 0; }
         .search-box {
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 12px;
+            background: #141210;
+            border: 1px solid rgba(249, 115, 22, 0.15);
+            border-left: 3px solid var(--accent);
             padding: 2rem;
             display: flex;
             flex-direction: column;
@@ -154,22 +201,21 @@
         }
         
         button {
-            background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 700;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: var(--accent);
+            color: #000000;
             border: none;
-            border-radius: 8px;
-            padding: 0.875rem 2rem;
-            color: #ffffff;
-            font-size: 1rem;
-            font-weight: 600;
+            border-radius: 0;
+            padding: 0.75rem 2rem;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: background 0.15s, transform 0.15s;
             margin-top: 0.5rem;
         }
-        
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 16px rgba(59, 130, 246, 0.3);
-        }
+        button:hover { transform: scale(1.02); }
         
         .loading {
             display: none;
@@ -345,12 +391,28 @@
     <header class="page-header">
         <div class="header-content">
             <a href="/" class="logo">
-                <div class="logo-icon">TE</div>
-                <span>ThunderEdge</span>
+                <span class="logo-icon">⚡</span>
+                <span>THUNDEREDGE</span>
             </a>
             <nav class="header-nav">
-                <a href="/">Player Analysis</a>
-                <a href="/team" class="active">Team Analysis</a>
+                <div class="nav-dropdown">
+                    <span class="nav-dropdown-trigger">Thunderpick Kill Line ▾</span>
+                    <div class="nav-dropdown-menu">
+                        <a href="/">VCT Player</a>
+                        <a href="/challengers">Challengers</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <span class="nav-dropdown-trigger">PrizePicks ▾</span>
+                    <div class="nav-dropdown-menu">
+                        <a href="/prizepicks">PrizePicks</a>
+                        <a href="/challengers/prizepicks">Challengers PP</a>
+                    </div>
+                </div>
+                <a href="/team" class="active">Team</a>
+                <a href="/moneylines">MoneyLine</a>
+                <a href="/edge">Edge</a>
+                <span class="page-badge">Team</span>
             </nav>
         </div>
     </header>
@@ -394,7 +456,7 @@
         console.log('✅ [DEBUG] Current URL:', window.location.href);
         
         // Test API endpoint availability
-        fetch('http://localhost:5000/api/stats')
+        fetch('/api/stats')
             .then(r => r.json())
             .then(data => console.log('✅ [DEBUG] API endpoint test successful:', data))
             .catch(err => console.error('❌ [DEBUG] API endpoint test failed:', err));
@@ -419,7 +481,7 @@
             
             try {
                 const startTime = performance.now();
-                let url = `http://localhost:5000/api/team/${encodeURIComponent(teamName)}`;
+                let url = `/api/team/${encodeURIComponent(teamName)}`;
                 if (region) {
                     url += `?region=${encodeURIComponent(region)}`;
                 }

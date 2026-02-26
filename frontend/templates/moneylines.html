@@ -1,0 +1,730 @@
+<!-- frontend/templates/moneylines.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThunderEdge | MoneyLine Strategy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --accent: #16A34A;
+            --secondary: #FACC15;
+            --page-bg: #060D06;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--page-bg);
+            color: #e4e4e7;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .page-header {
+            background: rgba(6, 13, 6, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 1rem 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 800;
+            font-size: 1.4rem;
+            letter-spacing: -0.01em;
+            color: #ffffff;
+            text-decoration: none;
+        }
+        .logo-icon { color: var(--accent); }
+        .header-nav {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .header-nav a {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.55);
+            padding: 0.5rem 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s, border-color 0.15s;
+            border-bottom: 2px solid transparent;
+        }
+        .header-nav a:hover { color: #ffffff; }
+        .header-nav a.active {
+            color: #ffffff;
+            border-bottom-color: var(--accent);
+        }
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-trigger {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255,255,255,0.55);
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        .nav-dropdown:hover .nav-dropdown-trigger,
+        .nav-dropdown.active .nav-dropdown-trigger { color: #ffffff; }
+        .nav-dropdown.active .nav-dropdown-trigger { border-bottom-color: var(--accent); }
+        .nav-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            min-width: 180px;
+            background: rgba(0,0,0,0.95);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 0.5rem 0;
+            display: none;
+            z-index: 200;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a {
+            display: block;
+            padding: 0.6rem 1rem;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            border: none;
+            border-radius: 0;
+            border-left: 3px solid transparent;
+        }
+        .nav-dropdown-menu a:hover {
+            color: #ffffff;
+            background: rgba(255,255,255,0.06);
+            border-left-color: var(--accent);
+        }
+        .nav-dropdown-menu a.active {
+            color: var(--accent);
+            background: rgba(255,255,255,0.04);
+            border-left-color: var(--accent);
+        }
+        .page-badge {
+            font-family: 'Barlow Condensed', sans-serif;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 0.35rem 0.65rem;
+            background: rgba(22, 163, 74, 0.15);
+            border: 1px solid rgba(22, 163, 74, 0.3);
+            color: var(--accent);
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .hero-section { text-align: center; padding: 3rem 0 2rem; }
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.75rem;
+            letter-spacing: -0.02em;
+        }
+        .subtitle { font-size: 1.125rem; color: #71717a; margin-bottom: 2rem; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 500px) { .stats-grid { grid-template-columns: 1fr; } }
+        .stat-card {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: border-color 0.2s;
+        }
+        .stat-card:hover { border-color: #3f3f46; }
+        .stat-card h3 {
+            font-size: 0.75rem;
+            color: #71717a;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+        .stat-card .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #22c55e;
+        }
+        .stat-card .value.negative { color: #ef4444; }
+        .stat-card .value.neutral { color: #a1a1aa; }
+        .stat-card .desc {
+            font-size: 0.75rem;
+            color: #52525b;
+            margin-top: 0.25rem;
+        }
+        .section {
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .section h2 {
+            font-size: 1.125rem;
+            margin-bottom: 1rem;
+            color: #ffffff;
+            border-bottom: 1px solid #27272a;
+            padding-bottom: 0.5rem;
+        }
+        .section table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+        .section th, .section td {
+            padding: 0.5rem 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid #27272a;
+        }
+        .section th {
+            color: #71717a;
+            font-weight: 500;
+        }
+        .section tr:hover td { background: #18181b; }
+        .badge { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; }
+        .badge.bet { background: #166534; color: #86efac; }
+        .badge.skip { background: #27272a; color: #a1a1aa; }
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: #71717a;
+        }
+        .empty-state .empty-icon { font-size: 2rem; opacity: 0.2; margin-bottom: 0.75rem; }
+        .empty-state .empty-msg { font-size: 0.875rem; color: rgba(255,255,255,0.25); }
+        .empty-state p { margin-bottom: 1rem; }
+        .empty-state code {
+            background: #27272a;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+        }
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            padding: 0.25rem;
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+        }
+        .tab {
+            padding: 0.6rem 1.1rem;
+            border-radius: 6px;
+            background: transparent;
+            border: none;
+            color: #71717a;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .tab:hover { color: #ffffff; background: rgba(255,255,255,0.05); }
+        .tab.active { background: var(--accent); color: #ffffff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .bet-log-table { max-height: 400px; overflow-y: auto; }
+        .rule-list { list-style: none; color: #a1a1aa; font-size: 0.9375rem; }
+        .rule-list li { padding: 0.4rem 0; padding-left: 1.25rem; position: relative; }
+        .rule-list li::before { content: "→"; position: absolute; left: 0; color: var(--accent); }
+        .matchup-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            background: #0a0a0a;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.2s;
+        }
+        .matchup-card:hover { border-color: #3f3f46; }
+        .matchup-card.bet { border-left: 3px solid var(--accent); }
+        .matchup-team { font-weight: 600; font-size: 1rem; min-width: 0; }
+        .matchup-vs { font-size: 0.75rem; color: #71717a; font-weight: 500; flex-shrink: 0; }
+        .matchup-odds { display: flex; gap: 1.5rem; font-size: 0.875rem; color: #a1a1aa; }
+        .matchup-odds span { white-space: nowrap; }
+        .matchup-meta { font-size: 0.75rem; color: #52525b; margin-top: 0.25rem; }
+        .matchup-badge { font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px; margin-left: auto; }
+        .matchup-badge.bet { background: rgba(22, 163, 74, 0.2); color: #22c55e; }
+        .matchup-badge.skip { background: #27272a; color: #a1a1aa; }
+        .edge-filter {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .edge-filter label { font-size: 0.8rem; color: #71717a; }
+        .edge-filter input { width: 70px; padding: 0.35rem 0.5rem; }
+        .bet-log-cards { max-height: 500px; overflow-y: auto; }
+        .scroll-top-btn { position: fixed; bottom: 1.5rem; right: 1.5rem; width: 40px; height: 40px; background: rgba(22, 163, 74, 0.2); border: 1px solid var(--accent); color: var(--accent); font-size: 1.2rem; cursor: pointer; border-radius: 8px; display: none; z-index: 50; }
+        .copyable { cursor: pointer; position: relative; }
+        .copy-toast { position: absolute; top: -24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; font-size: 0.7rem; padding: 2px 6px; border-radius: 3px; pointer-events: none; animation: copyToastFade 1.2s forwards; }
+        @keyframes copyToastFade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <header class="page-header">
+        <div class="header-content">
+            <a href="/" class="logo">
+                <span class="logo-icon">⚡</span>
+                <span>THUNDEREDGE</span>
+            </a>
+            <nav class="header-nav">
+                <div class="nav-dropdown">
+                    <span class="nav-dropdown-trigger">Thunderpick Kill Line ▾</span>
+                    <div class="nav-dropdown-menu">
+                        <a href="/">VCT Player</a>
+                        <a href="/challengers">Challengers</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <span class="nav-dropdown-trigger">PrizePicks ▾</span>
+                    <div class="nav-dropdown-menu">
+                        <a href="/prizepicks">PrizePicks</a>
+                        <a href="/challengers/prizepicks">Challengers PP</a>
+                    </div>
+                </div>
+                <a href="/team">Team</a>
+                <a href="/moneylines" class="active">MoneyLine</a>
+                <a href="/edge">Edge</a>
+                <span class="page-badge">MoneyLine</span>
+            </nav>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="hero-section">
+            <h1>MoneyLine Strategy</h1>
+            <p class="subtitle">Americas+China, 0.55≤p_fair≤0.70, 1u flat — validated walk-forward (Champions Tour 2024+)</p>
+        </div>
+
+        <div id="statsContent">
+            <div id="statsLoading" style="text-align: center; padding: 3rem;">
+                <div class="spinner" style="width: 40px; height: 40px; border: 3px solid #27272a; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1rem;"></div>
+                <p style="color: #71717a;">Loading strategy data...</p>
+            </div>
+            <div id="statsResult" style="display: none;"></div>
+        </div>
+        <button id="scrollTopBtn" class="scroll-top-btn" title="Scroll to top">↑</button>
+    </div>
+
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    <script>
+        async function loadStrategy() {
+            const loading = document.getElementById('statsLoading');
+            const result = document.getElementById('statsResult');
+            try {
+                const r = await fetch('/api/moneylines/strategy');
+                const data = await r.json();
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                if (!data.success || data.walk_forward === undefined) {
+                    result.innerHTML = `
+                        <div class="empty-state">
+                            <p>No moneyline data yet. Populate the database:</p>
+                            <p><code>python scripts/populate_moneyline.py</code></p>
+                            <p style="margin-top: 1rem; font-size: 0.875rem;">Scrapes VCT 2024+ matches from VLR.gg (Thunderpick odds + results).</p>
+                            ${data.message ? `<p style="color: #ef4444; margin-top: 1rem;">${data.message}</p>` : ''}
+                        </div>
+                    `;
+                    return;
+                }
+                renderStrategy(data, result);
+            } catch (e) {
+                loading.style.display = 'none';
+                result.style.display = 'block';
+                result.innerHTML = `<div class="empty-state"><p>Error: ${e.message}</p></div>`;
+            }
+        }
+
+        function roiClass(roi) {
+            if (roi > 0) return 'value';
+            if (roi < 0) return 'value negative';
+            return 'value neutral';
+        }
+
+        function renderStrategy(d, resultEl) {
+            const wf = d.walk_forward || [];
+            const monthly = d.monthly_review || {};
+            const betLog = d.bet_log || [];
+            const betsOnly = betLog.filter(b => b.decision === 'bet_fav');
+
+            let html = `
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Usable Matches</h3>
+                        <div class="value neutral">${d.clean_stats?.usable ?? 0}</div>
+                        <div class="desc">Total rows for backtest</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Strategy Bets</h3>
+                        <div class="value">${d.bets_count ?? 0}</div>
+                        <div class="desc">bet_fav in Americas+China</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Near-Equal Odds</h3>
+                        <div class="value neutral">${d.near_equal_odds ?? 0}</div>
+                        <div class="desc">|Of-Ou|≤0.05 (skipped)</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Secondary Collisions</h3>
+                        <div class="value neutral">${d.secondary_collisions ?? 0}</div>
+                        <div class="desc">Duplicate match keys</div>
+                    </div>
+                </div>
+
+                <div class="section" style="margin-bottom: 1.5rem;">
+                    <h2>Bet Calculator</h2>
+                    <p style="color: #71717a; font-size: 0.875rem; margin-bottom: 1rem;">Enter odds for a match. Strategy applies to Americas + China only.</p>
+                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end;">
+                        <div>
+                            <label style="display: block; font-size: 0.75rem; color: #71717a; margin-bottom: 0.25rem;">Favorite odds (Of)</label>
+                            <input type="number" id="calcOf" step="0.01" min="1.01" placeholder="1.55" style="width: 100px; padding: 0.5rem; background: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #e4e4e7;" />
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.75rem; color: #71717a; margin-bottom: 0.25rem;">Underdog odds (Ou)</label>
+                            <input type="number" id="calcOu" step="0.01" min="1.01" placeholder="2.45" style="width: 100px; padding: 0.5rem; background: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #e4e4e7;" />
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.75rem; color: #71717a; margin-bottom: 0.25rem;">Region</label>
+                            <select id="calcRegion" style="padding: 0.5rem; background: #18181b; border: 1px solid #27272a; border-radius: 6px; color: #e4e4e7;">
+                                <option value="Americas">Americas</option>
+                                <option value="China">China</option>
+                            </select>
+                        </div>
+                        <button id="calcBtn" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">Check</button>
+                    </div>
+                    <div id="calcResult" style="margin-top: 1rem; padding: 1rem; background: #18181b; border-radius: 8px; border: 1px solid #27272a; display: none;"></div>
+                </div>
+
+                <div class="tabs">
+                    <span class="tab active" data-tab="walkforward">Walk-Forward</span>
+                    <span class="tab" data-tab="upcoming">Upcoming Picks</span>
+                    <span class="tab" data-tab="monthly">Monthly Review</span>
+                    <span class="tab" data-tab="consistency">Consistency Check</span>
+                    <span class="tab" data-tab="betlog">Bet Log</span>
+                    <span class="tab" data-tab="calibration">Calibration</span>
+                    <span class="tab" data-tab="spec">Strategy Spec</span>
+                </div>
+
+                <div id="tab-walkforward" class="tab-content active">
+                    <div class="section">
+                        <h2>Walk-Forward Validation (0.55≤p_fair≤0.70 Americas+China)</h2>
+                        <table>
+                            <thead><tr><th>Year</th><th>n</th><th>ROI</th><th>Hit %</th><th>Max DD</th><th>Event-Blocked</th></tr></thead>
+                            <tbody>
+                                ${wf.map(w => `
+                                    <tr>
+                                        <td>${w.year}</td>
+                                        <td>${w.n_bets}</td>
+                                        <td class="${roiClass(w.roi)}">${w.roi}%</td>
+                                        <td>${w.hit_rate}%</td>
+                                        <td>${w.max_dd}u</td>
+                                        <td>median ${w.event_blocked?.median_event_roi}% · ${w.event_blocked?.pct_positive}% positive</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="tab-upcoming" class="tab-content">
+                    <div class="section">
+                        <h2>Upcoming Americas + China Matches</h2>
+                        <p style="color: #71717a; font-size: 0.875rem; margin-bottom: 1rem;">Scrapes VLR for current Americas & China events, fetches Thunderpick odds. May take 30–60 seconds.</p>
+                        <button id="loadUpcomingBtn" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">Load Upcoming Picks</button>
+                        <div id="upcomingLoading" style="display: none; margin-top: 1rem; color: #71717a;">Loading... (scraping VLR, this may take a minute)</div>
+                        <div id="upcomingResult" style="margin-top: 1rem;"></div>
+                    </div>
+                </div>
+
+                <div id="tab-monthly" class="tab-content">
+                    <div class="section">
+                        <h2>Monthly Review (Latest Year ${monthly.year || '—'})</h2>
+                        <div class="stats-grid" style="margin-bottom: 1rem;">
+                            <div class="stat-card"><h3>ROI</h3><div class="${roiClass(monthly.roi)}">${monthly.roi ?? '—'}%</div></div>
+                            <div class="stat-card"><h3>n bets</h3><div class="value neutral">${monthly.n_bets ?? '—'}</div></div>
+                            <div class="stat-card"><h3>Hit rate</h3><div class="value">${monthly.hit_rate ?? '—'}%</div></div>
+                            <div class="stat-card"><h3>Max drawdown</h3><div class="value neutral">${monthly.max_dd ?? '—'}u</div></div>
+                        </div>
+                        <p style="color: #71717a; font-size: 0.875rem;">
+                            Region mix: Americas ${monthly.region_mix?.Americas ?? 0}% · China ${monthly.region_mix?.China ?? 0}%<br>
+                            p_fair: mean ${monthly.p_fair_mean ?? '—'} · median ${monthly.p_fair_median ?? '—'}<br>
+                            Event-blocked: median ROI ${monthly.event_blocked?.median_event_roi ?? '—'}% · ${monthly.event_blocked?.pct_positive ?? '—'}% positive (n=${monthly.event_blocked?.n_events ?? 0})
+                        </p>
+                    </div>
+                </div>
+
+                <div id="tab-consistency" class="tab-content">
+                    <div class="section">
+                        <h2>Consistency Check (break-even vs hit rate)</h2>
+                        <table>
+                            <thead><tr><th>Year</th><th>mean Of</th><th>median Of</th><th>mean p_fair</th><th>avg BE %</th><th>Hit %</th><th>Gap</th><th>ROI implied</th></tr></thead>
+                            <tbody>
+                                ${wf.map(w => `
+                                    <tr>
+                                        <td>${w.year}</td>
+                                        <td>${w.mean_Of}</td>
+                                        <td>${w.median_Of}</td>
+                                        <td>${w.mean_p_fair}</td>
+                                        <td>${w.avg_be_rate}%</td>
+                                        <td>${w.hit_rate}%</td>
+                                        <td class="${w.gap_pp >= 0 ? 'value' : 'value negative'}">${w.gap_pp >= 0 ? '+' : ''}${w.gap_pp}pp</td>
+                                        <td>${w.roi_implied}%</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        ${wf.some(w => w.skipped_even > 0) ? `<p style="margin-top: 0.5rem; font-size: 0.875rem; color: #71717a;">Skipped even odds: ${wf.map(w => `${w.year}: ${w.skipped_even}`).join(', ')}</p>` : ''}
+                    </div>
+                </div>
+
+                <div id="tab-betlog" class="tab-content">
+                    <div class="section">
+                        <h2>Bet Log (${betLog.length} candidates, ${betsOnly.length} bets)</h2>
+                        <p style="color: #71717a; font-size: 0.875rem; margin-bottom: 1rem;">All Americas+China matches with decision and flags. Filter: bet_fav = strategy would bet.</p>
+                        <div class="edge-filter" id="betlogEdgeFilter">
+                            <label>p_fair range:</label>
+                            <input type="number" id="betlogPfMin" step="0.01" value="0.55" placeholder="0.55" />
+                            <span>–</span>
+                            <input type="number" id="betlogPfMax" step="0.01" value="0.70" placeholder="0.70" />
+                            <button id="betlogFilterBtn" style="padding: 0.35rem 0.75rem; background: #27272a; color: #e4e4e7; border: 1px solid #3f3f46; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Apply</button>
+                        </div>
+                        <div id="betlogCards" class="bet-log-cards"></div>
+                        ${betLog.length > 100 ? `<p style="margin-top: 0.5rem; font-size: 0.875rem; color: #71717a;">Showing first 100 of ${betLog.length}. Export full CSV: <code>python scripts/moneyline_analytics.py --betlog</code></p>` : ''}
+                    </div>
+                </div>
+
+                <div id="tab-calibration" class="tab-content">
+                    <div class="section">
+                        <h2>Calibration (bins by Of)</h2>
+                        <table>
+                            <thead><tr><th>Bin</th><th>n</th><th>p_fair</th><th>p_obs</th><th>edge</th></tr></thead>
+                            <tbody>
+                                ${(d.calibration || []).map(c => `
+                                    <tr>
+                                        <td>${c.bin}</td>
+                                        <td>${c.n}</td>
+                                        <td>${c.p_fair}</td>
+                                        <td>${c.p_obs}</td>
+                                        <td class="${c.edge >= 0 ? 'value' : 'value negative'}">${c.edge}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="section">
+                        <h2>Odds Summary</h2>
+                        <p style="color: #a1a1aa;">Of: min ${d.vig?.of_min ?? '—'} median ${d.vig?.of_median ?? '—'} mean ${d.vig?.of_mean ?? '—'} max ${d.vig?.of_max ?? '—'}</p>
+                        <p style="color: #a1a1aa;">Ou: min ${d.vig?.ou_min ?? '—'} median ${d.vig?.ou_median ?? '—'}</p>
+                        <p style="color: #a1a1aa;">Overround mean: ${d.vig?.overround_mean ?? '—'}</p>
+                    </div>
+                </div>
+
+                <div id="tab-spec" class="tab-content">
+                    <div class="section">
+                        <h2>Strategy v1 Quick Reference</h2>
+                        <ul class="rule-list">
+                            <li><strong>Universe:</strong> Americas + China only</li>
+                            <li><strong>Bet side:</strong> Favorite</li>
+                            <li><strong>Entry:</strong> 0.55 ≤ p_fair ≤ 0.70, Of ≥ 1.35</li>
+                            <li><strong>Stake:</strong> 1u flat (Kickoff: 0.75u optional)</li>
+                            <li><strong>Caps:</strong> 3u/day, 2u/event, 1u/team/day</li>
+                            <li><strong>Avoid:</strong> p_fair > 0.70 (skip)</li>
+                            <li><strong>Kill switch:</strong> Pause if ROI(last 50) < -3% or drawdown > 10u</li>
+                            <li><strong>Even odds:</strong> Skip when |Of-Ou| ≤ 0.05</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+
+            resultEl.innerHTML = html;
+
+            // Bet log cards + edge filter
+            window.betLogData = betLog.slice(0, 100);
+            function renderBetLogCards(list) {
+                const container = resultEl.querySelector('#betlogCards');
+                if (!container) return;
+                if (!list || list.length === 0) {
+                    container.innerHTML = '<p style="color: #71717a; font-size: 0.875rem;">No matches in this p_fair range.</p>';
+                    return;
+                }
+                container.innerHTML = list.map(b => {
+                    const badgeClass = b.decision === 'bet_fav' ? 'bet' : 'skip';
+                    const cardClass = b.decision === 'bet_fav' ? 'matchup-card bet' : 'matchup-card';
+                    const flags = [b.flag_p_fair_low && 'p_low', b.flag_p_fair_high && 'p_high', b.flag_of_min && 'Of_min', b.flag_even_odds && 'even', b.flag_kickoff_cap && 'kickoff'].filter(Boolean).join(', ') || '—';
+                    return '<div class="' + cardClass + '">' +
+                        '<div><div class="matchup-team">' + b.team1 + ' <span class="matchup-vs">vs</span> ' + b.team2 + '</div>' +
+                        '<div class="matchup-meta">' + b.event_name + ' · p_fair ' + b.p_fair + (flags !== '—' ? ' · ' + flags : '') + '</div></div>' +
+                        '<div class="matchup-odds"><span>Of ' + b.Of + '</span><span>Ou ' + b.Ou + '</span><span>' + b.stake + 'u</span></div>' +
+                        '<span class="matchup-badge ' + badgeClass + '">' + b.decision + '</span></div>';
+                }).join('');
+            }
+            renderBetLogCards(window.betLogData);
+            const betlogFilterBtn = resultEl.querySelector('#betlogFilterBtn');
+            const betlogPfMin = resultEl.querySelector('#betlogPfMin');
+            const betlogPfMax = resultEl.querySelector('#betlogPfMax');
+            if (betlogFilterBtn && betlogPfMin && betlogPfMax) {
+                betlogFilterBtn.onclick = () => {
+                    const min = parseFloat(betlogPfMin.value) || 0;
+                    const max = parseFloat(betlogPfMax.value) || 1;
+                    const filtered = window.betLogData.filter(b => {
+                        const pf = parseFloat(b.p_fair);
+                        return !isNaN(pf) && pf >= min && pf <= max;
+                    });
+                    renderBetLogCards(filtered);
+                };
+            }
+
+            resultEl.querySelectorAll('.tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    resultEl.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    resultEl.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+                });
+            });
+
+            // Calculator
+            const calcBtn = resultEl.querySelector('#calcBtn');
+            const calcResult = resultEl.querySelector('#calcResult');
+            if (calcBtn && calcResult) {
+                calcBtn.onclick = () => {
+                    const Of = parseFloat(document.getElementById('calcOf')?.value);
+                    const Ou = parseFloat(document.getElementById('calcOu')?.value);
+                    const region = document.getElementById('calcRegion')?.value || 'Americas';
+                    if (!Of || !Ou || Of < 1.01 || Ou < 1.01) {
+                        calcResult.style.display = 'block';
+                        calcResult.innerHTML = '<span style="color: #ef4444;">Enter valid odds (both &gt; 1.01)</span>';
+                        return;
+                    }
+                    const oFav = Math.min(Of, Ou);
+                    const oDog = Math.max(Of, Ou);
+                    const pFair = (1/oFav) / (1/oFav + 1/oDog);
+                    const evenOdds = Math.abs(oFav - oDog) <= 0.05;
+                    const pfLow = pFair < 0.55;
+                    const pfHigh = pFair > 0.70;
+                    const ofMin = oFav < 1.35;
+                    const validRegion = region === 'Americas' || region === 'China';
+                    const bet = validRegion && !pfLow && !pfHigh && !ofMin && !evenOdds;
+                    let reason = [];
+                    if (!validRegion) reason.push('Region must be Americas or China');
+                    if (pfLow) reason.push('p_fair ' + pFair.toFixed(2) + ' < 0.55');
+                    if (pfHigh) reason.push('p_fair ' + pFair.toFixed(2) + ' > 0.70');
+                    if (ofMin) reason.push('Of ' + oFav.toFixed(2) + ' < 1.35');
+                    if (evenOdds) reason.push('|Of-Ou| ≤ 0.05 (even odds)');
+                    calcResult.style.display = 'block';
+                    calcResult.innerHTML = bet
+                        ? '<span style="color: #22c55e; font-weight: 600;">BET</span> — 1u on favorite (Of=' + oFav.toFixed(2) + ', p_fair=' + pFair.toFixed(2) + ')'
+                        : '<span style="color: #ef4444; font-weight: 600;">SKIP</span> — ' + (reason.length ? reason.join('; ') : 'No match');
+                };
+            }
+
+            // Upcoming picks
+            const loadUpcomingBtn = resultEl.querySelector('#loadUpcomingBtn');
+            const upcomingLoading = resultEl.querySelector('#upcomingLoading');
+            const upcomingResult = resultEl.querySelector('#upcomingResult');
+            if (loadUpcomingBtn && upcomingLoading && upcomingResult) {
+                loadUpcomingBtn.onclick = async () => {
+                    loadUpcomingBtn.disabled = true;
+                    upcomingLoading.style.display = 'block';
+                    upcomingResult.innerHTML = '';
+                    try {
+                        const r = await fetch('/api/moneylines/upcoming');
+                        const data = await r.json();
+                        upcomingLoading.style.display = 'none';
+                        loadUpcomingBtn.disabled = false;
+                        if (!data.success) {
+                            upcomingResult.innerHTML = '<p style="color: #ef4444;">' + (data.message || data.error || 'Failed') + '</p>';
+                            return;
+                        }
+                        const picks = data.picks || [];
+                        if (picks.length === 0) {
+                            upcomingResult.innerHTML = '<p style="color: #71717a;">No upcoming matches with odds found for Americas + China.</p>';
+                            return;
+                        }
+                        const bets = picks.filter(p => p.decision === 'bet_fav');
+                        const cardsHtml = picks.map(p => {
+                            const badgeClass = p.decision === 'bet_fav' ? 'bet' : 'skip';
+                            const cardClass = p.decision === 'bet_fav' ? 'matchup-card bet' : 'matchup-card';
+                            return '<div class="' + cardClass + '">' +
+                                '<div><div class="matchup-team">' + p.team1 + ' <span class="matchup-vs">vs</span> ' + p.team2 + '</div>' +
+                                '<div class="matchup-meta">' + p.event_name + ' · p_fair ' + p.p_fair + '</div></div>' +
+                                '<div class="matchup-odds"><span>Of ' + p.Of + '</span><span>Ou ' + p.Ou + '</span><span>' + p.stake + 'u</span></div>' +
+                                '<span class="matchup-badge ' + badgeClass + '">' + p.decision + '</span></div>';
+                        }).join('');
+                        upcomingResult.innerHTML = '<p style="color: #a1a1aa; margin-bottom: 1rem;">' + picks.length + ' matches with odds · ' + bets.length + ' strategy bets</p><div class="bet-log-cards">' + cardsHtml + '</div>';
+                    } catch (e) {
+                        upcomingLoading.style.display = 'none';
+                        loadUpcomingBtn.disabled = false;
+                        upcomingResult.innerHTML = '<p style="color: #ef4444;">Error: ' + e.message + '</p>';
+                    }
+                };
+            }
+        }
+        loadStrategy();
+
+        // Scroll-to-top button
+        const scrollTopBtn = document.getElementById('scrollTopBtn');
+        if (scrollTopBtn) {
+            window.addEventListener('scroll', function() {
+                scrollTopBtn.style.display = window.scrollY > 300 ? 'block' : 'none';
+            });
+            scrollTopBtn.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Copy on click for .copyable elements
+        document.addEventListener('click', function(e) {
+            const el = e.target.closest('.copyable');
+            if (!el) return;
+            const text = el.dataset.copy || el.textContent.trim();
+            if (text && navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    const toast = document.createElement('span');
+                    toast.className = 'copy-toast';
+                    toast.textContent = 'Copied!';
+                    el.style.position = 'relative';
+                    el.appendChild(toast);
+                    setTimeout(() => toast.remove(), 1200);
+                });
+            }
+        });
+    </script>
+</body>
+</html>

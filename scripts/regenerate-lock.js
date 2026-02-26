@@ -1,7 +1,10 @@
 import { execSync } from 'child_process'
-import { join } from 'path'
+import { fileURLToPath } from 'url'
+import { join, dirname } from 'path'
 
-const projectRoot = join(import.meta.dirname, '..')
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const projectRoot = join(__dirname, '..')
 
 console.log('[v0] Running npm install to regenerate package-lock.json...')
 try {

@@ -26,7 +26,6 @@ const NAV_DROPDOWNS = [
 const NAV_DIRECT = [
   { label: 'Team', href: '/team' },
   { label: 'MoneyLine', href: '/moneylines' },
-  { label: 'Edge', href: '/edge' },
 ]
 
 // Page badge labels, matched to route
@@ -37,7 +36,6 @@ const PAGE_BADGES: Record<string, string> = {
   '/challengers-prizepicks': 'Challengers PP',
   '/team': 'Team',
   '/moneylines': 'MoneyLine',
-  '/edge': 'Edge',
 }
 
 interface AppHeaderProps {
@@ -103,7 +101,7 @@ export function AppHeader({ activePage }: AppHeaderProps) {
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
+        <nav className="hidden md:flex items-center gap-0" aria-label="Main navigation">
           {/* Dropdown groups */}
           {NAV_DROPDOWNS.map((group) => {
             const active = isDropdownActive(group.links)
@@ -115,7 +113,7 @@ export function AppHeader({ activePage }: AppHeaderProps) {
                 onMouseLeave={() => setOpenDropdown(null)}
               >
                 <button
-                  className="flex items-center gap-1 px-3 py-2 text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150"
+                  className="flex items-center gap-1 px-[0.75rem] py-[0.5rem] text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150"
                   style={{
                     color: active ? '#ffffff' : 'rgba(255,255,255,0.55)',
                     background: 'none',
@@ -180,7 +178,7 @@ export function AppHeader({ activePage }: AppHeaderProps) {
             <Link
               key={link.href}
               href={link.href}
-              className="px-3 py-2 text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150 whitespace-nowrap"
+              className="px-[0.75rem] py-[0.5rem] text-[0.8rem] font-medium uppercase tracking-[0.08em] transition-colors duration-150 whitespace-nowrap"
               style={{
                 color: isActive(link.href) ? '#ffffff' : 'rgba(255,255,255,0.55)',
                 borderBottom: isActive(link.href) ? '2px solid #F0E040' : '2px solid transparent',

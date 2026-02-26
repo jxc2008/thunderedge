@@ -8,7 +8,6 @@ import { StatsGrid, type StatCardData } from '@/components/stats-grid'
 import { DataTable, type Column } from '@/components/data-table'
 import { RecommendationCard } from '@/components/recommendation-card'
 import { DistributionChart } from '@/components/distribution-chart'
-import { EmptyState } from '@/components/ux-patterns'
 
 const ACCENT = '#F0E040'
 
@@ -517,12 +516,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Empty state */}
-        {!isLoading && !result && !error && (
-          <div style={{ marginTop: '1.5rem', background: '#0a0a0a', border: '1px solid #27272a', borderRadius: 12 }}>
-            <EmptyState />
-          </div>
-        )}
 
         {/* ── Results ──────────────────────────────────────────────────────── */}
         {!isLoading && result && analysis && (

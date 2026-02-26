@@ -25,10 +25,16 @@ interface LbRow {
   vlr_ign?: string
   team?: string
   line?: number
+  mu?: number
   p_hit?: number
+  p_over?: number
+  p_under?: number
   adj_p_hit?: number
+  adj_p_over?: number
+  adj_p_under?: number
   best_side?: string
   adj_best_side?: string
+  sample_size?: number
   incomplete?: boolean
   reason?: string
 }
@@ -87,52 +93,101 @@ const BTN_PRIMARY = s({ fontFamily: 'var(--font-display)', fontWeight: 700, font
 
 // ─── Leaderboard card ─────────────────────────────────────────────────────────
 
+function StatPill({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 52 }}>
+      <div style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.95rem', color: color ?? '#e4e4e7' }}>{value}</div>
+    </div>
+  )
+}
+
 function LbCard({ row, onAddToParlay }: { row: LbRow; onAddToParlay: (ign: string, line: number) => void }) {
   const isIncomplete = row.incomplete === true
   const rankVal = row.rank > 0 ? row.rank : '—'
   const top3 = !isIncomplete && row.rank >= 1 && row.rank <= 3
-  const hitPct = row.adj_p_hit != null ? row.adj_p_hit * 100 : row.p_hit != null ? row.p_hit * 100 : null
-  const adjHit = row.adj_p_hit != null ? row.adj_p_hit * 100 : null
+  const isAdj = row.adj_p_hit != null
+  const hitPct = isAdj ? row.adj_p_hit! * 100 : (row.p_hit ?? 0) * 100
+  const pOver = isAdj ? (row.adj_p_over ?? row.p_over ?? 0) * 100 : (row.p_over ?? 0) * 100
+  const pUnder = isAdj ? (row.adj_p_under ?? row.p_under ?? 0) * 100 : (row.p_under ?? 0) * 100
   const bestSide = row.adj_best_side || row.best_side || 'N/A'
   const ign = row.vlr_ign || row.player_name || ''
 
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'center', gap: '0.5rem',
-        padding: '0.75rem 1rem', border: '1px solid rgba(255,255,255,0.06)',
-        borderLeft: `3px solid ${top3 ? ACCENT : 'transparent'}`,
-        marginBottom: '0.4rem', opacity: isIncomplete ? 0.4 : 1,
+        padding: '0.75rem 1rem',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderLeft: `3px solid ${top3 ? ACCENT : isIncomplete ? 'rgba(255,255,255,0.08)' : 'rgba(139,43,250,0.25)'}`,
+        marginBottom: '0.4rem',
+        opacity: isIncomplete ? 0.45 : 1,
         background: top3 ? ACCENT_BG : 'transparent',
-        transition: 'border-left 0.15s',
       }}
     >
-      <div style={{ width: '14%', fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '2.2rem', color: getRankColor(row.rank) }}>
-        {rankVal}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: isIncomplete ? '#71717a' : '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {row.player_name}
+      {/* Top row: rank · name · team · hit% */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        {/* Rank */}
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '2rem', color: getRankColor(row.rank), lineHeight: 1, minWidth: 36, textAlign: 'center' }}>
+          {rankVal}
         </div>
-        {row.team && <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.5)' }}>{row.team}</div>}
-        {row.line != null && <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.6)' }}>{row.line} Kills</div>}
-        {isIncomplete && row.reason && <div style={{ fontSize: '0.7rem', color: '#71717a' }}>{row.reason}</div>}
-      </div>
-      <div style={{ width: '20%', textAlign: 'right' }}>
-        {adjHit != null && <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)' }}>ADJ</div>}
-        {hitPct != null && (
-          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '1.9rem', color: getHitColor(hitPct) }}>
-            {hitPct.toFixed(1)}%
+
+        {/* Identity */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700, fontSize: '1rem', color: isIncomplete ? '#71717a' : '#fff' }}>
+              {row.player_name}
+            </span>
+            {row.vlr_ign && row.vlr_ign !== row.player_name && (
+              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace' }}>@{row.vlr_ign}</span>
+            )}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)', marginTop: 1 }}>
+            {row.team ?? '—'}
+          </div>
+          {isIncomplete && row.reason && (
+            <div style={{ fontSize: '0.7rem', color: '#71717a', marginTop: 2 }}>{row.reason}</div>
+          )}
+        </div>
+
+        {/* Hit % — large, right-aligned */}
+        {!isIncomplete && (
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {isAdj && <div style={{ fontSize: '0.6rem', color: ACCENT, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 1 }}>ADJ</div>}
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 900, fontSize: '2rem', lineHeight: 1, color: getHitColor(hitPct) }}>
+              {hitPct.toFixed(1)}%
+            </div>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', color: bestSide === 'over' ? '#22c55e' : '#ef4444', marginTop: 2 }}>
+              {bestSide}
+            </div>
           </div>
         )}
-        <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: bestSide === 'over' ? '#22c55e' : '#ef4444' }}>{bestSide}</div>
+
+        {/* Add to parlay */}
+        {!isIncomplete && ign && (
+          <button
+            onClick={() => onAddToParlay(ign, row.line ?? 30.5)}
+            title="Add to parlay"
+            style={{ width: 28, height: 28, padding: 0, fontSize: '1.1rem', lineHeight: '1', background: ACCENT_BG, border: `1px solid ${ACCENT}`, color: ACCENT, cursor: 'pointer', flexShrink: 0 }}
+          >+</button>
+        )}
       </div>
-      {!isIncomplete && ign && (
-        <button
-          onClick={() => onAddToParlay(ign, row.line ?? 30.5)}
-          title="Add to parlay"
-          style={{ width: 28, height: 28, padding: 0, fontSize: '1.2rem', lineHeight: '1', background: ACCENT_BG, border: `1px solid ${ACCENT}`, color: ACCENT, cursor: 'pointer', flexShrink: 0 }}
-        >+</button>
+
+      {/* Stats row */}
+      {!isIncomplete && (
+        <div style={{
+          display: 'flex', gap: '0.5rem', marginTop: '0.6rem',
+          paddingTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.06)',
+          flexWrap: 'wrap',
+        }}>
+          <StatPill label="Line" value={row.line != null ? `${row.line}` : '—'} color="rgba(255,255,255,0.8)" />
+          <div style={{ width: 1, background: 'rgba(255,255,255,0.08)', alignSelf: 'stretch', margin: '0 2px' }} />
+          <StatPill label="μ (Model)" value={row.mu != null ? row.mu.toFixed(1) : '—'} color={ACCENT} />
+          <div style={{ width: 1, background: 'rgba(255,255,255,0.08)', alignSelf: 'stretch', margin: '0 2px' }} />
+          <StatPill label="P(Over)" value={`${pOver.toFixed(1)}%`} color="#22c55e" />
+          <StatPill label="P(Under)" value={`${pUnder.toFixed(1)}%`} color="#ef4444" />
+          <div style={{ width: 1, background: 'rgba(255,255,255,0.08)', alignSelf: 'stretch', margin: '0 2px' }} />
+          <StatPill label="Sample" value={row.sample_size != null ? `${row.sample_size}m` : '—'} color="rgba(255,255,255,0.55)" />
+        </div>
       )}
     </div>
   )

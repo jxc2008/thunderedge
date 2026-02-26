@@ -93,36 +93,42 @@ export function AppHeader({ activePage }: AppHeaderProps) {
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1" aria-label="Main navigation">
+        <nav className="hidden md:flex items-center" aria-label="Main navigation">
           {NAV_GROUPS.map((group, gi) => (
             <div key={group.label} className="flex items-center">
+              {/* Divider between groups */}
               {gi > 0 && (
                 <span
-                  className="mx-2 w-px h-4 shrink-0"
+                  className="mx-3 w-px h-4 shrink-0"
                   style={{ background: '#27272a' }}
                   aria-hidden="true"
                 />
               )}
+              {/* Group label — visually subtle, only show on wider screens */}
               <span
-                className="text-[0.65rem] uppercase tracking-widest mr-1.5 shrink-0"
-                style={{ color: '#3f3f46', letterSpacing: '0.12em' }}
+                className="hidden lg:block text-[0.6rem] uppercase tracking-[0.14em] mr-2 shrink-0 select-none"
+                style={{ color: '#3f3f46' }}
+                aria-hidden="true"
               >
                 {group.label}
               </span>
-              {group.links.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="relative px-3 py-1 rounded-[6px] text-[0.8rem] font-medium transition-colors duration-150 whitespace-nowrap"
-                  style={{
-                    color: isActive(link.href) ? '#ffffff' : '#a1a1aa',
-                    background: isActive(link.href) ? '#18181b' : 'transparent',
-                  }}
-                  aria-current={isActive(link.href) ? 'page' : undefined}
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {/* Links */}
+              <div className="flex items-center gap-0.5">
+                {group.links.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="px-3 py-1.5 rounded-[6px] text-[0.8rem] font-medium transition-colors duration-150 whitespace-nowrap"
+                    style={{
+                      color: isActive(link.href) ? '#ffffff' : '#a1a1aa',
+                      background: isActive(link.href) ? '#18181b' : 'transparent',
+                    }}
+                    aria-current={isActive(link.href) ? 'page' : undefined}
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </div>
             </div>
           ))}
         </nav>

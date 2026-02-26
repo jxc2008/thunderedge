@@ -325,8 +325,12 @@ export default function PlayerPage() {
         {/* Search bar (command bar style matching index.html) */}
         <form onSubmit={handleSubmit}>
           <div
-            className="flex items-center gap-2 px-4 py-3 mb-0"
-            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)', borderBottom: 'none' }}
+            className="flex items-center gap-2 px-4 py-3"
+            style={{
+              background: '#0a0a0a',
+              border: '1px solid rgba(240,224,64,0.2)',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+            }}
           >
             <span style={{ fontFamily: '"Barlow Condensed", sans-serif', fontWeight: 700, fontSize: '1.2rem', color: '#F0E040' }}>{'>'}</span>
             <input
@@ -351,7 +355,12 @@ export default function PlayerPage() {
           {/* Secondary options row — scrollable on mobile */}
           <div
             className="overflow-x-auto"
-            style={{ background: '#0a0a0a', border: '1px solid rgba(240,224,64,0.2)' }}
+            style={{
+              background: '#0a0a0a',
+              borderLeft: '1px solid rgba(240,224,64,0.2)',
+              borderRight: '1px solid rgba(240,224,64,0.2)',
+              borderBottom: '1px solid rgba(240,224,64,0.2)',
+            }}
           >
           <div
             className="flex items-center gap-x-5 gap-y-0 px-4 py-2 text-sm min-w-max"

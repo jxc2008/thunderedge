@@ -1,10 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
 
-@layer base {
-  :root {
-  /* ThunderEdge design tokens */
+@theme {
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
 
@@ -12,31 +8,19 @@
   --color-surface: #0a0a0a;
   --color-surface-raised: #18181b;
   --color-border: #27272a;
-  --color-border-subtle: rgba(255, 255, 255, 0.06);
   --color-border-muted: #3f3f46;
 
   --color-text-primary: #ffffff;
   --color-text-secondary: #a1a1aa;
   --color-text-muted: #71717a;
-  --color-text-placeholder: #52525b;
-
-  --color-primary: #3b82f6;
-  --color-primary-dim: rgba(59, 130, 246, 0.15);
-  --color-accent: #0ea5e9;
 
   --color-success: #22c55e;
-  --color-success-dim: rgba(34, 197, 94, 0.1);
-  --color-success-border: rgba(34, 197, 94, 0.3);
-
   --color-danger: #ef4444;
-  --color-danger-dim: rgba(239, 68, 68, 0.1);
-  --color-danger-border: rgba(239, 68, 68, 0.3);
-
   --color-warning: #f59e0b;
-  --color-warning-dim: rgba(245, 158, 11, 0.1);
-  --color-warning-border: rgba(245, 158, 11, 0.3);
+  --color-accent: #f0e040;
+}
 
-  /* shadcn/ui compatibility */
+:root {
   --background: 0 0% 0%;
   --foreground: 0 0% 100%;
   --card: 0 0% 4%;
@@ -57,7 +41,6 @@
   --input: 240 4% 16%;
   --ring: 217 91% 60%;
   --radius: 0.625rem;
-  }
 }
 
 * {

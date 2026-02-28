@@ -2106,6 +2106,29 @@ def get_matchup_correlation():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/matchup/economy', methods=['GET'])
+def get_matchup_economy():
+    """Round economy win rates by buy type per map for two teams."""
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        db = Database(Config.DATABASE_PATH)
+        t1_eco = db.get_team_round_economy_stats(team1)
+        t2_eco = db.get_team_round_economy_stats(team2)
+
+        return jsonify({
+            'success': True,
+            'team1': {'name': team1, 'economy': t1_eco},
+            'team2': {'name': team2, 'economy': t2_eco},
+        })
+    except Exception as e:
+        logger.error(f"Error in matchup economy: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # Add error handler for 404 to debug (at end of file, after all routes)
 @app.errorhandler(404)
 def handle_404(e):

@@ -526,6 +526,87 @@ class RibScraper:
             })
         return result
 
+    # LoadoutTier integer → canonical economy string (confirmed from rib.gg __NEXT_DATA__)
+    # null = pistol (rounds 1 and 13); 1=eco; 2=semi-eco; 3=force; 4=full
+    _TIER_MAP = {None: 'pistol', 1: 'eco', 2: 'semi-eco', 3: 'force', 4: 'full'}
+
+    def get_series_economy_data(self, series_slug: str, series_id: str) -> Optional[dict]:
+        """
+        Fetch all round-level economy data for a series directly from __NEXT_DATA__.
+
+        The series page embeds all per-map round data in its JSON blob — no
+        separate economy tab request needed.
+
+        Returns:
+        {
+          'team1_name': str,
+          'team2_name': str,
+          'maps': [
+            {
+              'map_number': int,        # seriesMatchNumber (1-based)
+              'map_name': str,          # e.g. 'Bind', 'Abyss'
+              'rounds': [
+                {
+                  'round_num': int,
+                  'winning_team_side': int|None,   # 1 or 2
+                  'team1_economy': str,             # pistol/eco/semi-eco/force/full
+                  'team2_economy': str,
+                }
+              ]
+            }
+          ]
+        }
+        Returns None if the page is unreachable.
+        Returns dict with empty 'maps' if __NEXT_DATA__ parsing fails.
+        """
+        url = f"{self.BASE_URL}/series/{series_slug}/{series_id}"
+        content = self._make_request(url, timeout=90)
+        if not content:
+            return None
+
+        try:
+            text = content.decode('utf-8', errors='replace')
+            nd_match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.DOTALL)
+            if not nd_match:
+                logger.warning(f"RIB: no __NEXT_DATA__ in series {series_id}")
+                return {'team1_name': '', 'team2_name': '', 'maps': []}
+
+            nd = json.loads(nd_match.group(1))
+            series = nd.get('props', {}).get('pageProps', {}).get('series', {})
+
+            t1_name = (series.get('team1') or {}).get('name', '')
+            t2_name = (series.get('team2') or {}).get('name', '')
+
+            maps_out = []
+            for match in series.get('matches', []):
+                map_num = match.get('seriesMatchNumber')
+                map_name = (match.get('map') or {}).get('name', 'Unknown')
+                rounds_raw = match.get('rounds', [])
+
+                rounds_out = []
+                for r in rounds_raw:
+                    t1_tier = r.get('team1LoadoutTier')
+                    t2_tier = r.get('team2LoadoutTier')
+                    rounds_out.append({
+                        'round_num': r.get('number'),
+                        'winning_team_side': r.get('winningTeamNumber'),
+                        'team1_economy': self._TIER_MAP.get(t1_tier, 'unknown'),
+                        'team2_economy': self._TIER_MAP.get(t2_tier, 'unknown'),
+                    })
+
+                if map_num is not None and rounds_out:
+                    maps_out.append({
+                        'map_number': map_num,
+                        'map_name': map_name,
+                        'rounds': rounds_out,
+                    })
+
+            return {'team1_name': t1_name, 'team2_name': t2_name, 'maps': maps_out}
+
+        except Exception as e:
+            logger.error(f"RIB: get_series_economy_data failed for {series_id}: {e}")
+            return {'team1_name': '', 'team2_name': '', 'maps': []}
+
     # ------------------------------------------------------------------
     # Player lookup across events (rib.gg only — used when DB misses)
     # ------------------------------------------------------------------

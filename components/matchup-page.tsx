@@ -185,6 +185,27 @@ export interface CompWinratesData {
   team2: { name: string; comp_winrates: Record<string, AgentCompWinrateEntry[]> }
 }
 
+export interface EconomyTypeStats {
+  wins: number
+  losses: number
+  win_rate: number
+}
+
+export interface EconomyMapData {
+  pistol?: EconomyTypeStats
+  eco?: EconomyTypeStats
+  'semi-eco'?: EconomyTypeStats
+  force?: EconomyTypeStats
+  full?: EconomyTypeStats
+  total_rounds: number
+  sample_maps: number
+}
+
+export interface RoundEconomyData {
+  team1: { name: string; economy: Record<string, EconomyMapData> }
+  team2: { name: string; economy: Record<string, EconomyMapData> }
+}
+
 export interface TeamMatchupData {
   name: string
   overview: TeamOverview
@@ -207,6 +228,7 @@ export interface MatchupData {
   map_probs?: MapProbsData
   mispricing?: MispricingData
   comp_winrates?: CompWinratesData
+  economy?: RoundEconomyData
 }
 
 /* ─── Constants ──────────────────────────────────────────── */
@@ -1397,6 +1419,97 @@ function AgentCompWinrateSection({ data, t1Name, t2Name }: {
   )
 }
 
+/* ─── Round economy section ──────────────────────────────── */
+const ECO_ORDER = ['pistol', 'eco', 'semi-eco', 'force', 'full'] as const
+const ECO_LABELS: Record<string, string> = {
+  pistol: 'Pistol', eco: 'Eco', 'semi-eco': 'Semi', force: 'Force', full: 'Full Buy',
+}
+
+function RoundEconomySection({ data, t1Name, t2Name }: {
+  data: RoundEconomyData
+  t1Name: string
+  t2Name: string
+}) {
+  const allMaps = Array.from(
+    new Set([...Object.keys(data.team1.economy), ...Object.keys(data.team2.economy)])
+  ).sort()
+
+  if (allMaps.length === 0) return null
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Round Economy Win Rates</SectionLabel>
+      <div className="flex flex-col gap-5">
+        {allMaps.map((map) => {
+          const t1map = data.team1.economy[map]
+          const t2map = data.team2.economy[map]
+          if (!t1map && !t2map) return null
+          return (
+            <div key={map}>
+              <div
+                className="text-[0.65rem] uppercase tracking-widest font-semibold mb-2 px-2 py-1"
+                style={{ background: '#18181b', color: 'rgba(255,255,255,0.5)', borderLeft: '2px solid #3f3f46' }}
+              >
+                {map}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { ecoMap: t1map, color: T1_COLOR, bg: T1_BG, border: T1_BORDER, name: t1Name },
+                  { ecoMap: t2map, color: T2_COLOR, bg: T2_BG, border: T2_BORDER, name: t2Name },
+                ].map(({ ecoMap, color, bg, border, name }) => (
+                  <div key={name} className="flex flex-col gap-1">
+                    {!ecoMap ? (
+                      <div className="text-[0.7rem]" style={{ color: 'rgba(255,255,255,0.2)' }}>No data</div>
+                    ) : (
+                      ECO_ORDER.map((eco) => {
+                        const stats = ecoMap[eco]
+                        if (!stats) return null
+                        const wr = stats.win_rate
+                        const barW = Math.round(wr * 100)
+                        return (
+                          <div
+                            key={eco}
+                            className="px-2 py-1 text-[0.7rem]"
+                            style={{ background: '#0f0f0f', border: '1px solid #27272a' }}
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span style={{ color: 'rgba(255,255,255,0.5)' }}>{ECO_LABELS[eco]}</span>
+                              <div className="flex items-center gap-2">
+                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.65rem' }}>
+                                  {stats.wins}W–{stats.losses}L
+                                </span>
+                                <span
+                                  className="font-bold tabular-nums px-1.5 py-0.5 text-[0.65rem]"
+                                  style={{ background: bg, color, border: `1px solid ${border}` }}
+                                >
+                                  {(wr * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            </div>
+                            {/* Win rate bar */}
+                            <div className="h-1 rounded-full overflow-hidden" style={{ background: '#27272a' }}>
+                              <div style={{ width: `${barW}%`, background: color, height: '100%' }} />
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                    {ecoMap && (
+                      <div className="text-[0.6rem] mt-0.5" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                        {ecoMap.total_rounds} rounds · {ecoMap.sample_maps} maps
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
 /* ─── Main MatchupPage component ─────────────────────────── */
 export function MatchupPage({ data }: { data: MatchupData }) {
   const t1 = data.team1
@@ -1460,6 +1573,15 @@ export function MatchupPage({ data }: { data: MatchupData }) {
 
       {/* Attack / Defense split (shows once match_map_halves is populated) */}
       <AtkDefSection t1={t1} t2={t2} />
+
+      {/* Round economy win rates by buy type */}
+      {data.economy && (
+        <RoundEconomySection
+          data={data.economy}
+          t1Name={t1DisplayName}
+          t2Name={t2DisplayName}
+        />
+      )}
 
       {/* Map records */}
       <MapRecordsSection t1={t1} t2={t2} />

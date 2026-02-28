@@ -1941,6 +1941,171 @@ def get_matchup_mispricing():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/matchup/comp-winrates', methods=['GET'])
+def get_matchup_comp_winrates():
+    """Agent composition win rates per map for two teams."""
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        db = Database(Config.DATABASE_PATH)
+        t1_winrates = db.get_agent_comp_winrates(team1)
+        t2_winrates = db.get_agent_comp_winrates(team2)
+
+        return jsonify({
+            'success': True,
+            'team1': {'name': team1, 'comp_winrates': t1_winrates},
+            'team2': {'name': team2, 'comp_winrates': t2_winrates},
+        })
+    except Exception as e:
+        logger.error(f"Error in matchup comp-winrates: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/matchup/correlation', methods=['GET'])
+def get_matchup_correlation():
+    """
+    Pearson kill-count correlation matrix between players from two teams.
+    Only considers maps where both players appeared in the same match.
+    """
+    import sqlite3 as _sqlite3
+
+    team1 = request.args.get('team1', '').strip()
+    team2 = request.args.get('team2', '').strip()
+    if not team1 or not team2:
+        return jsonify({'error': 'team1 and team2 are required'}), 400
+
+    def pearson_r(xs, ys):
+        n = len(xs)
+        if n < 2:
+            return None
+        mx, my = sum(xs) / n, sum(ys) / n
+        num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+        sx = (sum((x - mx) ** 2 for x in xs)) ** 0.5
+        sy = (sum((y - my) ** 2 for y in ys)) ** 0.5
+        if sx == 0 or sy == 0:
+            return None
+        return round(num / (sx * sy), 3)
+
+    def fetch_player_map_kills(team_name, conn):
+        """Return {player_name: {(match_id, map_number): kills}} for a team."""
+        cursor = conn.cursor()
+        pat = f'%{team_name.strip()}%'
+
+        # Primary: join via players.team
+        cursor.execute('''
+            SELECT DISTINCT pms.player_name
+            FROM player_map_stats pms
+            JOIN matches m ON pms.match_id = m.id
+            JOIN vct_events ve ON m.event_id = ve.id
+            JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+            WHERE LOWER(p.team) LIKE LOWER(?)
+              AND ve.year = 2026
+              AND pms.kills IS NOT NULL
+        ''', (pat,))
+        player_names = [r[0] for r in cursor.fetchall()]
+
+        if len(player_names) >= 4:
+            # Fetch (match_id, map_number, kills) for all players at once
+            placeholders = ','.join(['LOWER(?)'] * len(player_names))
+            cursor.execute(f'''
+                SELECT pms.player_name, pms.match_id, pms.map_number, pms.kills
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE LOWER(pms.player_name) IN ({placeholders})
+                  AND ve.year = 2026
+                  AND pms.kills IS NOT NULL
+            ''', [p.lower() for p in player_names])
+            rows = cursor.fetchall()
+            player_data = {}
+            for (pname, match_id, map_number, kills) in rows:
+                player_data.setdefault(pname, {})[(match_id, map_number)] = kills
+            return player_data
+
+        # Fallback: row-order split via matches.team1/team2
+        cursor.execute('''
+            SELECT pms.id, pms.match_id, pms.map_number, pms.player_name,
+                   pms.kills, m.team1, m.team2
+            FROM player_map_stats pms
+            JOIN matches m ON pms.match_id = m.id
+            JOIN vct_events ve ON m.event_id = ve.id
+            WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+              AND ve.year = 2026
+              AND pms.kills IS NOT NULL
+            ORDER BY pms.match_id, pms.map_number, pms.id
+        ''', (pat, pat))
+        fb_rows = cursor.fetchall()
+
+        from collections import defaultdict as _defaultdict
+        grp = _defaultdict(lambda: {'team1': None, 'team2': None, 'entries': []})
+        tname_lower = team_name.lower()
+        for (row_id, match_id, map_number, pname, kills, t1, t2) in fb_rows:
+            key = (match_id, map_number)
+            grp[key]['team1'] = t1
+            grp[key]['team2'] = t2
+            grp[key]['entries'].append({'player_name': pname, 'kills': kills})
+
+        player_data = {}
+        for (match_id, map_number), info in grp.items():
+            entries = info['entries']
+            n = len(entries)
+            if n < 8:
+                continue
+            is_team1 = tname_lower in (info['team1'] or '').lower()
+            half = n // 2
+            team_entries = entries[:half] if is_team1 else entries[half:]
+            for e in team_entries:
+                pname = e['player_name']
+                key = (match_id, map_number)
+                player_data.setdefault(pname, {})[key] = e['kills']
+
+        return player_data
+
+    try:
+        conn = _sqlite3.connect(Config.DATABASE_PATH, timeout=30.0)
+        try:
+            t1_data = fetch_player_map_kills(team1, conn)
+            t2_data = fetch_player_map_kills(team2, conn)
+        finally:
+            conn.close()
+
+        team1_players = sorted(t1_data.keys())
+        team2_players = sorted(t2_data.keys())
+
+        matrix = {}
+        n_shared_maps = {}
+        for p1 in team1_players:
+            matrix[p1] = {}
+            n_shared_maps[p1] = {}
+            p1_map = t1_data[p1]
+            for p2 in team2_players:
+                p2_map = t2_data[p2]
+                shared_keys = set(p1_map.keys()) & set(p2_map.keys())
+                n = len(shared_keys)
+                n_shared_maps[p1][p2] = n
+                if n >= 5:
+                    xs = [p1_map[k] for k in shared_keys]
+                    ys = [p2_map[k] for k in shared_keys]
+                    matrix[p1][p2] = pearson_r(xs, ys)
+                else:
+                    matrix[p1][p2] = None
+
+        return jsonify({
+            'success': True,
+            'team1_players': team1_players,
+            'team2_players': team2_players,
+            'matrix': matrix,
+            'n_shared_maps': n_shared_maps,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in matchup correlation: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # Add error handler for 404 to debug (at end of file, after all routes)
 @app.errorhandler(404)
 def handle_404(e):

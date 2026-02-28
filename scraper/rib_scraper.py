@@ -353,6 +353,179 @@ class RibScraper:
                 return k
         return None
 
+    def get_map_economy(self, series_slug: str, series_id: str, rib_match_id: str) -> List[dict]:
+        """
+        Fetch round-level economy data from rib.gg for one map.
+
+        URL: https://www.rib.gg/series/{slug}/{id}?match={match_id}&tab=economy
+
+        Tries two approaches in order:
+          1. __NEXT_DATA__ JSON blob (reliable — rib.gg is Next.js SSR)
+          2. HTML table fallback
+
+        Returns list of:
+          {round_num: int, team1_economy: str, team2_economy: str, winning_team_side: int|None}
+        Economy strings: 'pistol', 'eco', 'semi-eco', 'force', 'full', 'unknown'
+        winning_team_side: 1 or 2 (which team won the round), or None
+        """
+        url = f"{self.BASE_URL}/series/{series_slug}/{series_id}?match={rib_match_id}&tab=economy"
+        content = self._make_request(url, timeout=90)
+        if not content:
+            return []
+
+        # ── Approach 1: __NEXT_DATA__ JSON ──────────────────────────────
+        try:
+            text = content.decode('utf-8', errors='replace')
+            nd_match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', text, re.DOTALL)
+            if nd_match:
+                nd = json.loads(nd_match.group(1))
+                rounds = self._extract_rounds_from_next_data(nd)
+                if rounds:
+                    return rounds
+        except Exception as e:
+            logger.debug(f"RIB economy __NEXT_DATA__ parse failed for {series_id}/{rib_match_id}: {e}")
+
+        # ── Approach 2: HTML table fallback ─────────────────────────────
+        try:
+            soup = BeautifulSoup(content, 'html.parser')
+            return self._parse_economy_html(soup)
+        except Exception as e:
+            logger.debug(f"RIB economy HTML parse failed for {series_id}/{rib_match_id}: {e}")
+
+        return []
+
+    # Economy type normalizer: maps rib.gg raw strings to canonical values
+    _ECO_MAP = {
+        'pistol': 'pistol', 'pistola': 'pistol',
+        'eco': 'eco', 'full eco': 'eco',
+        'semi': 'semi-eco', 'semi-eco': 'semi-eco', 'half buy': 'semi-eco', 'semi buy': 'semi-eco',
+        'force': 'force', 'force buy': 'force',
+        'full': 'full', 'full buy': 'full', 'buy': 'full',
+    }
+
+    def _normalize_eco(self, raw: str) -> str:
+        if not raw:
+            return 'unknown'
+        key = raw.lower().strip()
+        return self._ECO_MAP.get(key, 'unknown')
+
+    def _extract_rounds_from_next_data(self, nd: dict) -> List[dict]:
+        """
+        Walk the __NEXT_DATA__ props tree to find round economy data.
+        Tries multiple key paths since rib.gg's schema changes between builds.
+        """
+        # Collect all candidate lists that look like round arrays
+        candidates: List = []
+
+        def _walk(obj, depth=0):
+            if depth > 8:
+                return
+            if isinstance(obj, list) and len(obj) > 0 and isinstance(obj[0], dict):
+                keys = set(obj[0].keys())
+                if any(k in keys for k in ('roundNum', 'round_num', 'roundNumber', 'num')):
+                    candidates.append(obj)
+                    return
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    _walk(v, depth + 1)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _walk(item, depth + 1)
+
+        _walk(nd)
+
+        for candidate in candidates:
+            rounds = self._parse_rounds_list(candidate)
+            if rounds:
+                return rounds
+        return []
+
+    def _parse_rounds_list(self, raw_rounds: list) -> List[dict]:
+        """Parse a raw list of round dicts into our canonical format."""
+        result = []
+        for r in raw_rounds:
+            if not isinstance(r, dict):
+                continue
+            # Round number
+            rn = r.get('roundNum') or r.get('round_num') or r.get('roundNumber') or r.get('num')
+            if rn is None:
+                continue
+            try:
+                round_num = int(rn)
+            except (ValueError, TypeError):
+                continue
+
+            # Winning team side
+            winner = r.get('winner') or r.get('winningTeam') or r.get('winSide')
+            winning_side: Optional[int] = None
+            if winner is not None:
+                if winner in (1, '1', 'team1', 'Team 1'):
+                    winning_side = 1
+                elif winner in (2, '2', 'team2', 'Team 2'):
+                    winning_side = 2
+                elif isinstance(winner, str):
+                    # Could be team slug: take note of order
+                    pass
+
+            # Economy — try nested dicts first, then flat keys
+            t1_eco = 'unknown'
+            t2_eco = 'unknown'
+
+            t1_obj = r.get('team1') or r.get('teamA') or {}
+            t2_obj = r.get('team2') or r.get('teamB') or {}
+            if isinstance(t1_obj, dict):
+                raw = t1_obj.get('economy') or t1_obj.get('loadout') or t1_obj.get('buyType') or ''
+                t1_eco = self._normalize_eco(str(raw))
+            if isinstance(t2_obj, dict):
+                raw = t2_obj.get('economy') or t2_obj.get('loadout') or t2_obj.get('buyType') or ''
+                t2_eco = self._normalize_eco(str(raw))
+
+            # Flat fallback
+            if t1_eco == 'unknown':
+                raw = r.get('team1Economy') or r.get('t1Economy') or r.get('team1Loadout') or ''
+                t1_eco = self._normalize_eco(str(raw))
+            if t2_eco == 'unknown':
+                raw = r.get('team2Economy') or r.get('t2Economy') or r.get('team2Loadout') or ''
+                t2_eco = self._normalize_eco(str(raw))
+
+            result.append({
+                'round_num': round_num,
+                'winning_team_side': winning_side,
+                'team1_economy': t1_eco,
+                'team2_economy': t2_eco,
+            })
+        return result
+
+    def _parse_economy_html(self, soup: BeautifulSoup) -> List[dict]:
+        """HTML fallback: parse economy table rows."""
+        result = []
+        rows = soup.find_all('tr')
+        for row in rows:
+            cells = row.find_all('td')
+            if len(cells) < 3:
+                continue
+            texts = [c.get_text(strip=True) for c in cells]
+            # Expect: round_num | team1_eco | team2_eco [| winner]
+            try:
+                round_num = int(texts[0])
+            except ValueError:
+                continue
+            t1_eco = self._normalize_eco(texts[1]) if len(texts) > 1 else 'unknown'
+            t2_eco = self._normalize_eco(texts[2]) if len(texts) > 2 else 'unknown'
+            winning_side: Optional[int] = None
+            if len(texts) > 3:
+                if '1' in texts[3]:
+                    winning_side = 1
+                elif '2' in texts[3]:
+                    winning_side = 2
+            result.append({
+                'round_num': round_num,
+                'winning_team_side': winning_side,
+                'team1_economy': t1_eco,
+                'team2_economy': t2_eco,
+            })
+        return result
+
     # ------------------------------------------------------------------
     # Player lookup across events (rib.gg only — used when DB misses)
     # ------------------------------------------------------------------

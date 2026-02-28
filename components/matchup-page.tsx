@@ -172,6 +172,19 @@ export interface AtkDefEntry {
   sample_maps: number
 }
 
+export interface AgentCompWinrateEntry {
+  agents: string[]
+  wins: number
+  losses: number
+  played: number
+  win_rate: number
+}
+
+export interface CompWinratesData {
+  team1: { name: string; comp_winrates: Record<string, AgentCompWinrateEntry[]> }
+  team2: { name: string; comp_winrates: Record<string, AgentCompWinrateEntry[]> }
+}
+
 export interface TeamMatchupData {
   name: string
   overview: TeamOverview
@@ -193,6 +206,7 @@ export interface MatchupData {
   player_kills?: PlayerKillsData
   map_probs?: MapProbsData
   mispricing?: MispricingData
+  comp_winrates?: CompWinratesData
 }
 
 /* ─── Constants ──────────────────────────────────────────── */
@@ -439,7 +453,7 @@ function MapRecordsSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupDat
 }
 
 /* ─── Agent comps section ────────────────────────────────── */
-function AgentCompsSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupData }) {
+function AgentCompsSection({ t1, t2, compWinrates }: { t1: TeamMatchupData; t2: TeamMatchupData; compWinrates?: CompWinratesData }) {
   const allMaps = Array.from(
     new Set([...Object.keys(t1.comps_per_map), ...Object.keys(t2.comps_per_map)])
   ).sort()
@@ -450,6 +464,20 @@ function AgentCompsSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupDat
 
   const comps1 = (t1.comps_per_map[selectedMap] ?? []).slice(0, 5)
   const comps2 = (t2.comps_per_map[selectedMap] ?? []).slice(0, 5)
+
+  function findWinRate(
+    teamWinrates: Record<string, AgentCompWinrateEntry[]> | undefined,
+    mapName: string,
+    agents: string[]
+  ): AgentCompWinrateEntry | undefined {
+    if (!teamWinrates) return undefined
+    const mapEntries = teamWinrates[mapName]
+    if (!mapEntries) return undefined
+    const sortedAgents = JSON.stringify([...agents].sort())
+    return mapEntries.find(
+      (e) => JSON.stringify([...e.agents].sort()) === sortedAgents
+    )
+  }
 
   return (
     <Card style={{ padding: '1.25rem 1.5rem' }}>
@@ -478,37 +506,53 @@ function AgentCompsSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupDat
       {/* Two-column comp lists */}
       <div className="grid grid-cols-2 gap-6">
         {[
-          { comps: comps1, color: T1_COLOR, bg: T1_BG },
-          { comps: comps2, color: T2_COLOR, bg: T2_BG },
-        ].map(({ comps, color, bg }, idx) => (
+          { comps: comps1, color: T1_COLOR, bg: T1_BG, winratesMap: compWinrates?.team1.comp_winrates },
+          { comps: comps2, color: T2_COLOR, bg: T2_BG, winratesMap: compWinrates?.team2.comp_winrates },
+        ].map(({ comps, color, bg, winratesMap }, idx) => (
           <div key={idx}>
             {comps.length === 0 ? (
               <p className="text-[0.75rem]" style={{ color: 'rgba(255,255,255,0.25)' }}>No data</p>
             ) : (
               <div className="flex flex-col gap-1">
-                {comps.map((comp, i) => (
-                  <div
-                    key={comp.agents.join(',')}
-                    className="flex items-center justify-between gap-2 px-2 py-1.5 text-[0.7rem]"
-                    style={{
-                      background: i === 0 ? bg : 'transparent',
-                      border: `1px solid ${i === 0 ? color + '33' : '#27272a'}`,
-                    }}
-                  >
-                    <span
-                      className="flex-1 min-w-0 truncate"
-                      style={{ color: i === 0 ? color : '#a1a1aa' }}
+                {comps.map((comp, i) => {
+                  const wrEntry = findWinRate(winratesMap, selectedMap, comp.agents)
+                  return (
+                    <div
+                      key={comp.agents.join(',')}
+                      className="flex items-center justify-between gap-2 px-2 py-1.5 text-[0.7rem]"
+                      style={{
+                        background: i === 0 ? bg : 'transparent',
+                        border: `1px solid ${i === 0 ? color + '33' : '#27272a'}`,
+                      }}
                     >
-                      {comp.agents.join(' \u00B7 ')}
-                    </span>
-                    <span
-                      className="shrink-0 tabular-nums text-[0.65rem]"
-                      style={{ color: 'rgba(255,255,255,0.4)' }}
-                    >
-                      {comp.count}× {comp.pct.toFixed(1)}%
-                    </span>
-                  </div>
-                ))}
+                      <span
+                        className="flex-1 min-w-0 truncate"
+                        style={{ color: i === 0 ? color : '#a1a1aa' }}
+                      >
+                        {comp.agents.join(' \u00B7 ')}
+                      </span>
+                      <span
+                        className="shrink-0 tabular-nums text-[0.65rem]"
+                        style={{ color: 'rgba(255,255,255,0.4)' }}
+                      >
+                        {comp.count}× {comp.pct.toFixed(1)}%
+                      </span>
+                      {wrEntry && (
+                        <span
+                          className="shrink-0 tabular-nums text-[0.62rem] font-semibold px-1.5 py-0.5"
+                          style={{
+                            background: bg,
+                            color,
+                            border: `1px solid ${color}44`,
+                          }}
+                          title={`${wrEntry.wins}W–${wrEntry.losses}L`}
+                        >
+                          {(wrEntry.win_rate * 100).toFixed(0)}% WR
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -1274,6 +1318,85 @@ function TeamColumnHeaders({ t1Name, t2Name }: { t1Name: string; t2Name: string 
   )
 }
 
+/* ─── Agent comp win rates section ──────────────────────── */
+function AgentCompWinrateSection({ data, t1Name, t2Name }: {
+  data: CompWinratesData
+  t1Name: string
+  t2Name: string
+}) {
+  const allMaps = Array.from(
+    new Set([
+      ...Object.keys(data.team1.comp_winrates),
+      ...Object.keys(data.team2.comp_winrates),
+    ])
+  ).sort()
+
+  if (allMaps.length === 0) return null
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Agent Comp Win Rates</SectionLabel>
+      <div className="flex flex-col gap-4">
+        {allMaps.map((map) => {
+          const t1comps = data.team1.comp_winrates[map] ?? []
+          const t2comps = data.team2.comp_winrates[map] ?? []
+          if (t1comps.length === 0 && t2comps.length === 0) return null
+          return (
+            <div key={map}>
+              <div
+                className="text-[0.65rem] uppercase tracking-widest font-semibold mb-2 px-2 py-1"
+                style={{ background: '#18181b', color: 'rgba(255,255,255,0.5)', borderLeft: '2px solid #3f3f46' }}
+              >
+                {map}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { comps: t1comps, color: T1_COLOR, bg: T1_BG, border: T1_BORDER, name: t1Name },
+                  { comps: t2comps, color: T2_COLOR, bg: T2_BG, border: T2_BORDER, name: t2Name },
+                ].map(({ comps, color, bg, border, name }) => (
+                  <div key={name} className="flex flex-col gap-1">
+                    {comps.length === 0 ? (
+                      <div className="text-[0.7rem]" style={{ color: 'rgba(255,255,255,0.2)' }}>No data</div>
+                    ) : (
+                      comps.slice(0, 3).map((entry, i) => (
+                        <div
+                          key={i}
+                          className="px-2 py-1.5 text-[0.7rem]"
+                          style={{ background: '#0f0f0f', border: `1px solid #27272a` }}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold" style={{ color }}>
+                              {entry.agents.join(' \u00B7 ')}
+                            </span>
+                            <span
+                              className="font-bold tabular-nums text-[0.65rem] px-1.5 py-0.5"
+                              style={{
+                                background: bg,
+                                color,
+                                border: `1px solid ${border}`,
+                              }}
+                            >
+                              {(entry.win_rate * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="flex gap-2" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                            <span>{entry.wins}W\u2013{entry.losses}L</span>
+                            <span>({entry.played} maps)</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
 /* ─── Main MatchupPage component ─────────────────────────── */
 export function MatchupPage({ data }: { data: MatchupData }) {
   const t1 = data.team1
@@ -1345,7 +1468,16 @@ export function MatchupPage({ data }: { data: MatchupData }) {
       <PickBanSection t1={t1} t2={t2} />
 
       {/* Agent comps */}
-      <AgentCompsSection t1={t1} t2={t2} />
+      <AgentCompsSection t1={t1} t2={t2} compWinrates={data.comp_winrates} />
+
+      {/* Agent comp win rates */}
+      {data.comp_winrates && (
+        <AgentCompWinrateSection
+          data={data.comp_winrates}
+          t1Name={t1DisplayName}
+          t2Name={t2DisplayName}
+        />
+      )}
 
       {/* Player kill projections + parlay builder */}
       {data.player_kills && (

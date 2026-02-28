@@ -64,10 +64,11 @@ export default function MatchupAnalysisPage() {
       // Fetch supplemental data (separate endpoints, non-critical)
       const killsParams = new URLSearchParams({ team1: team1.trim(), team2: team2.trim() })
       try {
-        const [killsRes, probsRes, mispricingRes] = await Promise.all([
+        const [killsRes, probsRes, mispricingRes, compWinratesRes] = await Promise.all([
           fetch(`${API_BASE}/api/matchup/player-kills?${killsParams}`),
           fetch(`${API_BASE}/api/matchup/map-probs?${killsParams}`),
           fetch(`${API_BASE}/api/matchup/mispricing?${killsParams}`),
+          fetch(`${API_BASE}/api/matchup/comp-winrates?${killsParams}`),
         ])
         const killsJson = await killsRes.json()
         if (killsRes.ok && killsJson.success) {
@@ -80,6 +81,10 @@ export default function MatchupAnalysisPage() {
         const mispricingJson = await mispricingRes.json()
         if (mispricingRes.ok && mispricingJson.success) {
           json.mispricing = mispricingJson
+        }
+        const compWinratesJson = await compWinratesRes.json()
+        if (compWinratesRes.ok && compWinratesJson.success) {
+          json.comp_winrates = compWinratesJson
         }
       } catch {
         // supplemental endpoints are non-critical; proceed without them

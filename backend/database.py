@@ -300,6 +300,20 @@ class Database:
             )
         ''')
 
+        # Round-level economy data from rib.gg (pistol/eco/force/full buy per round)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS match_round_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id INTEGER NOT NULL,
+                map_number INTEGER NOT NULL,
+                round_num INTEGER NOT NULL,
+                winning_team_side INTEGER,  -- 1=team1, 2=team2, NULL=unknown
+                team1_economy TEXT,         -- 'pistol','eco','semi-eco','force','full','unknown'
+                team2_economy TEXT,
+                UNIQUE(match_id, map_number, round_num)
+            )
+        ''')
+
         # Create indexes for faster lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_name ON player_map_stats(player_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_match_event ON matches(event_id)')
@@ -309,6 +323,7 @@ class Database:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_combo_name ON player_combo_cache(player_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_map_halves_match ON match_map_halves(match_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_map_halves_team ON match_map_halves(team_name)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_round_data_match ON match_round_data(match_id)')
 
         conn.commit()
         conn.close()
@@ -1749,6 +1764,153 @@ class Database:
         finally:
             conn.close()
 
+    def get_agent_comp_winrates(self, team_name: str, year: int = 2026) -> Dict[str, List[Dict]]:
+        """For each map, return each 5-agent comp the team has played with wins/losses/win_rate.
+
+        Primary: joins players.team for team assignment.
+        Fallback: uses row-insertion order (pms.id) to split 10 players into team1/team2
+                  when the players table lacks enough coverage for this team.
+
+        Returns: {map_name: [{agents: [...], wins: int, losses: int, played: int, win_rate: float}]}
+        """
+        from collections import Counter as _Counter
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
+
+        def _parse_outcome(map_score, team1_raw, is_team1_flag):
+            """Return True=win, False=loss, None=skip."""
+            if not map_score or map_score == '0-0':
+                return None
+            parts = map_score.split('-')
+            if len(parts) != 2:
+                return None
+            try:
+                a, b = int(parts[0]), int(parts[1])
+            except (ValueError, TypeError):
+                return None
+            if a == 0 and b == 0:
+                return None
+            return (a > b) if is_team1_flag else (b > a)
+
+        def _build_result(map_plays_with_outcome: Dict) -> Dict[str, List[Dict]]:
+            # map_plays_with_outcome: {(match_id, map_number, map_name): {'agents': [...], 'won': True/False/None}}
+            map_comp_records: Dict[str, Dict[tuple, Dict]] = {}
+            for (match_id, map_number, map_name), info in map_plays_with_outcome.items():
+                agents = info['agents']
+                won = info['won']
+                if len(agents) < 4 or won is None:
+                    continue
+                comp = tuple(sorted(agents))
+                if map_name not in map_comp_records:
+                    map_comp_records[map_name] = {}
+                if comp not in map_comp_records[map_name]:
+                    map_comp_records[map_name][comp] = {'wins': 0, 'losses': 0}
+                if won:
+                    map_comp_records[map_name][comp]['wins'] += 1
+                else:
+                    map_comp_records[map_name][comp]['losses'] += 1
+
+            out: Dict[str, List[Dict]] = {}
+            for map_name, comp_records in sorted(map_comp_records.items()):
+                entries = []
+                for comp, rec in comp_records.items():
+                    wins = rec['wins']
+                    losses = rec['losses']
+                    played = wins + losses
+                    entries.append({
+                        'agents': list(comp),
+                        'wins': wins,
+                        'losses': losses,
+                        'played': played,
+                        'win_rate': round(wins / played, 3) if played > 0 else 0.0,
+                    })
+                entries.sort(key=lambda x: x['played'], reverse=True)
+                out[map_name] = entries
+            return out
+
+        try:
+            # ── Primary: players.team join ──────────────────────────────────
+            cursor.execute('''
+                SELECT pms.match_id, pms.map_number, pms.map_name, pms.agent,
+                       pms.map_score, m.team1
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+                WHERE LOWER(p.team) LIKE LOWER(?)
+                  AND pms.agent IS NOT NULL AND pms.map_name IS NOT NULL AND pms.kills > 0
+                  AND ve.year = ?
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            map_plays: Dict[tuple, Dict] = {}
+            for (match_id, map_number, map_name, agent, map_score, team1_raw) in rows:
+                key = (match_id, map_number, map_name)
+                if key not in map_plays:
+                    is_team1 = tname_lower in (team1_raw or '').lower()
+                    map_plays[key] = {
+                        'agents': [],
+                        'won': _parse_outcome(map_score, team1_raw, is_team1),
+                    }
+                map_plays[key]['agents'].append(agent)
+
+            # Count valid maps (>= 4 agents found via players table)
+            valid_maps = sum(1 for info in map_plays.values() if len(info['agents']) >= 4)
+
+            if valid_maps >= 3:
+                return _build_result(map_plays)
+
+            # ── Fallback: row-insertion order split ─────────────────────────
+            cursor.execute('''
+                SELECT pms.id, pms.match_id, pms.map_number, pms.map_name,
+                       pms.agent, pms.map_score, m.team1, m.team2
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND pms.agent IS NOT NULL AND pms.map_name IS NOT NULL AND pms.kills > 0
+                  AND ve.year = ?
+                ORDER BY pms.match_id, pms.map_number, pms.id
+            ''', (pat, pat, year))
+            fb_rows = cursor.fetchall()
+
+            from collections import defaultdict as _dd
+            grp: Dict = _dd(lambda: {'map_name': None, 'team1': None, 'team2': None,
+                                     'agents': [], 'map_score': None})
+            for (row_id, match_id, map_number, map_name, agent, map_score, t1, t2) in fb_rows:
+                key = (match_id, map_number)
+                grp[key]['map_name'] = map_name
+                grp[key]['team1'] = t1
+                grp[key]['team2'] = t2
+                grp[key]['agents'].append(agent)
+                if grp[key]['map_score'] is None:
+                    grp[key]['map_score'] = map_score
+
+            fb_plays: Dict[tuple, Dict] = {}
+            for (match_id, map_number), info in grp.items():
+                agents_all = info['agents']
+                n = len(agents_all)
+                if n < 8:
+                    continue
+                is_team1 = tname_lower in (info['team1'] or '').lower()
+                half = n // 2
+                team_agents = agents_all[:half] if is_team1 else agents_all[half:]
+                full_key = (match_id, map_number, info['map_name'])
+                fb_plays[full_key] = {
+                    'agents': team_agents,
+                    'won': _parse_outcome(info['map_score'], info['team1'], is_team1),
+                }
+
+            return _build_result(fb_plays)
+
+        except Exception as e:
+            logger.error(f"Error getting agent comp winrates for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
     def get_head_to_head(self, team1_name: str, team2_name: str, year: int = 2026) -> List[Dict]:
         """All matches between two teams."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -2151,6 +2313,125 @@ class Database:
             return result
         except Exception as e:
             logger.error(f"Error getting atk/def rates for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def save_round_data(self, match_id: int, map_number: int,
+                        rounds: List[Dict]) -> int:
+        """Save round-level economy data for one map.
+
+        Each round dict: {round_num, winning_team_side, team1_economy, team2_economy}
+        winning_team_side: 1 or 2 (or None)
+        economy strings: 'pistol','eco','semi-eco','force','full','unknown'
+
+        Returns number of rows inserted/replaced.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        saved = 0
+        try:
+            for r in rounds:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO match_round_data
+                    (match_id, map_number, round_num, winning_team_side, team1_economy, team2_economy)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    match_id, map_number,
+                    r.get('round_num'), r.get('winning_team_side'),
+                    r.get('team1_economy', 'unknown'), r.get('team2_economy', 'unknown'),
+                ))
+                saved += 1
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving round data match={match_id} map={map_number}: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+        return saved
+
+    def get_team_round_economy_stats(self, team_name: str, year: int = 2026) -> Dict[str, Dict]:
+        """Economy win rates by buy-type per map for a team.
+
+        Returns:
+        {
+          map_name: {
+            'pistol':   {wins, losses, win_rate},
+            'eco':      {wins, losses, win_rate},
+            'semi-eco': {wins, losses, win_rate},
+            'force':    {wins, losses, win_rate},
+            'full':     {wins, losses, win_rate},
+            'total_rounds': int,
+            'sample_maps': int,
+          }
+        }
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        try:
+            # Determine if team is team1 or team2 for each match
+            cursor.execute('''
+                SELECT mrd.match_id, mrd.map_number, mmh.map_name,
+                       mrd.round_num, mrd.winning_team_side,
+                       mrd.team1_economy, mrd.team2_economy,
+                       m.team1
+                FROM match_round_data mrd
+                JOIN matches m ON mrd.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                LEFT JOIN match_map_halves mmh
+                    ON mmh.match_id = mrd.match_id
+                    AND mmh.map_number = mrd.map_number
+                    AND LOWER(mmh.team_name) LIKE LOWER(?)
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND ve.year = ?
+                  AND mrd.winning_team_side IS NOT NULL
+            ''', (pat, pat, pat, year))
+            rows = cursor.fetchall()
+
+            # {map_name: {economy_type: {'wins': int, 'losses': int}}}
+            from collections import defaultdict as _dd
+            stats: Dict = _dd(lambda: _dd(lambda: {'wins': 0, 'losses': 0}))
+            map_match_ids: Dict = _dd(set)
+            tname_lower = team_name.lower()
+
+            for (match_id, map_number, map_name, round_num,
+                 winning_side, t1_eco, t2_eco, t1_name) in rows:
+                if not map_name:
+                    map_name = f'Map {map_number}'
+
+                is_team1 = tname_lower in (t1_name or '').lower()
+                team_economy = t1_eco if is_team1 else t2_eco
+                team_won = (winning_side == 1 and is_team1) or (winning_side == 2 and not is_team1)
+
+                if not team_economy or team_economy == 'unknown':
+                    continue
+
+                eco_key = team_economy.lower()
+                if team_won:
+                    stats[map_name][eco_key]['wins'] += 1
+                else:
+                    stats[map_name][eco_key]['losses'] += 1
+                map_match_ids[map_name].add(match_id)
+
+            result = {}
+            for map_name, eco_dict in stats.items():
+                map_result: Dict = {}
+                total_rounds = 0
+                for eco_type, wl in eco_dict.items():
+                    played = wl['wins'] + wl['losses']
+                    total_rounds += played
+                    map_result[eco_type] = {
+                        'wins': wl['wins'],
+                        'losses': wl['losses'],
+                        'win_rate': round(wl['wins'] / played, 3) if played > 0 else 0.0,
+                    }
+                map_result['total_rounds'] = total_rounds
+                map_result['sample_maps'] = len(map_match_ids[map_name])
+                result[map_name] = map_result
+            return result
+        except Exception as e:
+            logger.error(f"Error getting round economy stats for {team_name}: {e}")
             return {}
         finally:
             conn.close()

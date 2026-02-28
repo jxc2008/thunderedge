@@ -138,6 +138,31 @@ export interface PlayerKillsData {
   team2: { name: string; players: PlayerKillStats[] }
 }
 
+export interface MapProbEntry {
+  map: string
+  p_played: number
+  p_ban_t1: number
+  p_ban_t2: number
+}
+
+export interface MapProbsData {
+  maps: MapProbEntry[]
+  top3_projected_pool: string[]
+}
+
+export interface MispricingPlayer {
+  player_name: string
+  projected_kills: number | null
+  std: number | null
+  sample: number
+  suggested_line: number | null
+}
+
+export interface MispricingData {
+  team1: { name: string; players: MispricingPlayer[] }
+  team2: { name: string; players: MispricingPlayer[] }
+}
+
 export interface TeamMatchupData {
   name: string
   overview: TeamOverview
@@ -156,6 +181,8 @@ export interface MatchupData {
   odds: OddsInfo | null
   projected_scores: Record<string, ProjectedScoreEntry>
   player_kills?: PlayerKillsData
+  map_probs?: MapProbsData
+  mispricing?: MispricingData
 }
 
 /* ─── Constants ──────────────────────────────────────────── */
@@ -695,6 +722,339 @@ function PlayerKillsSection({ playerKills, t1Name, t2Name }: {
   )
 }
 
+/* ─── Map Probability section ────────────────────────────── */
+function mapProbColor(p: number): string {
+  if (p >= 0.6) return '#22c55e'
+  if (p >= 0.3) return '#f59e0b'
+  return '#f97316'
+}
+
+function MapProbabilitySection({ data, t1Name, t2Name }: { data: MapProbsData; t1Name: string; t2Name: string }) {
+  const sorted = [...data.maps].sort((a, b) => b.p_played - a.p_played)
+  const maxP = Math.max(...sorted.map((m) => m.p_played), 0.01)
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Map Pool Probabilities</SectionLabel>
+      {data.top3_projected_pool.length > 0 && (
+        <p className="text-[0.75rem] mb-4" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          Likely pool:{' '}
+          <span style={{ color: '#e4e4e7', fontWeight: 600 }}>
+            {data.top3_projected_pool.join(' \u00B7 ')}
+          </span>
+        </p>
+      )}
+      <div className="flex flex-col gap-2">
+        {sorted.map((entry) => (
+          <div key={entry.map} className="flex items-center gap-3">
+            <span className="text-[0.75rem] font-medium w-20 shrink-0" style={{ color: '#e4e4e7' }}>
+              {entry.map}
+            </span>
+            <div className="flex-1 h-5 relative" style={{ background: '#18181b', borderRadius: 2 }}>
+              <div
+                className="h-full"
+                style={{
+                  width: `${(entry.p_played / maxP) * 100}%`,
+                  minWidth: 2,
+                  background: mapProbColor(entry.p_played),
+                  borderRadius: 2,
+                  transition: 'width 0.3s ease',
+                }}
+              />
+              <span
+                className="absolute right-2 top-0 h-full flex items-center text-[0.65rem] font-semibold tabular-nums"
+                style={{ color: 'rgba(255,255,255,0.7)' }}
+              >
+                {(entry.p_played * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="flex gap-2 shrink-0 text-[0.6rem] tabular-nums" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              <span title={`${t1Name} ban prob`} style={{ color: T1_COLOR }}>
+                Ban {(entry.p_ban_t1 * 100).toFixed(0)}%
+              </span>
+              <span title={`${t2Name} ban prob`} style={{ color: T2_COLOR }}>
+                Ban {(entry.p_ban_t2 * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/* ─── Mispricing section ─────────────────────────────────── */
+function MispricingSection({ data, t1Name, t2Name }: { data: MispricingData; t1Name: string; t2Name: string }) {
+  function renderTeam(players: MispricingPlayer[], color: string) {
+    const sorted = [...players].sort((a, b) => (b.projected_kills ?? 0) - (a.projected_kills ?? 0))
+    if (sorted.length === 0) {
+      return <p className="text-[0.75rem]" style={{ color: 'rgba(255,255,255,0.25)' }}>No data</p>
+    }
+    return (
+      <div className="flex flex-col gap-0.5">
+        {sorted.map((p) => {
+          const hasData = p.projected_kills != null && p.std != null
+          let signal: { label: string; color: string } | null = null
+          if (hasData && p.suggested_line != null) {
+            if (p.suggested_line > p.projected_kills! * 1.05) {
+              signal = { label: '\u2193 UNDER', color: '#ef4444' }
+            } else if (p.suggested_line < p.projected_kills! * 0.95) {
+              signal = { label: '\u2191 OVER', color: '#22c55e' }
+            }
+          }
+          return (
+            <div
+              key={p.player_name}
+              className="flex items-center gap-2 px-2 py-1.5 text-[0.72rem]"
+              style={{ borderBottom: '1px solid #18181b' }}
+            >
+              <span className="font-medium w-24 truncate" style={{ color: '#e4e4e7' }}>{p.player_name}</span>
+              <span className="tabular-nums" style={{ color: hasData ? color : '#52525b' }}>
+                {hasData ? `Proj: ${p.projected_kills!.toFixed(1)} \u00B1 ${p.std!.toFixed(1)}` : '—'}
+              </span>
+              {p.suggested_line != null && (
+                <span className="tabular-nums text-[0.65rem]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  Line: {p.suggested_line.toFixed(1)}
+                </span>
+              )}
+              {signal && (
+                <span className="text-[0.65rem] font-bold ml-auto" style={{ color: signal.color }}>
+                  {signal.label}
+                </span>
+              )}
+              {p.sample < 5 && (
+                <span className="text-[0.55rem] ml-auto" style={{ color: '#71717a' }}>
+                  low sample (n={p.sample})
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Kill Line Mispricing</SectionLabel>
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-2" style={{ color: T1_COLOR }}>{t1Name}</p>
+          {renderTeam(data.team1.players, T1_COLOR)}
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-2" style={{ color: T2_COLOR }}>{t2Name}</p>
+          {renderTeam(data.team2.players, T2_COLOR)}
+        </div>
+      </div>
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        Suggested line = model fair value. OVER/UNDER signal when line deviates &gt;5% from projection.
+      </p>
+    </Card>
+  )
+}
+
+/* ─── Parlay Builder section ─────────────────────────────── */
+interface ParlayLeg {
+  playerName: string
+  team: 'team1' | 'team2'
+  line: number
+  direction: 'over' | 'under'
+  projectedMean: number | null
+  projectedStd: number | null
+}
+
+function normCDF(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x))
+  const d = 0.3989423 * Math.exp(-x * x / 2)
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.7814779 + t * (-1.8212560 + t * 1.3302744))))
+  return x > 0 ? 1 - p : p
+}
+
+function pOver(mean: number, std: number, line: number): number {
+  if (std <= 0) return mean > line ? 1 : 0
+  return 1 - normCDF((line - mean) / std)
+}
+
+function ParlayBuilderSection({ playerKills }: { playerKills: PlayerKillsData }) {
+  const [legs, setLegs] = useState<ParlayLeg[]>([])
+
+  const allPlayers: { name: string; team: 'team1' | 'team2'; mean: number | null; std: number | null }[] = [
+    ...playerKills.team1.players.map((p) => ({
+      name: p.player_name,
+      team: 'team1' as const,
+      mean: p.aggregate.mean,
+      std: p.aggregate.std,
+    })),
+    ...playerKills.team2.players.map((p) => ({
+      name: p.player_name,
+      team: 'team2' as const,
+      mean: p.aggregate.mean,
+      std: p.aggregate.std,
+    })),
+  ].sort((a, b) => (b.mean ?? 0) - (a.mean ?? 0))
+
+  const addedNames = new Set(legs.map((l) => l.playerName))
+
+  function addLeg(player: typeof allPlayers[number]) {
+    setLegs((prev) => [
+      ...prev,
+      {
+        playerName: player.name,
+        team: player.team,
+        line: player.mean != null ? Math.round(player.mean * 2) / 2 : 15,
+        direction: 'over',
+        projectedMean: player.mean,
+        projectedStd: player.std,
+      },
+    ])
+  }
+
+  function removeLeg(idx: number) {
+    setLegs((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function updateLeg(idx: number, updates: Partial<ParlayLeg>) {
+    setLegs((prev) => prev.map((leg, i) => (i === idx ? { ...leg, ...updates } : leg)))
+  }
+
+  function legProb(leg: ParlayLeg): number | null {
+    if (leg.projectedMean == null || leg.projectedStd == null) return null
+    const po = pOver(leg.projectedMean, leg.projectedStd, leg.line)
+    return leg.direction === 'over' ? po : 1 - po
+  }
+
+  const legProbs = legs.map(legProb)
+  const combinedProb = legProbs.every((p) => p != null)
+    ? legProbs.reduce((acc, p) => acc! * p!, 1)
+    : null
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Parlay Builder</SectionLabel>
+
+      {/* Player list to add */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {allPlayers.map((p) => {
+          const isAdded = addedNames.has(p.name)
+          const color = p.team === 'team1' ? T1_COLOR : T2_COLOR
+          return (
+            <button
+              key={p.name}
+              disabled={isAdded}
+              onClick={() => addLeg(p)}
+              className="text-[0.65rem] px-2 py-1 tracking-wide font-medium transition-colors"
+              style={{
+                background: isAdded ? 'rgba(255,255,255,0.03)' : 'transparent',
+                border: `1px solid ${isAdded ? '#27272a' : color + '44'}`,
+                color: isAdded ? '#3f3f46' : color,
+                cursor: isAdded ? 'not-allowed' : 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {isAdded ? p.name : `+ ${p.name}`}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Active legs */}
+      {legs.length > 0 && (
+        <div className="flex flex-col gap-2 mb-4">
+          {legs.map((leg, idx) => {
+            const prob = legProbs[idx]
+            const color = leg.team === 'team1' ? T1_COLOR : T2_COLOR
+            return (
+              <div
+                key={leg.playerName}
+                className="flex items-center gap-3 px-3 py-2"
+                style={{ background: '#0f0f0f', border: '1px solid #1c1c1e' }}
+              >
+                <span className="text-[0.75rem] font-medium w-24 truncate" style={{ color }}>
+                  {leg.playerName}
+                </span>
+                <button
+                  onClick={() => updateLeg(idx, { direction: leg.direction === 'over' ? 'under' : 'over' })}
+                  className="text-[0.65rem] font-bold px-2 py-0.5"
+                  style={{
+                    background: leg.direction === 'over' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                    border: `1px solid ${leg.direction === 'over' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                    color: leg.direction === 'over' ? '#22c55e' : '#ef4444',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    minWidth: 60,
+                    textAlign: 'center',
+                  }}
+                >
+                  {leg.direction === 'over' ? '\u2191 OVER' : '\u2193 UNDER'}
+                </button>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={leg.line}
+                  onChange={(e) => updateLeg(idx, { line: parseFloat(e.target.value) || 0 })}
+                  className="text-[0.75rem] tabular-nums w-16 text-center"
+                  style={{
+                    background: '#0a0a0a',
+                    border: '1px solid #27272a',
+                    color: '#e4e4e7',
+                    padding: '0.25rem',
+                    fontFamily: 'inherit',
+                    outline: 'none',
+                  }}
+                />
+                <span className="text-[0.7rem] tabular-nums" style={{ color: prob != null && prob >= 0.5 ? '#22c55e' : prob != null ? '#f59e0b' : '#52525b' }}>
+                  {prob != null ? `${(prob * 100).toFixed(1)}%` : '—'}
+                </span>
+                <button
+                  onClick={() => removeLeg(idx)}
+                  className="text-[0.65rem] ml-auto"
+                  style={{ color: '#71717a', cursor: 'pointer', background: 'none', border: 'none', fontFamily: 'inherit' }}
+                >
+                  Remove
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Combined probability */}
+      {legs.length > 0 && (
+        <div className="flex items-center justify-between px-3 py-2" style={{ background: '#141414', border: '1px solid #27272a' }}>
+          <span className="text-[0.7rem] uppercase tracking-wide font-semibold" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            Combined Probability ({legs.length} legs)
+          </span>
+          <span className="text-[0.9rem] font-bold tabular-nums" style={{ color: combinedProb != null ? (combinedProb >= 0.3 ? '#22c55e' : '#f59e0b') : '#52525b' }}>
+            {combinedProb != null ? `${(combinedProb * 100).toFixed(1)}%` : '—'}
+          </span>
+          {combinedProb != null && combinedProb > 0 && (
+            <span className="text-[0.65rem] tabular-nums" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              Fair odds: {(1 / combinedProb).toFixed(2)}x
+            </span>
+          )}
+          <button
+            onClick={() => setLegs([])}
+            className="text-[0.65rem] font-medium"
+            style={{ color: '#ef4444', cursor: 'pointer', background: 'none', border: 'none', fontFamily: 'inherit' }}
+          >
+            Clear All
+          </button>
+        </div>
+      )}
+
+      {legs.length === 0 && (
+        <p className="text-[0.75rem] text-center py-4" style={{ color: 'rgba(255,255,255,0.25)' }}>
+          Click a player above to add a kill line leg to your parlay.
+        </p>
+      )}
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        Probabilities assume Normal distribution and independence between legs.
+      </p>
+    </Card>
+  )
+}
+
 /* ─── Recent matches section ─────────────────────────────── */
 function MatchRow({ match, color }: { match: RecentMatch; color: string }) {
   const resultColor = match.result === 'W' ? '#22c55e' : match.result === 'L' ? '#ef4444' : 'rgba(255,255,255,0.3)'
@@ -890,6 +1250,16 @@ export function MatchupPage({ data }: { data: MatchupData }) {
         />
       )}
 
+      {/* Map pool probabilities */}
+      {data.map_probs && (
+        <MapProbabilitySection data={data.map_probs} t1Name={t1DisplayName} t2Name={t2DisplayName} />
+      )}
+
+      {/* Kill line mispricing */}
+      {data.mispricing && (
+        <MispricingSection data={data.mispricing} t1Name={t1DisplayName} t2Name={t2DisplayName} />
+      )}
+
       {/* Per-map K/D + fights/round */}
       <PerMapKDSection t1={t1} t2={t2} />
 
@@ -902,13 +1272,16 @@ export function MatchupPage({ data }: { data: MatchupData }) {
       {/* Agent comps */}
       <AgentCompsSection t1={t1} t2={t2} />
 
-      {/* Player kill projections */}
+      {/* Player kill projections + parlay builder */}
       {data.player_kills && (
-        <PlayerKillsSection
-          playerKills={data.player_kills}
-          t1Name={t1DisplayName}
-          t2Name={t2DisplayName}
-        />
+        <>
+          <PlayerKillsSection
+            playerKills={data.player_kills}
+            t1Name={t1DisplayName}
+            t2Name={t2DisplayName}
+          />
+          <ParlayBuilderSection playerKills={data.player_kills} />
+        </>
       )}
 
       {/* Recent matches */}

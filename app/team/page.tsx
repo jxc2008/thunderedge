@@ -61,16 +61,28 @@ export default function MatchupAnalysisPage() {
         return
       }
 
-      // Fetch player kill distributions (separate endpoint, non-critical)
+      // Fetch supplemental data (separate endpoints, non-critical)
       const killsParams = new URLSearchParams({ team1: team1.trim(), team2: team2.trim() })
       try {
-        const killsRes = await fetch(`${API_BASE}/api/matchup/player-kills?${killsParams}`)
+        const [killsRes, probsRes, mispricingRes] = await Promise.all([
+          fetch(`${API_BASE}/api/matchup/player-kills?${killsParams}`),
+          fetch(`${API_BASE}/api/matchup/map-probs?${killsParams}`),
+          fetch(`${API_BASE}/api/matchup/mispricing?${killsParams}`),
+        ])
         const killsJson = await killsRes.json()
         if (killsRes.ok && killsJson.success) {
           json.player_kills = killsJson
         }
+        const probsJson = await probsRes.json()
+        if (probsRes.ok && probsJson.success) {
+          json.map_probs = probsJson
+        }
+        const mispricingJson = await mispricingRes.json()
+        if (mispricingRes.ok && mispricingJson.success) {
+          json.mispricing = mispricingJson
+        }
       } catch {
-        // player-kills is non-critical; proceed without it
+        // supplemental endpoints are non-critical; proceed without them
       }
 
       setResult(json)

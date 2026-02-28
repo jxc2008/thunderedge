@@ -1841,6 +1841,104 @@ def get_matchup_player_kills():
         return jsonify({'error': str(e)}), 500
 
 
+VCT_MAP_POOL = ['Abyss', 'Bind', 'Breeze', 'Corrode', 'Haven', 'Pearl', 'Split']
+
+
+@app.route('/api/matchup/map-probs', methods=['GET'])
+def get_matchup_map_probs():
+    """Estimate map-played probabilities from pick/ban tendencies of both teams."""
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        pb1 = db.get_team_pick_ban_stats(team1)
+        pb2 = db.get_team_pick_ban_stats(team2)
+
+        def _ban_rate(pb_stats, map_name):
+            """Average ban rate for a map across first_ban and second_ban slots."""
+            rates = []
+            for slot in ('first_ban', 'second_ban'):
+                slot_data = pb_stats.get(slot, [])
+                for entry in slot_data:
+                    if entry['map'].lower() == map_name.lower():
+                        rates.append(entry['rate'])
+                        break
+            return statistics.mean(rates) if rates else 0.0
+
+        raw_probs = []
+        for m in VCT_MAP_POOL:
+            p_ban_t1 = _ban_rate(pb1, m)
+            p_ban_t2 = _ban_rate(pb2, m)
+            p_played = (1 - p_ban_t1) * (1 - p_ban_t2)
+            raw_probs.append({
+                'map': m,
+                'p_played_raw': p_played,
+                'p_ban_t1': round(p_ban_t1, 3),
+                'p_ban_t2': round(p_ban_t2, 3),
+            })
+
+        total = sum(e['p_played_raw'] for e in raw_probs)
+        for e in raw_probs:
+            e['p_played'] = round(e['p_played_raw'] / total, 3) if total > 0 else round(1.0 / len(VCT_MAP_POOL), 3)
+            del e['p_played_raw']
+
+        raw_probs.sort(key=lambda x: -x['p_played'])
+        top3 = [e['map'] for e in raw_probs[:3]]
+
+        return jsonify({
+            'success': True,
+            'team1': team1,
+            'team2': team2,
+            'maps': raw_probs,
+            'top3_projected_pool': top3,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in matchup map-probs: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/matchup/mispricing', methods=['GET'])
+def get_matchup_mispricing():
+    """Player kill projections with suggested sportsbook lines for mispricing detection."""
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        def _build_team_data(team_name):
+            players_raw = _get_player_kill_distributions(team_name)
+            players_out = []
+            for p in players_raw:
+                agg = p.get('aggregate', {})
+                proj = agg.get('mean')
+                std = agg.get('std')
+                sample = agg.get('sample', 0)
+                suggested = round(proj * 2) / 2 if proj is not None else None
+                players_out.append({
+                    'player_name': p['player_name'],
+                    'projected_kills': proj,
+                    'std': std,
+                    'sample': sample,
+                    'suggested_line': suggested,
+                    'per_map': p.get('per_map', {}),
+                })
+            return {'name': team_name, 'players': players_out}
+
+        return jsonify({
+            'success': True,
+            'team1': _build_team_data(team1),
+            'team2': _build_team_data(team2),
+        })
+
+    except Exception as e:
+        logger.error(f"Error in matchup mispricing: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # Add error handler for 404 to debug (at end of file, after all routes)
 @app.errorhandler(404)
 def handle_404(e):

@@ -285,6 +285,21 @@ class Database:
             )
         ''')
         
+        # Match map halves: attack/defense round breakdown per team per map
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS match_map_halves (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                match_id INTEGER NOT NULL,
+                map_number INTEGER NOT NULL,
+                map_name TEXT,
+                team_name TEXT NOT NULL,
+                atk_rounds_won INTEGER DEFAULT 0,
+                def_rounds_won INTEGER DEFAULT 0,
+                total_rounds INTEGER DEFAULT 0,
+                UNIQUE(match_id, map_number, team_name)
+            )
+        ''')
+
         # Create indexes for faster lookups
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_name ON player_map_stats(player_name)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_match_event ON matches(event_id)')
@@ -292,7 +307,9 @@ class Database:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_leaderboard_snapshot ON leaderboard_entries(snapshot_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_snapshots_created ON leaderboard_snapshots(created_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_player_combo_name ON player_combo_cache(player_name)')
-        
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_map_halves_match ON match_map_halves(match_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_map_halves_team ON match_map_halves(team_name)')
+
         conn.commit()
         conn.close()
     
@@ -2064,6 +2081,79 @@ class Database:
             }
 
         return result
+
+    def save_match_map_halves(self, match_id: int, map_number: int, map_name: str,
+                              team_name: str, atk_rounds: int, def_rounds: int):
+        """Save attack/defense round data for a team on a specific map."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            total = atk_rounds + def_rounds
+            cursor.execute('''
+                INSERT OR REPLACE INTO match_map_halves
+                (match_id, map_number, map_name, team_name, atk_rounds_won, def_rounds_won, total_rounds)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (match_id, map_number, map_name, team_name, atk_rounds, def_rounds, total))
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error saving match_map_halves: {e}")
+            conn.rollback()
+        finally:
+            conn.close()
+
+    def get_team_atk_def_rates(self, team_name: str, year: int = 2026) -> Dict[str, Dict]:
+        """Attack/defense win rates per map for a team.
+
+        Returns {map_name: {atk_win_rate, def_win_rate, atk_rounds_won, def_rounds_won,
+                             total_rounds, sample_maps}}
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        try:
+            cursor.execute('''
+                SELECT mmh.map_name,
+                       SUM(mmh.atk_rounds_won) as total_atk_won,
+                       SUM(mmh.def_rounds_won) as total_def_won,
+                       SUM(mmh.total_rounds) as total_rounds,
+                       COUNT(*) as sample_maps
+                FROM match_map_halves mmh
+                JOIN matches m ON mmh.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE LOWER(mmh.team_name) LIKE LOWER(?)
+                  AND ve.year = ?
+                  AND mmh.map_name IS NOT NULL
+                GROUP BY mmh.map_name
+                ORDER BY sample_maps DESC
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            result = {}
+            for (map_name, atk_won, def_won, total_rounds, sample_maps) in rows:
+                if not map_name or map_name == 'Unknown':
+                    continue
+                # In standard Valorant: 12 rounds per regulation half (atk then def, then swap).
+                # total_atk_rounds_played = total_rounds - def_won  (opponent's def rounds = our atk rounds played)
+                # But simpler: atk_win_rate = atk_rounds_won / (atk_rounds_won + opp_def_rounds_won)
+                # Since we only have this team's data, use total_rounds / 2 as approximate rounds per side.
+                # More precisely: atk_rate = atk_won / total across all maps.
+                total_side = atk_won + def_won  # = total rounds won by this team
+                atk_rate = atk_won / (total_side) if total_side > 0 else 0.5
+                def_rate = def_won / (total_side) if total_side > 0 else 0.5
+                result[map_name] = {
+                    'atk_win_rate': round(atk_rate, 3),
+                    'def_win_rate': round(def_rate, 3),
+                    'atk_rounds_won': atk_won,
+                    'def_rounds_won': def_won,
+                    'total_rounds': total_rounds,
+                    'sample_maps': sample_maps,
+                }
+            return result
+        except Exception as e:
+            logger.error(f"Error getting atk/def rates for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
 
     def get_team_matchup_data(self, team_name: str) -> Dict:
         """Master method: all matchup data for one team."""

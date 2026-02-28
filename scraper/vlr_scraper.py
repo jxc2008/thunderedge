@@ -1289,6 +1289,98 @@ class VLRScraper:
             logger.warning(f"Error getting match result from {match_url}: {e}")
             return None
     
+    def get_match_halftime_scores(self, match_url: str) -> Optional[Dict]:
+        """
+        Get attack/defense round breakdown for each map in a match.
+
+        Parses the half-time score spans (mod-t / mod-ct) from the VLR match page.
+        Each map section has div.team-name elements whose parent div contains
+        span.mod-t (attack rounds won) and span.mod-ct (defense rounds won).
+
+        Returns:
+            {
+              "maps": [
+                {
+                  "map_number": 1,
+                  "map_name": "Pearl",
+                  "team1_name": "NRG",
+                  "team2_name": "Cloud9",
+                  "team1_atk": 10,
+                  "team1_def": 3,
+                  "team2_atk": 0,
+                  "team2_def": 2,
+                }
+              ]
+            }
+            or None on failure.
+        """
+        full_url = f"{self.base_url}{match_url}"
+        try:
+            content = self._make_request(full_url)
+            soup = BeautifulSoup(content, 'html.parser')
+
+            maps = []
+            map_number = 0
+            game_sections = soup.find_all('div', class_='vm-stats-game')
+
+            for section in game_sections:
+                if section.get('data-game-id') == 'all':
+                    continue
+
+                # Extract map name
+                map_name = 'Unknown'
+                header = section.find('div', class_='map')
+                if header:
+                    map_name_div = header.find('div', style=lambda x: x and 'font-weight' in str(x) and '700' in str(x))
+                    if map_name_div:
+                        first_span = map_name_div.find('span')
+                        if first_span:
+                            map_name = first_span.get_text(strip=True)
+                        else:
+                            map_name = map_name_div.get_text(strip=True)
+                        map_name = ' '.join(map_name.split())
+                        map_name = re.sub(r'(PICK|BAN|pick|ban)', '', map_name).strip()
+
+                # Find half-score team-name divs
+                team_name_divs = section.find_all('div', class_='team-name')
+                if len(team_name_divs) < 2:
+                    continue
+
+                team_halves = []
+                for tnd in team_name_divs:
+                    parent = tnd.parent
+                    t_span = parent.find('span', class_='mod-t')
+                    ct_span = parent.find('span', class_='mod-ct')
+                    name = tnd.get_text(strip=True)
+                    try:
+                        atk = int(t_span.get_text(strip=True)) if t_span else 0
+                        dfn = int(ct_span.get_text(strip=True)) if ct_span else 0
+                    except (ValueError, TypeError):
+                        atk, dfn = 0, 0
+                    team_halves.append({'name': name, 'atk': atk, 'def': dfn})
+
+                if len(team_halves) >= 2:
+                    map_number += 1
+                    maps.append({
+                        'map_number': map_number,
+                        'map_name': map_name,
+                        'team1_name': team_halves[0]['name'],
+                        'team2_name': team_halves[1]['name'],
+                        'team1_atk': team_halves[0]['atk'],
+                        'team1_def': team_halves[0]['def'],
+                        'team2_atk': team_halves[1]['atk'],
+                        'team2_def': team_halves[1]['def'],
+                    })
+
+            if not maps:
+                return None
+
+            return {'maps': maps}
+
+        except Exception as e:
+            logger.error(f"Error fetching halftime scores from {match_url}: {e}")
+            return None
+
     def get_match_betting_odds(self, match_url: str) -> Optional[Dict]:
         """
         Scrape Thunderpick pre-match odds from a VLR match page.

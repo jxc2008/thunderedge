@@ -796,11 +796,13 @@ def get_matchup_analysis():
             pass
 
         projected_scores = db.get_projected_map_score(team1, team2)
+        atk_def_t1 = db.get_team_atk_def_rates(team1)
+        atk_def_t2 = db.get_team_atk_def_rates(team2)
 
         response = jsonify({
             'success': True,
-            'team1': {'name': team1, **team1_data},
-            'team2': {'name': team2, **team2_data},
+            'team1': {'name': team1, **team1_data, 'atk_def': atk_def_t1},
+            'team2': {'name': team2, **team2_data, 'atk_def': atk_def_t2},
             'head_to_head': h2h,
             'odds': odds_info,
             'projected_scores': projected_scores,

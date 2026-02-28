@@ -163,6 +163,15 @@ export interface MispricingData {
   team2: { name: string; players: MispricingPlayer[] }
 }
 
+export interface AtkDefEntry {
+  atk_win_rate: number
+  def_win_rate: number
+  atk_rounds_won: number
+  def_rounds_won: number
+  total_rounds: number
+  sample_maps: number
+}
+
 export interface TeamMatchupData {
   name: string
   overview: TeamOverview
@@ -172,6 +181,7 @@ export interface TeamMatchupData {
   comps_per_map: Record<string, CompEntry[]>
   fights_per_round: Record<string, FightsPerRoundEntry>
   per_map_kd: Record<string, PerMapKDEntry>
+  atk_def: Record<string, AtkDefEntry>
 }
 
 export interface MatchupData {
@@ -631,6 +641,68 @@ function PerMapKDSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupData 
       </div>
       <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
         * low sample (&lt;5 maps). FPR = (kills + deaths) / rounds.
+      </p>
+    </Card>
+  )
+}
+
+/* ─── Attack / Defense Split section ────────────────────── */
+function AtkDefSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupData }) {
+  const ad1 = t1.atk_def ?? {}
+  const ad2 = t2.atk_def ?? {}
+  const allMaps = Array.from(new Set([...Object.keys(ad1), ...Object.keys(ad2)])).sort()
+
+  if (allMaps.length === 0) return null
+
+  const rateColor = (r: number) => {
+    if (r >= 0.55) return '#22c55e'
+    if (r >= 0.45) return '#f59e0b'
+    return '#ef4444'
+  }
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Attack / Defense Win Rates</SectionLabel>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th className="text-left text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Map</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T1_COLOR, fontWeight: 600 }}>Atk%</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T1_COLOR, fontWeight: 600 }}>Def%</th>
+              <th className="w-4" />
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T2_COLOR, fontWeight: 600 }}>Atk%</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T2_COLOR, fontWeight: 600 }}>Def%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allMaps.map((map) => {
+              const a1 = ad1[map]
+              const a2 = ad2[map]
+              return (
+                <tr key={map} style={{ borderTop: '1px solid #18181b' }}>
+                  <td className="py-2 text-[0.8rem] font-medium" style={{ color: '#e4e4e7' }}>{map}</td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: a1 ? rateColor(a1.atk_win_rate) : '#3f3f46' }}>
+                    {a1 ? `${Math.round(a1.atk_win_rate * 100)}%` : '—'}
+                  </td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: a1 ? rateColor(a1.def_win_rate) : '#3f3f46' }}>
+                    {a1 ? `${Math.round(a1.def_win_rate * 100)}%` : '—'}
+                  </td>
+                  <td className="py-2 text-center text-[0.65rem]" style={{ color: 'rgba(255,255,255,0.15)' }}>|</td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: a2 ? rateColor(a2.atk_win_rate) : '#3f3f46' }}>
+                    {a2 ? `${Math.round(a2.atk_win_rate * 100)}%` : '—'}
+                  </td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: a2 ? rateColor(a2.def_win_rate) : '#3f3f46' }}>
+                    {a2 ? `${Math.round(a2.def_win_rate * 100)}%` : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        % of rounds won on each side. Atk%+Def% sum to 100 for each team.
       </p>
     </Card>
   )
@@ -1262,6 +1334,9 @@ export function MatchupPage({ data }: { data: MatchupData }) {
 
       {/* Per-map K/D + fights/round */}
       <PerMapKDSection t1={t1} t2={t2} />
+
+      {/* Attack / Defense split (shows once match_map_halves is populated) */}
+      <AtkDefSection t1={t1} t2={t2} />
 
       {/* Map records */}
       <MapRecordsSection t1={t1} t2={t2} />

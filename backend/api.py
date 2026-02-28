@@ -1859,15 +1859,15 @@ def get_matchup_map_probs():
         pb2 = db.get_team_pick_ban_stats(team2)
 
         def _ban_rate(pb_stats, map_name):
-            """Average ban rate for a map across first_ban and second_ban slots."""
-            rates = []
-            for slot in ('first_ban', 'second_ban'):
+            """Total ban rate for a map across both ban slots (P(banned in slot1 OR slot2))."""
+            total = 0.0
+            for slot in ('ban1', 'ban2'):
                 slot_data = pb_stats.get(slot, [])
                 for entry in slot_data:
                     if entry['map'].lower() == map_name.lower():
-                        rates.append(entry['rate'])
+                        total += entry['rate']
                         break
-            return statistics.mean(rates) if rates else 0.0
+            return min(total, 1.0)
 
         raw_probs = []
         for m in VCT_MAP_POOL:

@@ -1555,9 +1555,12 @@ class Database:
             rows = cursor.fetchall()
             total = len(rows)
             counts: Dict[str, Dict] = {'ban1': {}, 'ban2': {}, 'pick': {}, 'decider': {}}
+            # Track how many matches actually have data for each slot
+            slot_totals: Dict[str, int] = {'ban1': 0, 'ban2': 0, 'pick': 0, 'decider': 0}
 
             def _add(bucket: str, val):
                 if val:
+                    slot_totals[bucket] += 1
                     counts[bucket][val] = counts[bucket].get(val, 0) + 1
 
             for (t1, t2, tb1_b1, tb1_b2, tb1_p,
@@ -1588,8 +1591,9 @@ class Database:
 
             result: Dict = {'total_matches': total}
             for action in counts:
+                denom = slot_totals[action] or 1
                 result[action] = sorted(
-                    [{'map': m, 'rate': round(c / total, 3) if total else 0}
+                    [{'map': m, 'rate': round(c / denom, 3)}
                      for m, c in counts[action].items()],
                     key=lambda x: -x['rate']
                 )[:5]

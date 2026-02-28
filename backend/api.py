@@ -6,6 +6,7 @@ import sys
 import os
 import time
 import json
+import statistics
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -794,12 +795,15 @@ def get_matchup_analysis():
         except (ValueError, ZeroDivisionError):
             pass
 
+        projected_scores = db.get_projected_map_score(team1, team2)
+
         response = jsonify({
             'success': True,
             'team1': {'name': team1, **team1_data},
             'team2': {'name': team2, **team2_data},
             'head_to_head': h2h,
             'odds': odds_info,
+            'projected_scores': projected_scores,
         })
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return response
@@ -1669,6 +1673,171 @@ def get_leaderboard_history_item(snapshot_id):
         return jsonify({'success': True, **snapshot})
     except Exception as e:
         logger.error(f"Error getting leaderboard snapshot: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+def _get_player_kill_distributions(team_name, year=2026):
+    """Get per-player per-map kill distribution stats for a team.
+
+    Returns a list of dicts, one per player, each with per_map and aggregate stats.
+    Uses players.team join as primary lookup; falls back to row-order split when
+    the players table has fewer than 4 matching players.
+    """
+    import sqlite3
+    conn = sqlite3.connect(Config.DATABASE_PATH, timeout=30.0)
+    cursor = conn.cursor()
+    pat = f'%{team_name.strip()}%'
+    tname_lower = team_name.lower()
+
+    try:
+        # Primary: get players via players.team join
+        cursor.execute('''
+            SELECT DISTINCT pms.player_name
+            FROM player_map_stats pms
+            JOIN matches m ON pms.match_id = m.id
+            JOIN vct_events ve ON m.event_id = ve.id
+            JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+            WHERE LOWER(p.team) LIKE LOWER(?)
+              AND ve.year = ?
+              AND pms.kills > 0
+        ''', (pat, year))
+        player_names = [r[0] for r in cursor.fetchall()]
+
+        use_fallback = len(player_names) < 4
+
+        if use_fallback:
+            # Fallback: find players via match team1/team2 + row-order split
+            cursor.execute('''
+                SELECT pms.id, pms.match_id, pms.map_number, pms.player_name,
+                       pms.kills, pms.map_name, m.team1, m.team2
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND ve.year = ?
+                  AND pms.kills > 0
+                ORDER BY pms.match_id, pms.map_number, pms.id
+            ''', (pat, pat, year))
+            fb_rows = cursor.fetchall()
+
+            # Group by (match_id, map_number) to split into team halves
+            from collections import defaultdict
+            grp = defaultdict(lambda: {'team1': None, 'team2': None, 'entries': []})
+            for (row_id, match_id, map_number, pname, kills, map_name, t1, t2) in fb_rows:
+                key = (match_id, map_number)
+                grp[key]['team1'] = t1
+                grp[key]['team2'] = t2
+                grp[key]['entries'].append({'player_name': pname, 'kills': kills, 'map_name': map_name})
+
+            # Collect kills per player per map via row-order split
+            player_map_kills = {}  # {player_name: {map_name: [kills]}}
+            for (match_id, map_number), info in grp.items():
+                entries = info['entries']
+                n = len(entries)
+                if n < 8:
+                    continue
+                is_team1 = tname_lower in (info['team1'] or '').lower()
+                half = n // 2
+                team_entries = entries[:half] if is_team1 else entries[half:]
+                for e in team_entries:
+                    pname = e['player_name']
+                    mname = e['map_name']
+                    if mname is None:
+                        continue
+                    player_map_kills.setdefault(pname, {}).setdefault(mname, []).append(e['kills'])
+
+            player_names = list(player_map_kills.keys())
+        else:
+            # Primary path: fetch kills grouped by player and map
+            placeholders = ','.join(['?'] * len(player_names))
+            cursor.execute(f'''
+                SELECT pms.player_name, pms.map_name, pms.kills
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE LOWER(pms.player_name) IN ({','.join(['LOWER(?)'] * len(player_names))})
+                  AND ve.year = ?
+                  AND pms.kills > 0
+                  AND pms.map_name IS NOT NULL
+            ''', player_names + [year])
+            rows = cursor.fetchall()
+
+            player_map_kills = {}
+            for (pname, mname, kills) in rows:
+                player_map_kills.setdefault(pname, {}).setdefault(mname, []).append(kills)
+
+        # Build result for each player
+        results = []
+        for pname in player_names:
+            maps_data = player_map_kills.get(pname, {})
+            per_map = {}
+            total_plays = 0
+            weighted_mean_sum = 0.0
+
+            for map_name, kills_list in sorted(maps_data.items()):
+                n = len(kills_list)
+                mean_k = statistics.mean(kills_list)
+                std_k = statistics.stdev(kills_list) if n >= 2 else None
+                per_map[map_name] = {
+                    'mean': round(mean_k, 1),
+                    'std': round(std_k, 1) if std_k is not None else None,
+                    'sample': n,
+                    'is_low_sample': n < 5,
+                }
+                total_plays += n
+                weighted_mean_sum += mean_k * n
+
+            # Aggregate: frequency-weighted mean across all maps
+            agg_mean = round(weighted_mean_sum / total_plays, 1) if total_plays > 0 else None
+            # Aggregate std: pool all kills across maps
+            all_kills = []
+            for kills_list in maps_data.values():
+                all_kills.extend(kills_list)
+            agg_std = round(statistics.stdev(all_kills), 1) if len(all_kills) >= 2 else None
+
+            results.append({
+                'player_name': pname,
+                'per_map': per_map,
+                'aggregate': {
+                    'mean': agg_mean,
+                    'std': agg_std,
+                    'sample': total_plays,
+                },
+            })
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Error getting player kill distributions for {team_name}: {e}", exc_info=True)
+        return []
+    finally:
+        conn.close()
+
+
+@app.route('/api/matchup/player-kills', methods=['GET'])
+def get_matchup_player_kills():
+    """Per-player per-map kill distribution stats for both teams.
+    Query params: team1, team2
+    """
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        t1_players = _get_player_kill_distributions(team1)
+        t2_players = _get_player_kill_distributions(team2)
+
+        response = jsonify({
+            'success': True,
+            'team1': {'name': team1, 'players': t1_players},
+            'team2': {'name': team2, 'players': t2_players},
+        })
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in matchup player kills: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

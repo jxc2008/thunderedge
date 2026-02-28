@@ -90,6 +90,54 @@ export interface OddsInfo {
   vig_pct: number
 }
 
+export interface FightsPerRoundEntry {
+  kills: number
+  deaths: number
+  rounds: number
+  fights_per_round: number | null
+  kills_per_round: number | null
+  deaths_per_round: number | null
+  sample_maps: number
+}
+
+export interface PerMapKDEntry {
+  kills: number
+  deaths: number
+  assists: number
+  kd: number | null
+  rounds: number
+  sample_maps: number
+  is_low_sample: boolean
+}
+
+export interface ProjectedScoreEntry {
+  projectedWinner: 'team1' | 'team2'
+  projectedScore: string
+  confidence: number
+  team1AvgRounds: number
+  team2AvgRounds: number
+  sampleMaps1: number
+  sampleMaps2: number
+}
+
+export interface PlayerMapStat {
+  mean: number
+  std: number | null
+  sample: number
+  is_low_sample: boolean
+}
+
+export interface PlayerKillStats {
+  player_name: string
+  per_map: Record<string, PlayerMapStat>
+  aggregate: { mean: number | null; std: number | null; sample: number }
+}
+
+export interface PlayerKillsData {
+  team1: { name: string; players: PlayerKillStats[] }
+  team2: { name: string; players: PlayerKillStats[] }
+}
+
 export interface TeamMatchupData {
   name: string
   overview: TeamOverview
@@ -97,6 +145,8 @@ export interface TeamMatchupData {
   map_records: MapRecord[]
   recent_matches: RecentMatch[]
   comps_per_map: Record<string, CompEntry[]>
+  fights_per_round: Record<string, FightsPerRoundEntry>
+  per_map_kd: Record<string, PerMapKDEntry>
 }
 
 export interface MatchupData {
@@ -104,6 +154,8 @@ export interface MatchupData {
   team2: TeamMatchupData
   head_to_head: H2HMatch[]
   odds: OddsInfo | null
+  projected_scores: Record<string, ProjectedScoreEntry>
+  player_kills?: PlayerKillsData
 }
 
 /* ─── Constants ──────────────────────────────────────────── */
@@ -429,6 +481,220 @@ function AgentCompsSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupDat
   )
 }
 
+/* ─── Projected Map Scores section ──────────────────────── */
+function confidenceColor(c: number) {
+  if (c >= 0.65) return '#22c55e'
+  if (c >= 0.35) return '#f59e0b'
+  return '#71717a'
+}
+
+function ProjectedScoresSection({
+  projected,
+  t1Name,
+  t2Name,
+}: {
+  projected: Record<string, ProjectedScoreEntry>
+  t1Name: string
+  t2Name: string
+}) {
+  const maps = Object.keys(projected).sort()
+  if (maps.length === 0) return null
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Projected Map Scores</SectionLabel>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th className="text-left text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Map</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Projected</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Score</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Conf</th>
+            </tr>
+          </thead>
+          <tbody>
+            {maps.map((map) => {
+              const e = projected[map]
+              const winnerName = e.projectedWinner === 'team1' ? t1Name : t2Name
+              const winnerColor = e.projectedWinner === 'team1' ? T1_COLOR : T2_COLOR
+              return (
+                <tr key={map} style={{ borderTop: '1px solid #18181b' }}>
+                  <td className="py-2 text-[0.8rem] font-medium" style={{ color: '#e4e4e7' }}>{map}</td>
+                  <td className="py-2 text-center text-[0.75rem] font-semibold" style={{ color: winnerColor }}>
+                    {winnerName}
+                  </td>
+                  <td className="py-2 text-center text-[0.75rem] tabular-nums font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                    {e.projectedScore}
+                  </td>
+                  <td className="py-2 text-center text-[0.75rem] tabular-nums font-semibold" style={{ color: confidenceColor(e.confidence) }}>
+                    {Math.round(e.confidence * 100)}%
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        Projected from historical avg rounds scored/conceded. Confidence reflects sample size + win-rate margin.
+      </p>
+    </Card>
+  )
+}
+
+/* ─── Per-Map K/D Comparison section ────────────────────── */
+function PerMapKDSection({ t1, t2 }: { t1: TeamMatchupData; t2: TeamMatchupData }) {
+  const allMaps = Array.from(
+    new Set([...Object.keys(t1.per_map_kd ?? {}), ...Object.keys(t2.per_map_kd ?? {})])
+  ).sort()
+
+  if (allMaps.length === 0) return null
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Per-Map K/D &amp; Fights/Round</SectionLabel>
+      <div style={{ overflowX: 'auto' }}>
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th className="text-left text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Map</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T1_COLOR, fontWeight: 600 }}>K/D</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T1_COLOR, fontWeight: 600 }}>FPR</th>
+              <th className="w-4" />
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T2_COLOR, fontWeight: 600 }}>K/D</th>
+              <th className="text-center text-[0.65rem] uppercase tracking-[0.1em] pb-2" style={{ color: T2_COLOR, fontWeight: 600 }}>FPR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allMaps.map((map) => {
+              const k1 = (t1.per_map_kd ?? {})[map]
+              const k2 = (t2.per_map_kd ?? {})[map]
+              const f1 = (t1.fights_per_round ?? {})[map]
+              const f2 = (t2.fights_per_round ?? {})[map]
+              const kdColor = (kd: number | null | undefined) => {
+                if (kd == null) return '#3f3f46'
+                if (kd >= 1.05) return '#22c55e'
+                if (kd >= 0.95) return '#f59e0b'
+                return '#ef4444'
+              }
+              return (
+                <tr key={map} style={{ borderTop: '1px solid #18181b' }}>
+                  <td className="py-2 text-[0.8rem] font-medium" style={{ color: '#e4e4e7' }}>{map}</td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: kdColor(k1?.kd) }}>
+                    {k1?.kd != null ? k1.kd.toFixed(2) : '—'}
+                    {k1?.is_low_sample && <span style={{ color: '#71717a', fontSize: '0.55rem' }}> *</span>}
+                  </td>
+                  <td className="py-2 text-center text-[0.7rem] tabular-nums" style={{ color: f1?.fights_per_round != null ? 'rgba(255,255,255,0.55)' : '#3f3f46' }}>
+                    {f1?.fights_per_round != null ? f1.fights_per_round.toFixed(2) : '—'}
+                  </td>
+                  <td className="py-2 text-center text-[0.65rem]" style={{ color: 'rgba(255,255,255,0.15)' }}>|</td>
+                  <td className="py-2 text-center text-[0.8rem] font-semibold tabular-nums" style={{ color: kdColor(k2?.kd) }}>
+                    {k2?.kd != null ? k2.kd.toFixed(2) : '—'}
+                    {k2?.is_low_sample && <span style={{ color: '#71717a', fontSize: '0.55rem' }}> *</span>}
+                  </td>
+                  <td className="py-2 text-center text-[0.7rem] tabular-nums" style={{ color: f2?.fights_per_round != null ? 'rgba(255,255,255,0.55)' : '#3f3f46' }}>
+                    {f2?.fights_per_round != null ? f2.fights_per_round.toFixed(2) : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        * low sample (&lt;5 maps). FPR = (kills + deaths) / rounds.
+      </p>
+    </Card>
+  )
+}
+
+/* ─── Player Kill Projections section ────────────────────── */
+function PlayerKillsSection({ playerKills, t1Name, t2Name }: {
+  playerKills: PlayerKillsData
+  t1Name: string
+  t2Name: string
+}) {
+  const allMaps = Array.from(new Set([
+    ...playerKills.team1.players.flatMap((p) => Object.keys(p.per_map)),
+    ...playerKills.team2.players.flatMap((p) => Object.keys(p.per_map)),
+  ])).sort()
+
+  const [selectedMap, setSelectedMap] = useState<string>('All')
+  const mapOptions = ['All', ...allMaps]
+
+  function renderPlayers(players: PlayerKillStats[], color: string) {
+    if (players.length === 0) return <p className="text-[0.75rem]" style={{ color: 'rgba(255,255,255,0.25)' }}>No data</p>
+    const sorted = [...players].sort((a, b) => (b.aggregate.mean ?? 0) - (a.aggregate.mean ?? 0))
+    return (
+      <div className="flex flex-col gap-0.5">
+        {sorted.map((p) => {
+          const stat = selectedMap === 'All' ? p.aggregate : p.per_map[selectedMap]
+          const mean = stat?.mean ?? null
+          return (
+            <div
+              key={p.player_name}
+              className="flex items-center justify-between gap-3 px-2 py-1.5 text-[0.72rem]"
+              style={{ borderBottom: '1px solid #18181b' }}
+            >
+              <span className="font-medium w-24 truncate" style={{ color: '#e4e4e7' }}>{p.player_name}</span>
+              <span className="tabular-nums font-semibold" style={{ color: mean != null ? color : '#52525b' }}>
+                {mean != null ? mean.toFixed(1) : '—'}
+              </span>
+              {stat && 'std' in stat && stat.std != null && (
+                <span className="tabular-nums text-[0.62rem]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                  ±{stat.std.toFixed(1)}
+                </span>
+              )}
+              <span className="text-[0.62rem] ml-auto" style={{ color: 'rgba(255,255,255,0.2)' }}>
+                n={stat && 'sample' in stat ? stat.sample : '?'}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Player Kill Projections</SectionLabel>
+      {/* Map filter */}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {mapOptions.map((m) => (
+          <button
+            key={m}
+            onClick={() => setSelectedMap(m)}
+            className="text-[0.65rem] px-2.5 py-1 uppercase tracking-wide font-medium transition-colors"
+            style={{
+              background: selectedMap === m ? 'rgba(255,255,255,0.08)' : 'transparent',
+              border: `1px solid ${selectedMap === m ? 'rgba(255,255,255,0.2)' : '#27272a'}`,
+              color: selectedMap === m ? '#ffffff' : 'rgba(255,255,255,0.4)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-6">
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-2" style={{ color: T1_COLOR }}>{t1Name}</p>
+          {renderPlayers(playerKills.team1.players, T1_COLOR)}
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-2" style={{ color: T2_COLOR }}>{t2Name}</p>
+          {renderPlayers(playerKills.team2.players, T2_COLOR)}
+        </div>
+      </div>
+      <p className="text-[0.6rem] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
+        Avg kills ± std dev from 2026 VCT maps. Select a map for map-specific projections.
+      </p>
+    </Card>
+  )
+}
+
 /* ─── Recent matches section ─────────────────────────────── */
 function MatchRow({ match, color }: { match: RecentMatch; color: string }) {
   const resultColor = match.result === 'W' ? '#22c55e' : match.result === 'L' ? '#ef4444' : 'rgba(255,255,255,0.3)'
@@ -615,6 +881,18 @@ export function MatchupPage({ data }: { data: MatchupData }) {
       {/* Overview comparison */}
       <OverviewSection t1={t1.overview} t2={t2.overview} />
 
+      {/* Projected map scores */}
+      {data.projected_scores && Object.keys(data.projected_scores).length > 0 && (
+        <ProjectedScoresSection
+          projected={data.projected_scores}
+          t1Name={t1DisplayName}
+          t2Name={t2DisplayName}
+        />
+      )}
+
+      {/* Per-map K/D + fights/round */}
+      <PerMapKDSection t1={t1} t2={t2} />
+
       {/* Map records */}
       <MapRecordsSection t1={t1} t2={t2} />
 
@@ -623,6 +901,15 @@ export function MatchupPage({ data }: { data: MatchupData }) {
 
       {/* Agent comps */}
       <AgentCompsSection t1={t1} t2={t2} />
+
+      {/* Player kill projections */}
+      {data.player_kills && (
+        <PlayerKillsSection
+          playerKills={data.player_kills}
+          t1Name={t1DisplayName}
+          t2Name={t2DisplayName}
+        />
+      )}
 
       {/* Recent matches */}
       <RecentMatchesSection t1={t1} t2={t2} />

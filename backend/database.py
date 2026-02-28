@@ -1770,6 +1770,301 @@ class Database:
         finally:
             conn.close()
 
+    def get_team_fights_per_round(self, team_name: str, year: int = 2026) -> Dict[str, Dict]:
+        """Per-map fights-per-round stats for a team.
+
+        For each map the team has played, computes kills, deaths, rounds,
+        fights_per_round, kills_per_round, deaths_per_round, and sample_maps.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
+
+        def _aggregate(rows) -> Dict[str, Dict]:
+            # rows: (match_id, map_number, map_name, kills, deaths, map_score)
+            # Accumulate per-map totals; deduplicate rounds by (match_id, map_number)
+            map_data: Dict[str, Dict] = {}
+            for (match_id, map_number, map_name, kills, deaths, map_score) in rows:
+                if not map_name:
+                    continue
+                if map_name not in map_data:
+                    map_data[map_name] = {'kills': 0, 'deaths': 0, 'round_map': {}, 'map_keys': set()}
+                md = map_data[map_name]
+                md['kills'] += kills or 0
+                md['deaths'] += deaths or 0
+                md['map_keys'].add((match_id, map_number))
+                rkey = (match_id, map_number)
+                if rkey not in md['round_map'] and map_score and '-' in map_score:
+                    parts = map_score.split('-')
+                    if len(parts) == 2:
+                        try:
+                            md['round_map'][rkey] = int(parts[0]) + int(parts[1])
+                        except ValueError:
+                            pass
+            result: Dict[str, Dict] = {}
+            for map_name, md in map_data.items():
+                total_rounds = sum(md['round_map'].values())
+                sample_maps = len(md['map_keys'])
+                k = md['kills']
+                d = md['deaths']
+                result[map_name] = {
+                    'kills': k,
+                    'deaths': d,
+                    'rounds': total_rounds,
+                    'fights_per_round': round((k + d) / total_rounds, 3) if total_rounds > 0 else None,
+                    'kills_per_round': round(k / total_rounds, 3) if total_rounds > 0 else None,
+                    'deaths_per_round': round(d / total_rounds, 3) if total_rounds > 0 else None,
+                    'sample_maps': sample_maps,
+                }
+            return result
+
+        try:
+            # Primary: players.team join
+            cursor.execute('''
+                SELECT pms.match_id, pms.map_number, pms.map_name,
+                       pms.kills, pms.deaths, pms.map_score
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+                WHERE LOWER(p.team) LIKE LOWER(?)
+                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND ve.year = ?
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            result = _aggregate(rows)
+            valid_maps = sum(1 for v in result.values() if v['sample_maps'] >= 1)
+
+            if valid_maps >= 3:
+                return result
+
+            # Fallback: matches.team1/team2 LIKE match
+            cursor.execute('''
+                SELECT pms.id, pms.match_id, pms.map_number, pms.map_name,
+                       pms.kills, pms.deaths, pms.map_score, m.team1, m.team2
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND ve.year = ?
+                ORDER BY pms.match_id, pms.map_number, pms.id
+            ''', (pat, pat, year))
+            fb_rows = cursor.fetchall()
+
+            # Split players into team1/team2 by insertion order
+            from collections import defaultdict as _dd
+            grp: Dict = _dd(lambda: {'rows': [], 'team1': None, 'team2': None})
+            for (row_id, match_id, map_number, map_name, kills, deaths, map_score, t1, t2) in fb_rows:
+                key = (match_id, map_number)
+                grp[key]['rows'].append((row_id, map_name, kills, deaths, map_score))
+                grp[key]['team1'] = t1
+                grp[key]['team2'] = t2
+
+            filtered_rows = []
+            for (match_id, map_number), info in grp.items():
+                all_rows = info['rows']
+                n = len(all_rows)
+                if n < 8:
+                    continue
+                is_team1 = tname_lower in (info['team1'] or '').lower()
+                half = n // 2
+                team_rows = all_rows[:half] if is_team1 else all_rows[half:]
+                for (_, map_name, kills, deaths, map_score) in team_rows:
+                    filtered_rows.append((match_id, map_number, map_name, kills, deaths, map_score))
+
+            return _aggregate(filtered_rows)
+        except Exception as e:
+            logger.error(f"Error getting team fights per round for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_team_per_map_kd(self, team_name: str, year: int = 2026) -> Dict[str, Dict]:
+        """Per-map K/D breakdown for a team.
+
+        Returns kills, deaths, assists, kd, rounds, sample_maps, is_low_sample per map.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
+
+        def _aggregate(rows) -> Dict[str, Dict]:
+            # rows: (match_id, map_number, map_name, kills, deaths, assists, map_score)
+            map_data: Dict[str, Dict] = {}
+            for (match_id, map_number, map_name, kills, deaths, assists, map_score) in rows:
+                if not map_name:
+                    continue
+                if map_name not in map_data:
+                    map_data[map_name] = {'kills': 0, 'deaths': 0, 'assists': 0,
+                                          'round_map': {}, 'map_keys': set()}
+                md = map_data[map_name]
+                md['kills'] += kills or 0
+                md['deaths'] += deaths or 0
+                md['assists'] += assists or 0
+                md['map_keys'].add((match_id, map_number))
+                rkey = (match_id, map_number)
+                if rkey not in md['round_map'] and map_score and '-' in map_score:
+                    parts = map_score.split('-')
+                    if len(parts) == 2:
+                        try:
+                            md['round_map'][rkey] = int(parts[0]) + int(parts[1])
+                        except ValueError:
+                            pass
+            result: Dict[str, Dict] = {}
+            for map_name, md in map_data.items():
+                total_rounds = sum(md['round_map'].values())
+                sample_maps = len(md['map_keys'])
+                k = md['kills']
+                d = md['deaths']
+                a = md['assists']
+                result[map_name] = {
+                    'kills': k,
+                    'deaths': d,
+                    'assists': a,
+                    'kd': round(k / d, 2) if d > 0 else None,
+                    'rounds': total_rounds,
+                    'sample_maps': sample_maps,
+                    'is_low_sample': sample_maps < 5,
+                }
+            return result
+
+        try:
+            # Primary: players.team join
+            cursor.execute('''
+                SELECT pms.match_id, pms.map_number, pms.map_name,
+                       pms.kills, pms.deaths, pms.assists, pms.map_score
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+                WHERE LOWER(p.team) LIKE LOWER(?)
+                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND ve.year = ?
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            result = _aggregate(rows)
+            valid_maps = sum(1 for v in result.values() if v['sample_maps'] >= 1)
+
+            if valid_maps >= 3:
+                return result
+
+            # Fallback: matches.team1/team2 LIKE match
+            cursor.execute('''
+                SELECT pms.id, pms.match_id, pms.map_number, pms.map_name,
+                       pms.kills, pms.deaths, pms.assists, pms.map_score,
+                       m.team1, m.team2
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND ve.year = ?
+                ORDER BY pms.match_id, pms.map_number, pms.id
+            ''', (pat, pat, year))
+            fb_rows = cursor.fetchall()
+
+            from collections import defaultdict as _dd
+            grp: Dict = _dd(lambda: {'rows': [], 'team1': None, 'team2': None})
+            for (row_id, match_id, map_number, map_name, kills, deaths, assists, map_score, t1, t2) in fb_rows:
+                key = (match_id, map_number)
+                grp[key]['rows'].append((row_id, map_name, kills, deaths, assists, map_score))
+                grp[key]['team1'] = t1
+                grp[key]['team2'] = t2
+
+            filtered_rows = []
+            for (match_id, map_number), info in grp.items():
+                all_rows = info['rows']
+                n = len(all_rows)
+                if n < 8:
+                    continue
+                is_team1 = tname_lower in (info['team1'] or '').lower()
+                half = n // 2
+                team_rows = all_rows[:half] if is_team1 else all_rows[half:]
+                for (_, map_name, kills, deaths, assists, map_score) in team_rows:
+                    filtered_rows.append((match_id, map_number, map_name, kills, deaths, assists, map_score))
+
+            return _aggregate(filtered_rows)
+        except Exception as e:
+            logger.error(f"Error getting team per-map K/D for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_projected_map_score(self, team1_name: str, team2_name: str, year: int = 2026) -> Dict[str, Dict]:
+        """Project likely score margin per map between two teams.
+
+        Uses each team's avg rounds scored/conceded from get_team_map_records
+        to project winner, score, and confidence for each shared map.
+        """
+        t1_records = self.get_team_map_records(team1_name, year=year)
+        t2_records = self.get_team_map_records(team2_name, year=year)
+
+        # Index by map name
+        t1_by_map = {r['map']: r for r in t1_records}
+        t2_by_map = {r['map']: r for r in t2_records}
+
+        shared_maps = set(t1_by_map.keys()) & set(t2_by_map.keys())
+        result: Dict[str, Dict] = {}
+
+        for map_name in sorted(shared_maps):
+            t1 = t1_by_map[map_name]
+            t2 = t2_by_map[map_name]
+
+            # Project rounds: average of team's offense vs opponent's defense
+            # team1 projected = avg of (t1 avg scored, t2 avg conceded)
+            t1_proj = (t1['avg_team_rounds'] + t2['avg_opp_rounds']) / 2
+            t2_proj = (t2['avg_team_rounds'] + t1['avg_opp_rounds']) / 2
+
+            # Determine winner and build projected score
+            if t1_proj >= t2_proj:
+                winner = 'team1'
+                # Scale to a realistic Valorant score (winner gets 13)
+                if t2_proj > 0:
+                    ratio = t1_proj / t2_proj
+                    loser_rounds = max(0, min(12, round(13 / ratio)))
+                else:
+                    loser_rounds = 0
+                score_str = f"13-{loser_rounds}"
+            else:
+                winner = 'team2'
+                if t1_proj > 0:
+                    ratio = t2_proj / t1_proj
+                    loser_rounds = max(0, min(12, round(13 / ratio)))
+                else:
+                    loser_rounds = 0
+                score_str = f"{loser_rounds}-13"
+
+            # Confidence: based on sample size and win-rate margin
+            sample1 = t1['played']
+            sample2 = t2['played']
+            min_sample = min(sample1, sample2)
+            total_sample = sample1 + sample2
+            # Sample size factor: ramps from 0 to 1, saturates around 10+ maps each
+            sample_factor = min(1.0, min_sample / 10.0)
+            # Win rate margin factor
+            wr1 = t1.get('win_rate', 50) / 100.0
+            wr2 = t2.get('win_rate', 50) / 100.0
+            margin = abs(wr1 - wr2)
+            margin_factor = min(1.0, margin * 2)  # 50% margin -> 1.0
+            confidence = round(0.5 * sample_factor + 0.5 * margin_factor, 2)
+
+            result[map_name] = {
+                'projectedWinner': winner,
+                'projectedScore': score_str,
+                'confidence': confidence,
+                'team1AvgRounds': t1['avg_team_rounds'],
+                'team2AvgRounds': t2['avg_team_rounds'],
+                'sampleMaps1': sample1,
+                'sampleMaps2': sample2,
+            }
+
+        return result
+
     def get_team_matchup_data(self, team_name: str) -> Dict:
         """Master method: all matchup data for one team."""
         return {
@@ -1778,6 +2073,8 @@ class Database:
             'map_records': self.get_team_map_records(team_name),
             'recent_matches': self.get_team_recent_matches(team_name),
             'comps_per_map': self.get_team_comps_per_map(team_name),
+            'fights_per_round': self.get_team_fights_per_round(team_name),
+            'per_map_kd': self.get_team_per_map_kd(team_name),
         }
 
     # ==================== Legacy Methods ====================

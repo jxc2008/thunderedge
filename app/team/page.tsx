@@ -58,9 +58,22 @@ export default function MatchupAnalysisPage() {
       const json = await res.json()
       if (!res.ok || json.error) {
         setError(json.error ?? 'Unknown error')
-      } else {
-        setResult(json)
+        return
       }
+
+      // Fetch player kill distributions (separate endpoint, non-critical)
+      const killsParams = new URLSearchParams({ team1: team1.trim(), team2: team2.trim() })
+      try {
+        const killsRes = await fetch(`${API_BASE}/api/matchup/player-kills?${killsParams}`)
+        const killsJson = await killsRes.json()
+        if (killsRes.ok && killsJson.success) {
+          json.player_kills = killsJson
+        }
+      } catch {
+        // player-kills is non-critical; proceed without it
+      }
+
+      setResult(json)
     } catch (e) {
       setError(String(e))
     } finally {

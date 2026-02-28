@@ -101,11 +101,23 @@ class Database:
                 first_pick TEXT,
                 second_pick TEXT,
                 decider TEXT,
+                t1_ban1 TEXT,
+                t1_ban2 TEXT,
+                t1_pick TEXT,
+                t2_ban1 TEXT,
+                t2_ban2 TEXT,
+                t2_pick TEXT,
                 FOREIGN KEY (match_id) REFERENCES matches (id),
                 UNIQUE(match_id)
             )
         ''')
-        
+        # Migration: add team-attributed pick/ban columns if missing
+        cursor.execute("PRAGMA table_info(match_pick_bans)")
+        mpb_cols = {row[1] for row in cursor.fetchall()}
+        for col in ['t1_ban1', 't1_ban2', 't1_pick', 't2_ban1', 't2_ban2', 't2_pick']:
+            if col not in mpb_cols:
+                cursor.execute(f'ALTER TABLE match_pick_bans ADD COLUMN {col} TEXT')
+
         # Player event stats (aggregate KPR, rounds, etc. per event)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS player_event_stats (
@@ -443,17 +455,21 @@ class Database:
             conn.close()
     
     def save_match_pick_bans(self, match_id: int, first_ban: str = None, second_ban: str = None,
-                             first_pick: str = None, second_pick: str = None, decider: str = None):
-        """Save match pick/ban sequence"""
+                             first_pick: str = None, second_pick: str = None, decider: str = None,
+                             t1_ban1: str = None, t1_ban2: str = None, t1_pick: str = None,
+                             t2_ban1: str = None, t2_ban2: str = None, t2_pick: str = None):
+        """Save match pick/ban sequence. Team-attributed fields (t1_*/t2_*) are keyed to matches.team1/team2."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
-        
+
         try:
             cursor.execute('''
-                INSERT OR REPLACE INTO match_pick_bans 
-                (match_id, first_ban, second_ban, first_pick, second_pick, decider)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (match_id, first_ban, second_ban, first_pick, second_pick, decider))
+                INSERT OR REPLACE INTO match_pick_bans
+                (match_id, first_ban, second_ban, first_pick, second_pick, decider,
+                 t1_ban1, t1_ban2, t1_pick, t2_ban1, t2_ban2, t2_pick)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (match_id, first_ban, second_ban, first_pick, second_pick, decider,
+                  t1_ban1, t1_ban2, t1_pick, t2_ban1, t2_ban2, t2_pick))
             
             conn.commit()
             
@@ -1513,13 +1529,23 @@ class Database:
             conn.close()
 
     def get_team_pick_ban_stats(self, team_name: str, year: int = 2026) -> Dict:
-        """Aggregate map pick/ban rates from match_pick_bans for matches the team played."""
+        """Aggregate map pick/ban rates for a team.
+
+        Uses team-attributed columns (t1_ban1/t2_ban1 etc.) when populated,
+        which correctly attribute bans/picks to each team.
+        Returns {total_matches, ban1, ban2, pick, decider} each as a list of {map, rate}.
+        """
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
         try:
             cursor.execute('''
-                SELECT mpb.first_ban, mpb.second_ban, mpb.first_pick, mpb.second_pick
+                SELECT m.team1, m.team2,
+                       mpb.t1_ban1, mpb.t1_ban2, mpb.t1_pick,
+                       mpb.t2_ban1, mpb.t2_ban2, mpb.t2_pick,
+                       mpb.decider,
+                       mpb.first_ban, mpb.second_ban, mpb.first_pick, mpb.second_pick
                 FROM match_pick_bans mpb
                 JOIN matches m ON mpb.match_id = m.id
                 JOIN vct_events ve ON m.event_id = ve.id
@@ -1528,14 +1554,38 @@ class Database:
             ''', (pat, pat, year))
             rows = cursor.fetchall()
             total = len(rows)
-            counts: Dict[str, Dict] = {
-                'first_ban': {}, 'second_ban': {},
-                'first_pick': {}, 'second_pick': {},
-            }
-            for (fb, sb, fp, sp) in rows:
-                for key, val in [('first_ban', fb), ('second_ban', sb), ('first_pick', fp), ('second_pick', sp)]:
-                    if val:
-                        counts[key][val] = counts[key].get(val, 0) + 1
+            counts: Dict[str, Dict] = {'ban1': {}, 'ban2': {}, 'pick': {}, 'decider': {}}
+
+            def _add(bucket: str, val):
+                if val:
+                    counts[bucket][val] = counts[bucket].get(val, 0) + 1
+
+            for (t1, t2, tb1_b1, tb1_b2, tb1_p,
+                 tb2_b1, tb2_b2, tb2_p, decider,
+                 seq_fb, seq_sb, seq_fp, seq_sp) in rows:
+
+                is_team1 = tname_lower in (t1 or '').lower()
+                has_attributed = any(v is not None for v in [tb1_b1, tb1_b2, tb1_p, tb2_b1, tb2_b2, tb2_p])
+
+                if has_attributed:
+                    if is_team1:
+                        _add('ban1', tb1_b1)
+                        _add('ban2', tb1_b2)
+                        _add('pick', tb1_p)
+                    else:
+                        _add('ban1', tb2_b1)
+                        _add('ban2', tb2_b2)
+                        _add('pick', tb2_p)
+                else:
+                    # Fallback to sequence-order data (legacy): T1 = first actor
+                    if is_team1:
+                        _add('ban1', seq_fb)
+                        _add('pick', seq_fp)
+                    else:
+                        _add('ban1', seq_sb)
+                        _add('pick', seq_sp)
+                _add('decider', decider)
+
             result: Dict = {'total_matches': total}
             for action in counts:
                 result[action] = sorted(
@@ -2008,7 +2058,7 @@ class Database:
                 JOIN vct_events ve ON m.event_id = ve.id
                 JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
                 WHERE LOWER(p.team) LIKE LOWER(?)
-                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND pms.map_name IS NOT NULL
                   AND ve.year = ?
             ''', (pat, year))
             rows = cursor.fetchall()
@@ -2027,7 +2077,7 @@ class Database:
                 JOIN matches m ON pms.match_id = m.id
                 JOIN vct_events ve ON m.event_id = ve.id
                 WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
-                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND pms.map_name IS NOT NULL
                   AND ve.year = ?
                 ORDER BY pms.match_id, pms.map_number, pms.id
             ''', (pat, pat, year))
@@ -2273,41 +2323,44 @@ class Database:
         cursor = conn.cursor()
         pat = self._normalize_team(team_name)
         try:
+            # Self-join: us vs opponent on same match-map to get rounds played per side.
+            # atk_played = our_atk_won + opponent_def_won
+            # def_played = our_def_won + opponent_atk_won
             cursor.execute('''
-                SELECT mmh.map_name,
-                       SUM(mmh.atk_rounds_won) as total_atk_won,
-                       SUM(mmh.def_rounds_won) as total_def_won,
-                       SUM(mmh.total_rounds) as total_rounds,
+                SELECT mmh_us.map_name,
+                       SUM(mmh_us.atk_rounds_won) as atk_won,
+                       SUM(mmh_us.def_rounds_won) as def_won,
+                       SUM(mmh_us.atk_rounds_won + COALESCE(mmh_opp.def_rounds_won, 0)) as atk_played,
+                       SUM(mmh_us.def_rounds_won + COALESCE(mmh_opp.atk_rounds_won, 0)) as def_played,
                        COUNT(*) as sample_maps
-                FROM match_map_halves mmh
-                JOIN matches m ON mmh.match_id = m.id
+                FROM match_map_halves mmh_us
+                JOIN matches m ON mmh_us.match_id = m.id
                 JOIN vct_events ve ON m.event_id = ve.id
-                WHERE LOWER(mmh.team_name) LIKE LOWER(?)
+                LEFT JOIN match_map_halves mmh_opp
+                    ON mmh_opp.match_id = mmh_us.match_id
+                    AND mmh_opp.map_number = mmh_us.map_number
+                    AND LOWER(mmh_opp.team_name) NOT LIKE LOWER(?)
+                WHERE LOWER(mmh_us.team_name) LIKE LOWER(?)
                   AND ve.year = ?
-                  AND mmh.map_name IS NOT NULL
-                GROUP BY mmh.map_name
+                  AND mmh_us.map_name IS NOT NULL
+                GROUP BY mmh_us.map_name
                 ORDER BY sample_maps DESC
-            ''', (pat, year))
+            ''', (pat, pat, year))
             rows = cursor.fetchall()
 
             result = {}
-            for (map_name, atk_won, def_won, total_rounds, sample_maps) in rows:
+            for (map_name, atk_won, def_won, atk_played, def_played, sample_maps) in rows:
                 if not map_name or map_name == 'Unknown':
                     continue
-                # In standard Valorant: 12 rounds per regulation half (atk then def, then swap).
-                # total_atk_rounds_played = total_rounds - def_won  (opponent's def rounds = our atk rounds played)
-                # But simpler: atk_win_rate = atk_rounds_won / (atk_rounds_won + opp_def_rounds_won)
-                # Since we only have this team's data, use total_rounds / 2 as approximate rounds per side.
-                # More precisely: atk_rate = atk_won / total across all maps.
-                total_side = atk_won + def_won  # = total rounds won by this team
-                atk_rate = atk_won / (total_side) if total_side > 0 else 0.5
-                def_rate = def_won / (total_side) if total_side > 0 else 0.5
+                atk_rate = atk_won / atk_played if atk_played > 0 else 0.5
+                def_rate = def_won / def_played if def_played > 0 else 0.5
                 result[map_name] = {
                     'atk_win_rate': round(atk_rate, 3),
                     'def_win_rate': round(def_rate, 3),
                     'atk_rounds_won': atk_won,
                     'def_rounds_won': def_won,
-                    'total_rounds': total_rounds,
+                    'atk_rounds_played': atk_played,
+                    'def_rounds_played': def_played,
                     'sample_maps': sample_maps,
                 }
             return result
@@ -2370,9 +2423,11 @@ class Database:
         cursor = conn.cursor()
         pat = self._normalize_team(team_name)
         try:
-            # Determine if team is team1 or team2 for each match
+            # Determine if team is team1 or team2 for each match.
+            # Use player_map_stats as a reliable fallback for map_name.
             cursor.execute('''
-                SELECT mrd.match_id, mrd.map_number, mmh.map_name,
+                SELECT mrd.match_id, mrd.map_number,
+                       COALESCE(mmh.map_name, pms_nm.map_name) as map_name,
                        mrd.round_num, mrd.winning_team_side,
                        mrd.team1_economy, mrd.team2_economy,
                        m.team1
@@ -2383,6 +2438,13 @@ class Database:
                     ON mmh.match_id = mrd.match_id
                     AND mmh.map_number = mrd.map_number
                     AND LOWER(mmh.team_name) LIKE LOWER(?)
+                LEFT JOIN (
+                    SELECT match_id, map_number, MIN(map_name) as map_name
+                    FROM player_map_stats
+                    WHERE map_name IS NOT NULL
+                    GROUP BY match_id, map_number
+                ) pms_nm ON pms_nm.match_id = mrd.match_id
+                         AND pms_nm.map_number = mrd.map_number
                 WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
                   AND ve.year = ?
                   AND mrd.winning_team_side IS NOT NULL
@@ -2398,7 +2460,7 @@ class Database:
             for (match_id, map_number, map_name, round_num,
                  winning_side, t1_eco, t2_eco, t1_name) in rows:
                 if not map_name:
-                    map_name = f'Map {map_number}'
+                    continue  # skip rounds where map name is truly unknown
 
                 is_team1 = tname_lower in (t1_name or '').lower()
                 team_economy = t1_eco if is_team1 else t2_eco

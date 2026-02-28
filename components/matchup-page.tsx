@@ -11,10 +11,10 @@ export interface MapAction {
 
 export interface PickBanStats {
   total_matches: number
-  first_ban: MapAction[]
-  second_ban: MapAction[]
-  first_pick: MapAction[]
-  second_pick: MapAction[]
+  ban1: MapAction[]
+  ban2: MapAction[]
+  pick: MapAction[]
+  decider?: MapAction[]
 }
 
 export interface MapRecord {
@@ -343,24 +343,26 @@ function BarCell({ rate, count, color }: { rate: number; count: number; color: s
   )
 }
 
-type PickBanAction = 'first_ban' | 'second_ban' | 'first_pick' | 'second_pick'
+type PickBanAction = 'ban1' | 'ban2' | 'pick' | 'decider'
 
 const PB_LABELS: Record<PickBanAction, string> = {
-  first_ban: '1st Ban',
-  second_ban: '2nd Ban',
-  first_pick: '1st Pick',
-  second_pick: '2nd Pick',
+  ban1: '1st Ban',
+  ban2: '2nd Ban',
+  pick: 'Pick',
+  decider: 'Decider',
 }
 
 const PB_COLORS: Record<PickBanAction, string> = {
-  first_ban: '#ef4444',
-  second_ban: '#f87171',
-  first_pick: T1_COLOR,
-  second_pick: '#0ea5e9',
+  ban1: '#ef4444',
+  ban2: '#f87171',
+  pick: T1_COLOR,
+  decider: 'rgba(255,255,255,0.35)',
 }
 
 function PickBanTeamCol({ pb, teamColor }: { pb: PickBanStats; teamColor: string }) {
-  const actions: PickBanAction[] = ['first_ban', 'second_ban', 'first_pick', 'second_pick']
+  const actions: PickBanAction[] = ['ban1', 'ban2', 'pick', 'decider']
+  const actionColor = (action: PickBanAction) =>
+    action === 'pick' ? teamColor : PB_COLORS[action]
   return (
     <div className="flex flex-col gap-3">
       {actions.map((action) => {
@@ -375,7 +377,7 @@ function PickBanTeamCol({ pb, teamColor }: { pb: PickBanStats; teamColor: string
               {items.map((item) => (
                 <div key={item.map} className="flex items-center gap-2">
                   <span className="text-[0.7rem] w-16 truncate" style={{ color: '#e4e4e7' }}>{item.map}</span>
-                  <BarCell rate={item.rate} count={item.count} color={PB_COLORS[action]} />
+                  <BarCell rate={item.rate} count={item.count} color={actionColor(action)} />
                 </div>
               ))}
             </div>

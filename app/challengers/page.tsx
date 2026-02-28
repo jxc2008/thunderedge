@@ -8,6 +8,8 @@ import { StatsGrid, type StatCardData } from '@/components/stats-grid'
 import { DataTable, type Column } from '@/components/data-table'
 import { RecommendationCard } from '@/components/recommendation-card'
 import { DistributionChart } from '@/components/distribution-chart'
+import { CollapsibleSection } from '@/components/collapsible-section'
+import { API_BASE } from '@/lib/api'
 
 const ACCENT = '#0ECFCF'
 
@@ -59,9 +61,19 @@ interface AgentStat {
   agent: string
   maps: number
   avg_kills: number
-  over_count: number
-  under_count: number
-  over_pct: number
+  over_count?: number
+  under_count?: number
+  over_pct?: number
+}
+
+interface MapStat {
+  map_name: string
+  times_played: number
+  avg_kills_per_map: number
+  kd_ratio?: number
+  avg_acs?: number
+  avg_adr?: number
+  avg_kast?: number
 }
 
 interface EdgeData {
@@ -83,6 +95,7 @@ interface EdgeData {
 interface Result {
   analysis: Analysis
   agentStats: AgentStat[]
+  mapStats: MapStat[]
   edgeData: EdgeData | null
   elapsed: string
 }
@@ -108,20 +121,32 @@ function parseConfidence(c?: string): 'HIGH' | 'MED' | 'LOW' {
 const AGENT_COLS: Column<AgentStat>[] = [
   { key: 'agent', label: 'Agent', sortable: true },
   { key: 'maps', label: 'Maps', sortable: true, align: 'right' },
-  { key: 'avg_kills', label: 'Avg K', sortable: true, align: 'right', render: (v) => (v as number).toFixed(1) },
-  { key: 'over_count', label: 'Over', sortable: true, align: 'right' },
-  { key: 'under_count', label: 'Under', sortable: true, align: 'right' },
+  { key: 'avg_kills', label: 'Avg K', sortable: true, align: 'right', render: (v) => (v != null ? (v as number).toFixed(1) : '—') },
+  { key: 'over_count', label: 'Over', sortable: true, align: 'right', render: (v) => (v != null ? String(v) : '—') },
+  { key: 'under_count', label: 'Under', sortable: true, align: 'right', render: (v) => (v != null ? String(v) : '—') },
   {
     key: 'over_pct',
     label: 'Over %',
     sortable: true,
     align: 'right',
-    render: (v) => (
-      <span style={{ color: (v as number) >= 55 ? '#22c55e' : (v as number) <= 45 ? '#ef4444' : '#a1a1aa' }}>
-        {(v as number).toFixed(1)}%
-      </span>
-    ),
+    render: (v) => {
+      const n = v != null ? (v as number) : null
+      if (n == null) return '—'
+      return (
+        <span style={{ color: n >= 55 ? '#22c55e' : n <= 45 ? '#ef4444' : '#a1a1aa' }}>
+          {n.toFixed(1)}%
+        </span>
+      )
+    },
   },
+]
+
+const MAP_COLS: Column<MapStat>[] = [
+  { key: 'map_name', label: 'Map', sortable: true },
+  { key: 'times_played', label: 'Times Played', sortable: true, align: 'right' },
+  { key: 'avg_kills_per_map', label: 'Avg K/Map', sortable: true, align: 'right', render: (v) => (v != null ? (v as number).toFixed(1) : '—') },
+  { key: 'kd_ratio', label: 'K/D', sortable: true, align: 'right', render: (v) => (v != null ? (v as number).toFixed(2) : '—') },
+  { key: 'avg_acs', label: 'ACS', sortable: true, align: 'right', render: (v) => (v != null ? (v as number).toFixed(1) : '—') },
 ]
 
 // ─── Kill chip row ──────────────────────────────────────────────────────────
@@ -364,7 +389,9 @@ export default function ChallengersPage() {
 
     try {
       const t0 = performance.now()
-      const res = await fetch(`/api/challengers/player/${encodeURIComponent(ign)}?line=${line}${teamQ}`)
+      // Use direct backend URL to avoid Next.js proxy 30s timeout
+      const base = API_BASE || 'http://localhost:5000'
+      const res = await fetch(`${base}/api/challengers/player/${encodeURIComponent(ign)}?line=${line}${teamQ}`)
       const data = await res.json()
       if (!res.ok || data.error) throw new Error(data.error || 'API error')
 
@@ -374,7 +401,7 @@ export default function ChallengersPage() {
       const parsedUnder = parseFloat(underOdds)
       if (!isNaN(parsedOver) && !isNaN(parsedUnder)) {
         try {
-          const er = await fetch(`/api/challengers/edge/${encodeURIComponent(ign)}?line=${line}&over_odds=${parsedOver}&under_odds=${parsedUnder}${teamQ}`)
+          const er = await fetch(`${base}/api/challengers/edge/${encodeURIComponent(ign)}?line=${line}&over_odds=${parsedOver}&under_odds=${parsedUnder}${teamQ}`)
           if (er.ok) {
             const ed = await er.json()
             if (ed.success) edgeData = ed
@@ -383,7 +410,24 @@ export default function ChallengersPage() {
       }
 
       const elapsed = ((performance.now() - t0) / 1000).toFixed(2)
-      setResult({ analysis: data.analysis, agentStats: data.agent_stats || [], edgeData, elapsed })
+      const agentStats = (data.agent_stats || []).map((a: Record<string, unknown>) => ({
+        agent: a.agent,
+        maps: a.maps ?? a.maps_played ?? 0,
+        avg_kills: a.avg_kills ?? (a.maps_played && a.total_kills ? (a.total_kills as number) / (a.maps_played as number) : 0),
+        over_count: a.over_count,
+        under_count: a.under_count,
+        over_pct: a.over_pct,
+      }))
+      const mapStats = (data.map_stats || []).map((m: Record<string, unknown>) => ({
+        map_name: m.map_name,
+        times_played: m.times_played ?? 0,
+        avg_kills_per_map: m.avg_kills_per_map ?? 0,
+        kd_ratio: m.kd_ratio,
+        avg_acs: m.avg_acs,
+        avg_adr: m.avg_adr,
+        avg_kast: m.avg_kast,
+      }))
+      setResult({ analysis: data.analysis, agentStats, mapStats, edgeData, elapsed })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to backend')
     } finally {
@@ -391,7 +435,13 @@ export default function ChallengersPage() {
     }
   }
 
-  const handleKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') handleAnalyze() }
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      e.stopPropagation()
+      handleAnalyze()
+    }
+  }
 
   const analysis = result?.analysis
   const edgeData = result?.edgeData
@@ -451,6 +501,7 @@ export default function ChallengersPage() {
               }}
             />
             <button
+              type="button"
               onClick={handleAnalyze}
               disabled={isLoading || !playerInput.trim()}
               style={{
@@ -535,123 +586,121 @@ export default function ChallengersPage() {
               padding: '0.875rem 1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem',
               fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)',
             }}>
+              <span><strong style={{ color: '#fff' }}>{analysis.player_ign}</strong> · {analysis.team || 'Unknown Team'}</span>
               <span>Query Time: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{result.elapsed}s</span></span>
               <span>Events: <span style={{ color: '#22c55e', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{cachedCount} cached</span> / <span style={{ color: '#f59e0b', fontFamily: 'var(--font-display)', fontWeight: 700 }}>{liveCount} live</span></span>
-              <span>Maps Analyzed: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{analysis.total_maps}</span></span>
+              <span>Maps: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{analysis.total_maps ?? 0}</span></span>
               <span style={{ color: 'rgba(255,255,255,0.4)' }}>Circuit: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>Challengers</span></span>
               {edgeData && <span style={{ marginLeft: 'auto', color: '#22c55e', fontWeight: 600 }}>✓ Edge data loaded</span>}
             </div>
 
-            {/* Two-column grid */}
-            <div className="result-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,58%) minmax(0,42%)', gap: '1.5rem' }}>
+            {/* Collapsible data sections */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
 
-              {/* Left column */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <CollapsibleSection title="Recommendation" defaultOpen accentColor={recType === 'BET_OVER' ? '#22c55e' : recType === 'BET_UNDER' ? '#ef4444' : ACCENT}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+                  <span style={{
+                    fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.75rem',
+                    padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em',
+                    background: recType === 'BET_OVER' ? 'rgba(34,197,94,0.12)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.12)' : 'rgba(14,207,207,0.12)',
+                    color: recType === 'BET_OVER' ? '#22c55e' : recType === 'BET_UNDER' ? '#ef4444' : ACCENT,
+                    border: `1px solid ${recType === 'BET_OVER' ? 'rgba(34,197,94,0.3)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.3)' : 'rgba(14,207,207,0.3)'}`,
+                  }}>
+                    {analysis.classification ?? '—'}
+                  </span>
+                </div>
+                <RecommendationCard
+                  type={recType}
+                  ev={recEV ?? 0}
+                  confidence={recConfidence}
+                  reason={analysis.recommendation ?? undefined}
+                />
+              </CollapsibleSection>
 
-                {/* Player card */}
-                <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`, padding: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <div>
-                      <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 'clamp(1.5rem,4vw,2.25rem)', color: '#fff', marginBottom: '0.25rem' }}>
-                        {analysis.player_ign}
-                      </h2>
-                      <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)' }}>{analysis.team || 'Unknown Team'}</div>
-                    </div>
-                    <div style={{
-                      fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.75rem',
-                      padding: '0.35rem 0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em',
-                      background: recType === 'BET_OVER' ? 'rgba(34,197,94,0.12)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.12)' : `rgba(14,207,207,0.12)`,
-                      color: recType === 'BET_OVER' ? '#22c55e' : recType === 'BET_UNDER' ? '#ef4444' : ACCENT,
-                      border: `1px solid ${recType === 'BET_OVER' ? 'rgba(34,197,94,0.3)' : recType === 'BET_UNDER' ? 'rgba(239,68,68,0.3)' : 'rgba(14,207,207,0.3)'}`,
-                    }}>
-                      {analysis.classification}
-                    </div>
+              <CollapsibleSection title="Empirical Over/Under Percentages" accentColor={ACCENT}>
+                <OverUnderDisplay
+                  overPct={analysis.over_percentage ?? 0}
+                  underPct={analysis.under_percentage ?? 0}
+                  sampleSize={analysis.total_maps ?? 0}
+                  killLine={analysis.kill_line}
+                />
+                <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: '1rem' }}>
+                  Based on {analysis.total_maps ?? 0} maps across {analysis.events_analyzed ?? 0} Challengers events
+                </div>
+              </CollapsibleSection>
+
+              <CollapsibleSection title="Expected Rounds" accentColor={ACCENT}>
+                <div style={{ background: '#0a0a0a', border: `1px solid rgba(14,207,207,0.1)`, padding: '1.5rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
+                    Formula: Kill Line / Weighted KPR = Rounds Needed
                   </div>
-
-                  <OverUnderDisplay
-                    overPct={analysis.over_percentage}
-                    underPct={analysis.under_percentage}
-                    sampleSize={analysis.total_maps}
-                    killLine={analysis.kill_line}
-                  />
-
-                  <div style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: '1rem' }}>
-                    Based on {analysis.total_maps} maps across {analysis.events_analyzed} Challengers events
+                  <div style={{ fontFamily: 'monospace', fontSize: '1rem', color: ACCENT, margin: '0.5rem 0' }}>
+                    {analysis.kill_line ?? '—'} / {(analysis.weighted_kpr ?? 0).toFixed(3)} =
                   </div>
-
-                  {/* Formula box */}
-                  <div style={{ marginTop: '1.5rem', background: '#0a0a0a', border: `1px solid rgba(14,207,207,0.1)`, padding: '1.5rem', textAlign: 'center' }}>
-                    <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
-                      Formula: Kill Line / Weighted KPR = Rounds Needed
-                    </div>
-                    <div style={{ fontFamily: 'monospace', fontSize: '1rem', color: ACCENT, margin: '0.5rem 0' }}>
-                      {analysis.kill_line} / {(analysis.weighted_kpr || 0).toFixed(3)} =
-                    </div>
-                    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '2.5rem', color: '#fff' }}>
-                      {(analysis.rounds_needed || 0).toFixed(1)} rounds
-                    </div>
-                  </div>
-
-                  {/* Recommendation */}
-                  <div style={{ marginTop: '1.5rem' }}>
-                    <RecommendationCard
-                      type={recType}
-                      ev={recEV || 0}
-                      confidence={recConfidence}
-                      reason={analysis.recommendation}
-                    />
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '2.5rem', color: '#fff' }}>
+                    {(analysis.rounds_needed ?? 0).toFixed(1)} rounds
                   </div>
                 </div>
+              </CollapsibleSection>
 
-                {/* Stats grid */}
+              <CollapsibleSection title="Key Stats" accentColor={ACCENT}>
                 <StatsGrid stats={stats} columns={3} />
+              </CollapsibleSection>
 
-                {/* Matchup adjustment */}
-                {analysis.matchup_adjusted_probabilities && (
+              {analysis.matchup_adjusted_probabilities && (
+                <CollapsibleSection title="Matchup Adjustment" accentColor={ACCENT}>
                   <MatchupBox adj={analysis.matchup_adjusted_probabilities} />
-                )}
+                </CollapsibleSection>
+              )}
 
-                {/* Events timeline */}
-                {analysis.event_details && analysis.event_details.length > 0 && (
-                  <div style={{ background: '#0D0D0D', border: `1px solid rgba(14,207,207,0.12)`, borderLeft: `3px solid ${ACCENT}`, padding: '1.5rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.1rem', color: '#fff', marginBottom: '0.25rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '0.75rem' }}>
-                      Challengers Events Analyzed
-                    </h3>
-                    <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', margin: '0.75rem 0 1rem' }}>
-                      Total KPR: {(analysis.total_kpr || analysis.weighted_kpr || 0).toFixed(3)} · Weighted KPR: {(analysis.weighted_kpr || 0).toFixed(3)} · Rounds: {analysis.total_rounds ?? '—'}
-                    </p>
-                    <EventTimeline events={analysis.event_details} line={analysis.kill_line} />
-                  </div>
-                )}
-              </div>
-
-              {/* Right column – agent table */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                {result.agentStats && result.agentStats.length > 0 && (
-                  <div>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '0.75rem' }}>
-                      Agent Breakdown
-                    </h3>
+              <CollapsibleSection title="Agent and Map Breakdown" accentColor={ACCENT}>
+                {result.agentStats && result.agentStats.length > 0 ? (
+                  <>
+                    <h4 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Agent Performance</h4>
                     <DataTable<AgentStat>
                       columns={AGENT_COLS}
                       data={result.agentStats}
                       filterPlaceholder="Filter agents..."
                       filterKey="agent"
                     />
-                  </div>
+                  </>
+                ) : (
+                  <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem', marginBottom: '1rem' }}>No agent data available. Populate the database with match details to see per-agent stats.</p>
                 )}
-              </div>
-            </div>
+                {result.mapStats && result.mapStats.length > 0 ? (
+                  <>
+                    <h4 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)', marginTop: '1.5rem', marginBottom: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Map Performance</h4>
+                    <DataTable<MapStat>
+                      columns={MAP_COLS}
+                      data={result.mapStats}
+                      filterPlaceholder="Filter maps..."
+                      filterKey="map_name"
+                    />
+                  </>
+                ) : (
+                  <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.875rem' }}>No map data available. Populate the database with match details to see per-map stats.</p>
+                )}
+              </CollapsibleSection>
 
-            {/* Edge section (full-width, below grid) */}
-            {edgeData && <EdgeSection edge={edgeData} line={analysis.kill_line} />}
+              {analysis.event_details && analysis.event_details.length > 0 && (
+                <CollapsibleSection title="Challengers Events Timeline" accentColor={ACCENT}>
+                  <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', margin: '0 0 1rem' }}>
+                    Total KPR: {(analysis.total_kpr ?? analysis.weighted_kpr ?? 0).toFixed(3)} · Weighted KPR: {(analysis.weighted_kpr ?? 0).toFixed(3)} · Rounds: {analysis.total_rounds ?? '—'}
+                  </p>
+                  <EventTimeline events={analysis.event_details} line={analysis.kill_line ?? 18.5} />
+                </CollapsibleSection>
+              )}
+
+              {edgeData && (
+                <CollapsibleSection title="Monte-Carlo & Mathematical Edge Analysis" accentColor={ACCENT}>
+                  <EdgeSection edge={edgeData} line={analysis.kill_line ?? 18.5} />
+                </CollapsibleSection>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      <style>{`
-        @media (max-width: 768px) { .result-grid { grid-template-columns: 1fr !important; } }
-      `}</style>
     </>
   )
 }

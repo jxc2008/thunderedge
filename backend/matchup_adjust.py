@@ -92,13 +92,19 @@ def infer_team_win_probability(
 def apply_matchup_adjustment(
     dist_params: Dict,
     team_win_prob: Optional[float],
-    alpha_strength: float = 0.22,
-    beta_mismatch: float = 0.18,
-    gamma_mismatch: float = 1.8,
+    alpha_strength: float = 0.04,
+    beta_mismatch: float = 0.04,
+    gamma_mismatch: float = 4.0,
     min_multiplier: float = 0.72,
     max_multiplier: float = 1.28,
 ) -> Dict:
     """Apply matchup-aware non-linear mean adjustment to distribution params.
+
+    Defaults calibrated from 3,753 historical player-map records (2024-2026 VCT).
+    Calibration result: team win probability has near-zero effect on individual
+    kill output beyond the player's historical baseline. alpha and beta are set
+    to ~0.04 (effectively minimal adjustment). The mu_base alone is the best
+    single predictor.
 
     multiplier = 1 + strength_term - mismatch_penalty
     where:

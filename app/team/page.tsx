@@ -3,66 +3,8 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
-import { TeamPage, type TeamData } from '@/components/team-page'
-import { EmptyState } from '@/components/ux-patterns'
-
-/* ─── Sample data simulating API response ────────────────── */
-function buildTeam(name: string, region: string): TeamData {
-  return {
-    name: name || 'Sentinels',
-    region: region || 'Americas',
-    players: [
-      { ign: 'TenZ', role: 'Duelist' },
-      { ign: 'Zellsis', role: 'Initiator' },
-      { ign: 'Sacy', role: 'Initiator' },
-      { ign: 'Pryze', role: 'Controller' },
-      { ign: 'Zekken', role: 'Sentinel' },
-    ],
-    fprAvg: 0.842,
-    totalMatches: 48,
-    avgKillsPerRound: 0.74,
-    events: [
-      {
-        id: 'e1',
-        eventName: 'VCT Americas 2025 — Masters',
-        date: 'Feb 2025',
-        defaultOpen: true,
-        stats: {
-          fpr: 0.871,
-          kills: 512,
-          deaths: 487,
-          rounds: 624,
-          matchesPlayed: 12,
-          maps: [
-            { map: 'Ascent', rate: 45, type: 'first-pick' },
-            { map: 'Bind', rate: 32, type: 'second-pick' },
-            { map: 'Haven', rate: 28, type: 'first-ban' },
-            { map: 'Icebox', rate: 18, type: 'second-ban' },
-            { map: 'Pearl', rate: 22, type: 'first-pick' },
-            { map: 'Lotus', rate: 15, type: 'second-ban' },
-          ],
-        },
-      },
-      {
-        id: 'e2',
-        eventName: 'VCT Americas 2025 — Kickoff',
-        date: 'Jan 2025',
-        stats: {
-          fpr: 0.813,
-          kills: 340,
-          deaths: 358,
-          rounds: 416,
-          matchesPlayed: 8,
-          maps: [
-            { map: 'Split', rate: 38, type: 'first-pick' },
-            { map: 'Fracture', rate: 25, type: 'first-ban' },
-            { map: 'Breeze', rate: 20, type: 'second-pick' },
-          ],
-        },
-      },
-    ],
-  }
-}
+import { MatchupPage, type MatchupData } from '@/components/matchup-page'
+import { API_BASE } from '@/lib/api'
 
 const inputStyle: React.CSSProperties = {
   background: '#0a0a0a',
@@ -87,20 +29,43 @@ const labelStyle: React.CSSProperties = {
   marginBottom: '0.5rem',
 }
 
-export default function TeamAnalysisPage() {
-  const [teamInput, setTeamInput] = useState('')
-  const [regionInput, setRegionInput] = useState('')
+export default function MatchupAnalysisPage() {
+  const [team1, setTeam1] = useState('')
+  const [team2, setTeam2] = useState('')
+  const [team1Odds, setTeam1Odds] = useState('')
+  const [team2Odds, setTeam2Odds] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [result, setResult] = useState<TeamData | null>(null)
+  const [result, setResult] = useState<MatchupData | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleAnalyze = () => {
-    if (!teamInput.trim()) return
+  const canAnalyze = team1.trim().length > 0 && team2.trim().length > 0
+
+  const handleAnalyze = async () => {
+    if (!canAnalyze) return
     setIsLoading(true)
     setResult(null)
-    setTimeout(() => {
-      setResult(buildTeam(teamInput.trim(), regionInput.trim()))
+    setError(null)
+
+    const params = new URLSearchParams({
+      team1: team1.trim(),
+      team2: team2.trim(),
+    })
+    if (team1Odds.trim()) params.set('team1_odds', team1Odds.trim())
+    if (team2Odds.trim()) params.set('team2_odds', team2Odds.trim())
+
+    try {
+      const res = await fetch(`${API_BASE}/api/matchup?${params}`)
+      const json = await res.json()
+      if (!res.ok || json.error) {
+        setError(json.error ?? 'Unknown error')
+      } else {
+        setResult(json)
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
       setIsLoading(false)
-    }, 1200)
+    }
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -126,10 +91,10 @@ export default function TeamAnalysisPage() {
               marginBottom: '1rem',
             }}
           >
-            VCT Team <span style={{ color: '#F97316' }}>Analysis</span>
+            Team <span style={{ color: '#F97316' }}>Matchup</span>
           </h1>
           <p style={{ fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)', maxWidth: 600, margin: '0 auto 2rem' }}>
-            Team statistics, fights per round, and map pick/ban rates — scraped live from VLR.gg.
+            Compare two VCT teams: map records, pick/ban tendencies, agent comps, and recent history.
           </p>
         </div>
 
@@ -144,31 +109,66 @@ export default function TeamAnalysisPage() {
           }}
         >
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={labelStyle}>Team Name</label>
+            {/* Team 1 */}
+            <div style={{ flex: '1 1 160px' }}>
+              <label style={{ ...labelStyle, color: '#3b82f6' }}>Team 1</label>
               <input
                 type="text"
-                value={teamInput}
-                onChange={(e) => setTeamInput(e.target.value)}
+                value={team1}
+                onChange={(e) => setTeam1(e.target.value)}
                 onKeyDown={handleKey}
-                placeholder="Sentinels, LOUD, Fnatic..."
+                placeholder="Sentinels, LOUD..."
+                style={{ ...inputStyle, borderColor: team1.trim() ? 'rgba(59,130,246,0.4)' : 'rgba(255,255,255,0.1)' }}
+              />
+            </div>
+
+            {/* Team 2 */}
+            <div style={{ flex: '1 1 160px' }}>
+              <label style={{ ...labelStyle, color: '#f97316' }}>Team 2</label>
+              <input
+                type="text"
+                value={team2}
+                onChange={(e) => setTeam2(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder="Cloud9, 100T..."
+                style={{ ...inputStyle, borderColor: team2.trim() ? 'rgba(249,115,22,0.4)' : 'rgba(255,255,255,0.1)' }}
+              />
+            </div>
+
+            {/* Odds (optional) */}
+            <div style={{ flex: '0 1 100px' }}>
+              <label style={labelStyle}>
+                T1 Odds{' '}
+                <span style={{ textTransform: 'none', letterSpacing: 'normal', color: 'rgba(255,255,255,0.2)' }}>(opt)</span>
+              </label>
+              <input
+                type="text"
+                value={team1Odds}
+                onChange={(e) => setTeam1Odds(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder="1.50"
                 style={inputStyle}
               />
             </div>
-            <div style={{ flex: '1 1 180px' }}>
-              <label style={labelStyle}>Region <span style={{ textTransform: 'none', letterSpacing: 'normal', color: 'rgba(255,255,255,0.25)' }}>(optional)</span></label>
+
+            <div style={{ flex: '0 1 100px' }}>
+              <label style={labelStyle}>
+                T2 Odds{' '}
+                <span style={{ textTransform: 'none', letterSpacing: 'normal', color: 'rgba(255,255,255,0.2)' }}>(opt)</span>
+              </label>
               <input
                 type="text"
-                value={regionInput}
-                onChange={(e) => setRegionInput(e.target.value)}
+                value={team2Odds}
+                onChange={(e) => setTeam2Odds(e.target.value)}
                 onKeyDown={handleKey}
-                placeholder="Americas, EMEA, Pacific, China"
+                placeholder="2.40"
                 style={inputStyle}
               />
             </div>
+
             <button
               onClick={handleAnalyze}
-              disabled={isLoading || !teamInput.trim()}
+              disabled={isLoading || !canAnalyze}
               style={{
                 fontFamily: 'var(--font-display)',
                 fontWeight: 700,
@@ -176,11 +176,11 @@ export default function TeamAnalysisPage() {
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 padding: '0.75rem 2rem',
-                background: isLoading || !teamInput.trim() ? 'rgba(249,115,22,0.5)' : '#F97316',
+                background: isLoading || !canAnalyze ? 'rgba(249,115,22,0.5)' : '#F97316',
                 color: '#000000',
                 border: 'none',
                 borderRadius: 0,
-                cursor: isLoading || !teamInput.trim() ? 'not-allowed' : 'pointer',
+                cursor: isLoading || !canAnalyze ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
@@ -188,7 +188,7 @@ export default function TeamAnalysisPage() {
                 alignSelf: 'flex-end',
               }}
             >
-              {isLoading ? <><Loader2 size={14} className="animate-spin" /> Fetching...</> : 'Analyze Team'}
+              {isLoading ? <><Loader2 size={14} className="animate-spin" /> Analyzing...</> : 'Analyze Matchup'}
             </button>
           </div>
         </div>
@@ -204,21 +204,46 @@ export default function TeamAnalysisPage() {
               animation: 'spin 0.8s linear infinite',
               margin: '0 auto 1rem',
             }} />
-            <p style={{ fontWeight: 600, color: '#e4e4e7', marginBottom: 4 }}>Fetching Team Data</p>
-            <p style={{ fontSize: '0.875rem' }}>Scraping statistics from VLR.gg...</p>
+            <p style={{ fontWeight: 600, color: '#e4e4e7', marginBottom: 4 }}>Fetching Matchup Data</p>
+            <p style={{ fontSize: '0.875rem' }}>Querying historical records...</p>
             <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           </div>
         )}
 
+        {/* Error */}
+        {!isLoading && error && (
+          <div
+            style={{
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.2)',
+              borderLeft: '3px solid #ef4444',
+              padding: '1rem 1.25rem',
+              color: '#fca5a5',
+              fontSize: '0.875rem',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
         {/* Empty state */}
-        {!isLoading && !result && (
-          <div style={{ background: '#0a0a0a', border: '1px solid #27272a', borderRadius: 12 }}>
-            <EmptyState />
+        {!isLoading && !result && !error && (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '4rem 2rem',
+              background: '#0a0a0a',
+              border: '1px solid #27272a',
+              color: 'rgba(255,255,255,0.25)',
+            }}
+          >
+            <p style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>⚔</p>
+            <p style={{ fontSize: '0.875rem' }}>Enter two team names above to compare</p>
           </div>
         )}
 
         {/* Results */}
-        {!isLoading && result && <TeamPage team={result} />}
+        {!isLoading && result && <MatchupPage data={result} />}
       </div>
     </>
   )

@@ -24,7 +24,7 @@ const NAV_DROPDOWNS = [
 ]
 
 const NAV_DIRECT = [
-  { label: 'Team', href: '/team' },
+  { label: 'Matchup', href: '/team' },
   { label: 'MoneyLine', href: '/moneylines' },
 ]
 
@@ -34,7 +34,7 @@ const PAGE_BADGES: Record<string, string> = {
   '/challengers': 'Challengers',
   '/prizepicks': 'PrizePicks',
   '/challengers-prizepicks': 'Challengers PP',
-  '/team': 'Team',
+  '/team': 'Matchup',
   '/moneylines': 'MoneyLine',
 }
 

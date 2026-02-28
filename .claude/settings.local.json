@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/calibrate_matchup.py)",
+      "Bash(python scripts/calibrate_matchup_results.py)",
+      "Bash(python -c \"from backend.database import Database; d = Database\\(''data/thunderedge.db''\\); print\\(''DB ok''\\)\")",
+      "Bash(python -c \":*)",
+      "WebFetch(domain:www.vlr.gg)",
+      "Bash(python scripts/populate_database.py)",
+      "Bash(echo $CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS)",
+      "Bash(python -c \"import sqlite3; conn = sqlite3.connect\\(''data/valorant_stats.db''\\); cursor = conn.cursor\\(\\); cursor.execute\\(''SELECT name FROM sqlite_master WHERE type=\"\"table\"\"''\\); tables = cursor.fetchall\\(\\); print\\(''\\\\n''.join\\([t[0] for t in tables]\\)\\)\")",
+      "Bash(git log --oneline --all --grep=\"team\" --grep=\"matchup\" -i)",
+      "Bash(python -c \"import sqlite3; conn = sqlite3.connect\\(''data/valorant_stats.db''\\); cursor = conn.cursor\\(\\); cursor.execute\\(''SELECT COUNT\\(*\\) FROM vct_events''\\); events = cursor.fetchone\\(\\)[0]; cursor.execute\\(''SELECT COUNT\\(*\\) FROM matches''\\); matches = cursor.fetchone\\(\\)[0]; cursor.execute\\(''SELECT COUNT\\(*\\) FROM player_map_stats''\\); pms = cursor.fetchone\\(\\)[0]; print\\(f''Events: {events}''\\); print\\(f''Matches: {matches}''\\); print\\(f''Player Map Stats: {pms}''\\)\")"
+    ]
+  }
+}

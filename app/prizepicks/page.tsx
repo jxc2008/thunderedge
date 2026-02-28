@@ -8,6 +8,7 @@ import { StatsGrid, type StatCardData } from '@/components/stats-grid'
 import { RecommendationCard } from '@/components/recommendation-card'
 import { DistributionChart } from '@/components/distribution-chart'
 import { EmptyState } from '@/components/ux-patterns'
+import { CollapsibleSection } from '@/components/collapsible-section'
 
 const ACCENT = '#8B2BFA'
 const ACCENT_BG = 'rgba(139,43,250,0.08)'
@@ -66,7 +67,7 @@ interface ParlayLeg { ign: string; line: number; side: 'over' | 'under' }
 interface ParlayResult { hit_probability: number; expected_value?: number; details?: unknown[] }
 
 interface HistoryItem {
-  id: string; created_at: string; player_count: number; source?: string; snapshot_type?: string
+  id: number; created_at: string; ranked_count?: number; parsed_count?: number; source?: string
 }
 
 interface Matchup { team1: string; team2: string; team1_odds: number; team2_odds: number }
@@ -586,38 +587,46 @@ function AnalyzeTab() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* Performance bar */}
           <div style={{ background: ACCENT_BG, border: `1px solid ${ACCENT_BORDER}`, borderLeft: `3px solid ${ACCENT}`, padding: '0.875rem 1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1.5rem', fontSize: '0.875rem', color: 'rgba(255,255,255,0.5)' }}>
-            <span>Player: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{edge.player?.ign}</span></span>
+            <span><strong style={{ color: '#fff' }}>{edge.player?.ign}</strong></span>
             <span>Line: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{edge.line} kills ({comboMaps === 2 ? 'Bo3' : 'Bo5'})</span></span>
             <span>Model: <span style={{ color: ACCENT, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{edge.model?.mu?.toFixed(2)} μ</span></span>
             <span style={{ marginLeft: 'auto' }}>Query time: <span style={{ color: ACCENT }}>{result?.elapsed}s</span></span>
           </div>
 
-          <div className="result-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,58%) minmax(0,42%)', gap: '1.5rem' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              <OverUnderDisplay
-                overPct={(edge.model?.p_over ?? 0) * 100}
-                underPct={(edge.model?.p_under ?? 0) * 100}
-                sampleSize={edge.player?.sample_size ?? 0}
-                killLine={edge.line ?? 30.5}
-              />
+          {/* Collapsible data sections */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <CollapsibleSection title="Recommendation" defaultOpen accentColor={ACCENT}>
               <RecommendationCard
                 type={recType}
                 ev={recEV}
                 confidence={(edge.player?.confidence ?? 'LOW') as 'HIGH' | 'MED' | 'LOW'}
                 reason={`Model mean ${edge.model?.mu?.toFixed(1)} vs ${edge.line?.toFixed(1)} kill line. ${recommended !== 'NO BET' ? `Bet ${recommended} — ROI: +${(recommended === 'OVER' ? edge.edge?.roi_over_pct : edge.edge?.roi_under_pct ?? 0).toFixed(1)}%` : 'No positive EV found.'}`}
               />
+            </CollapsibleSection>
+
+            <CollapsibleSection title="Model Over/Under Percentages" accentColor={ACCENT}>
+              <OverUnderDisplay
+                overPct={(edge.model?.p_over ?? 0) * 100}
+                underPct={(edge.model?.p_under ?? 0) * 100}
+                sampleSize={edge.player?.sample_size ?? 0}
+                killLine={edge.line ?? 30.5}
+              />
+            </CollapsibleSection>
+
+            <CollapsibleSection title="Key Stats" accentColor={ACCENT}>
               <StatsGrid stats={stats} columns={3} />
-            </div>
-            <div>
-              {dist.length > 0 && (
+            </CollapsibleSection>
+
+            {dist.length > 0 && (
+              <CollapsibleSection title="Monte-Carlo Distribution" accentColor={ACCENT}>
                 <DistributionChart
                   data={dist}
                   killLine={edge.line ?? 30.5}
                   modelOverPct={(edge.model?.p_over ?? 0) * 100}
                   marketOverPct={(edge.market?.p_over_vigfree ?? 0) * 100}
                 />
-              )}
-            </div>
+              </CollapsibleSection>
+            )}
           </div>
         </div>
       )}
@@ -762,7 +771,7 @@ function HistoryTab() {
   async function load() {
     setLoading(true)
     try {
-      const r = await fetch('/api/prizepicks/leaderboard/history?limit=50')
+      const r = await fetch('/api/prizepicks/leaderboard/history?limit=50&challengers=false')
       const d = await r.json()
       setSnapshots(d.snapshots || [])
       setLoaded(true)
@@ -784,7 +793,7 @@ function HistoryTab() {
           <div>
             <div style={{ fontWeight: 600, color: '#e4e4e7', fontSize: '0.875rem' }}>{new Date(s.created_at).toLocaleString()}</div>
             <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)' }}>
-              {s.player_count} players · {s.source || 'manual'} · {s.snapshot_type || 'vct'}
+              {(s.ranked_count ?? s.parsed_count ?? 0)} players · {s.source || 'manual'}
             </div>
           </div>
           <a

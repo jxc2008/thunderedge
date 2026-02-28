@@ -115,23 +115,29 @@ def _extract_pick_bans_attributed(soup, team1: str, team2: str) -> dict:
             result['decider'] = remains.group(1).strip()
 
         # Identify which DB team each VLR actor string belongs to.
-        # actor_role[vlr_team_str] = 1 or 2
+        # Two-pass approach: first match what we can, then fill remaining slots.
+        # This handles cases where one team uses an abbreviation (e.g. "NS", "C9")
+        # that can't be matched to the DB name, while the other team CAN be matched.
+        unique_vlr_teams = list(dict.fromkeys(vt for vt, _, _ in sequence))
         actor_role = {}
-        for vlr_team, _, _ in sequence:
-            if vlr_team in actor_role:
-                continue
+        unmatched = []
+
+        for vlr_team in unique_vlr_teams:
             if _teams_match(vlr_team, team1):
                 actor_role[vlr_team] = 1
             elif _teams_match(vlr_team, team2):
                 actor_role[vlr_team] = 2
             else:
-                # Unknown — try to infer from sequence position
-                # First actor in the sequence is whichever VLR team appears first
-                if not actor_role:
-                    actor_role[vlr_team] = 1
-                else:
-                    known_roles = set(actor_role.values())
-                    actor_role[vlr_team] = 2 if 1 in known_roles else 1
+                unmatched.append(vlr_team)
+
+        # Assign unmatched teams to whichever role isn't yet taken
+        for vlr_team in unmatched:
+            assigned = set(actor_role.values())
+            if 1 not in assigned:
+                actor_role[vlr_team] = 1
+            elif 2 not in assigned:
+                actor_role[vlr_team] = 2
+            # else both roles taken (shouldn't happen in a normal match)
 
         # Apply attribution
         t1_bans, t2_bans = [], []

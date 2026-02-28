@@ -1592,11 +1592,16 @@ class Database:
             result: Dict = {'total_matches': total}
             for action in counts:
                 denom = slot_totals[action] or 1
-                result[action] = sorted(
+                entries = sorted(
                     [{'map': m, 'rate': round(c / denom, 3)}
                      for m, c in counts[action].items()],
                     key=lambda x: -x['rate']
-                )[:5]
+                )
+                # Correct last entry so rates sum exactly to 1.000
+                if entries:
+                    s = sum(e['rate'] for e in entries[:-1])
+                    entries[-1]['rate'] = round(1.0 - s, 3)
+                result[action] = entries
             return result
         except Exception as e:
             logger.error(f"Error getting team pick/ban stats for {team_name}: {e}")

@@ -160,13 +160,13 @@ class PlayerProcessor:
         
     def _is_most_recent_event(self, event_name: str) -> bool:
         """
-        Check if an event is the most recent (2026 Kickoff).
-        This identifies the event that should get 1.5x weight.
+        Check if an event is a recent 2026 VCT Tier-1 event.
+        These events get 1.5x weight in KPR calculation.
         """
         if not event_name:
             return False
-        # Check for 2026 Kickoff pattern
-        return '2026' in event_name and 'kickoff' in event_name.lower()
+        n = event_name.lower()
+        return '2026' in n and ('kickoff' in n or 'masters' in n or 'santiago' in n)
     
     def calculate_weighted_kpr(self, events: List[Dict]) -> Dict:
         """

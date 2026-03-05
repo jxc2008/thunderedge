@@ -111,11 +111,11 @@ export interface PerMapKDEntry {
 }
 
 export interface ProjectedScoreEntry {
-  projectedWinner: 'team1' | 'team2'
+  projectedWinner: 'team1' | 'team2' | null
   projectedScore: string
   confidence: number
-  team1AvgRounds: number
-  team2AvgRounds: number
+  team1AvgRounds: number | null
+  team2AvgRounds: number | null
   sampleMaps1: number
   sampleMaps2: number
 }
@@ -621,8 +621,9 @@ function ProjectedScoresSection({
           <tbody>
             {maps.map((map) => {
               const e = projected[map]
-              const winnerName = e.projectedWinner === 'team1' ? t1Name : t2Name
-              const winnerColor = e.projectedWinner === 'team1' ? T1_COLOR : T2_COLOR
+              const hasProjection = e.projectedWinner !== null
+              const winnerName = e.projectedWinner === 'team1' ? t1Name : e.projectedWinner === 'team2' ? t2Name : '—'
+              const winnerColor = e.projectedWinner === 'team1' ? T1_COLOR : e.projectedWinner === 'team2' ? T2_COLOR : 'rgba(255,255,255,0.3)'
               return (
                 <tr key={map} style={{ borderTop: '1px solid #18181b' }}>
                   <td className="py-2 text-[0.8rem] font-medium" style={{ color: '#e4e4e7' }}>{map}</td>
@@ -632,8 +633,8 @@ function ProjectedScoresSection({
                   <td className="py-2 text-center text-[0.75rem] tabular-nums font-mono" style={{ color: 'rgba(255,255,255,0.6)' }}>
                     {e.projectedScore}
                   </td>
-                  <td className="py-2 text-center text-[0.75rem] tabular-nums font-semibold" style={{ color: confidenceColor(e.confidence) }}>
-                    {Math.round(e.confidence * 100)}%
+                  <td className="py-2 text-center text-[0.75rem] tabular-nums font-semibold" style={{ color: hasProjection ? confidenceColor(e.confidence) : 'rgba(255,255,255,0.3)' }}>
+                    {hasProjection ? `${Math.round(e.confidence * 100)}%` : '—'}
                   </td>
                 </tr>
               )

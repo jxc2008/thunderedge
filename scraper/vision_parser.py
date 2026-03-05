@@ -5,6 +5,7 @@ Uses gemini-2.0-flash-lite (free tier: 15 RPM, 1000 RPD).
 Requires GOOGLE_API_KEY or GEMINI_API_KEY environment variable.
 """
 import base64
+import hashlib
 import json
 import logging
 import re
@@ -12,6 +13,11 @@ import time
 from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# In-memory cache: image MD5 → (projections, combo_maps)
+# Prevents duplicate Gemini calls when the user re-uploads the same screenshots,
+# which would otherwise hit rate limits (10 RPM on free tier).
+_image_cache: dict = {}
 
 PROMPT = """Extract all Valorant player kill lines from this PrizePicks screenshot.
 
@@ -46,9 +52,16 @@ def _detect_mime_type(image_bytes: bytes) -> str:
 
 def parse_prizepicks_image_vision(image_bytes: bytes) -> Tuple[List[dict], int]:
     """
-    Parse PrizePicks screenshot using Gemini 1.5 Flash vision.
+    Parse PrizePicks screenshot using Gemini vision.
     Returns (projections: [{"player_name", "line"}], combo_maps: 2 or 3).
+    Results are cached by image MD5 to avoid duplicate Gemini calls on re-upload.
     """
+    # Cache check — same image bytes → same result, skip Gemini call entirely
+    img_hash = hashlib.md5(image_bytes).hexdigest()
+    if img_hash in _image_cache:
+        logger.info(f"Gemini cache hit for image {img_hash[:8]}")
+        return _image_cache[img_hash]
+
     api_key = __import__('os').environ.get('GOOGLE_API_KEY') or __import__('os').environ.get('GEMINI_API_KEY')
     if not api_key:
         raise ImportError(
@@ -64,31 +77,44 @@ def parse_prizepicks_image_vision(image_bytes: bytes) -> Tuple[List[dict], int]:
         )
 
     genai.configure(api_key=api_key)
-    # gemini-2.0-flash-lite deprecated for new users; use gemini-2.5-flash (current)
     model = genai.GenerativeModel('gemini-2.5-flash')
 
     mime = _detect_mime_type(image_bytes)
     b64 = base64.b64encode(image_bytes).decode('utf-8')
+    image_part = {'inline_data': {'mime_type': mime, 'data': b64}}
 
-    image_part = {
-        'inline_data': {'mime_type': mime, 'data': b64}
-    }
-
-    try:
-        response = model.generate_content(
-            [image_part, PROMPT],
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=2048,
+    last_exc = None
+    for attempt in range(2):
+        try:
+            response = model.generate_content(
+                [image_part, PROMPT],
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=2048,
+                )
             )
-        )
-        text = (response.text or '').strip()
-        if not text:
-            logger.warning("Gemini returned empty response (image may be blocked or unreadable)")
-            return [], 2
-    except Exception as e:
-        logger.error(f"Gemini vision API error: {e}")
-        raise
+            # response.text raises ValueError in newer SDK when response is blocked/empty
+            try:
+                text = response.text or ''
+            except ValueError as ve:
+                logger.warning(f"Gemini response has no text (blocked or empty): {ve}")
+                text = ''
+            text = text.strip()
+            if not text:
+                logger.warning("Gemini returned empty response (image may be blocked or unreadable)")
+                return [], 2
+            break  # success
+        except Exception as e:
+            last_exc = e
+            err_str = str(e)
+            if attempt == 0 and ('429' in err_str or 'quota' in err_str.lower() or 'rate' in err_str.lower()):
+                logger.warning(f"Gemini rate limit on attempt 1, retrying in 10s: {e}")
+                time.sleep(10)
+            else:
+                logger.error(f"Gemini vision API error: {e}")
+                raise
+    else:
+        raise last_exc
 
     # Extract JSON from response (handle markdown code blocks)
     json_match = re.search(r'\[[\s\S]*?\]', text)
@@ -118,7 +144,9 @@ def parse_prizepicks_image_vision(image_bytes: bytes) -> Tuple[List[dict], int]:
                 if name and 12 <= line <= 55:
                     projections.append({'player_name': name, 'line': line})
 
-    return projections, combo_maps
+    result = (projections, combo_maps)
+    _image_cache[img_hash] = result  # cache for re-upload deduplication
+    return result
 
 
 MATCHUP_ODDS_PROMPT = """Extract team matchup moneyline odds from this sports betting screenshot.

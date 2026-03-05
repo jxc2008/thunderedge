@@ -180,6 +180,16 @@ textarea:focus-visible {
 .mobile-drawer-open  { animation: slideDown 0.18s ease forwards; }
 .mobile-drawer-close { animation: slideUp   0.18s ease forwards; }
 
+/* Radix Tabs — active indicator fix (border-b on Trigger) */
+[data-radix-collection-item] {
+  border-bottom: 2px solid transparent;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+[data-radix-collection-item][data-state='active'] {
+  border-bottom-color: #F0E040;
+  color: #ffffff;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

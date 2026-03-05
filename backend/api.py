@@ -7,6 +7,9 @@ import os
 import time
 import json
 import statistics
+import threading
+import subprocess
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,9 +33,51 @@ import logging
 app = Flask(__name__, static_folder='../frontend', template_folder='../frontend/templates')
 CORS(app)
 
+# Flask 3's default JSON provider serializes float('inf')/float('nan') as Infinity/NaN,
+# which are not valid JSON — browser JSON.parse rejects them with a "Parse error".
+# Override to replace them with null before serializing.
+import math as _math
+from flask.json.provider import DefaultJSONProvider as _DefaultJSONProvider
+
+def _sanitize_floats(obj):
+    if isinstance(obj, float) and (_math.isnan(obj) or _math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
+class _SafeJSONProvider(_DefaultJSONProvider):
+    def dumps(self, obj, **kwargs):
+        return super().dumps(_sanitize_floats(obj), **kwargs)
+
+app.json_provider_class = _SafeJSONProvider
+app.json = _SafeJSONProvider(app)
+
 # Initialize logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# Global error handlers — ensure Flask never returns an HTML error page to the browser.
+# Uses stdlib json.dumps directly (not Flask's JSON pipeline) so these never fail.
+def _json_error_response(msg: str, status: int = 500):
+    """Return a plain JSON error response without going through Flask's JSON provider."""
+    body = json.dumps({'error': msg})
+    return app.response_class(response=body, status=status, mimetype='application/json')
+
+
+@app.errorhandler(Exception)
+def _handle_exception(e):
+    logger.error(f"Unhandled exception: {e}", exc_info=True)
+    return _json_error_response(str(e) or type(e).__name__)
+
+
+@app.errorhandler(500)
+def _handle_500(e):
+    logger.error(f"Internal server error: {e}", exc_info=True)
+    return _json_error_response(str(e) or 'Internal server error')
 
 
 def _parse_matchup_inputs(args):
@@ -1471,7 +1516,7 @@ def upload_leaderboard_image():
         })
     except Exception as e:
         logger.error(f"Error processing leaderboard image: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return _json_error_response(str(e) or type(e).__name__)
 
 
 @app.route('/api/prizepicks/leaderboard/apply-matchup', methods=['POST'])
@@ -2127,6 +2172,87 @@ def get_matchup_economy():
     except Exception as e:
         logger.error(f"Error in matchup economy: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+# ── Admin: data sync ─────────────────────────────────────────────────────────
+
+_SYNC_STEPS = [
+    # (key, script, extra_args, stdin)
+    ('populate_db',    'populate_database.py',        [],                  '4\ny\n'),
+    ('atk_def',        'populate_atk_def.py',         [],                  None),
+    ('pick_bans',      'repopulate_pick_bans.py',     ['--new-only'],      None),
+    ('moneyline',      'populate_moneyline.py',       ['--year', '2026'],  None),
+    ('clear_cache',    'clear_prizepicks_cache.py',   [],                  None),
+]
+
+_sync_status: dict = {'running': False, 'steps': [], 'finished_at': None, 'error': None}
+_sync_lock = threading.Lock()
+
+
+def _run_sync_background():
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    python = sys.executable
+    steps_log = []
+
+    with _sync_lock:
+        _sync_status['running'] = True
+        _sync_status['steps'] = []
+        _sync_status['finished_at'] = None
+        _sync_status['error'] = None
+
+    try:
+        for key, script, extra_args, stdin in _SYNC_STEPS:
+            script_path = os.path.join(project_root, 'scripts', script)
+            cmd = [python, script_path] + extra_args
+            entry = {'step': key, 'ok': None, 'lines': []}
+            with _sync_lock:
+                _sync_status['steps'].append(entry)
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    input=stdin.encode() if stdin else None,
+                    capture_output=True,
+                    cwd=project_root,
+                    timeout=600,
+                )
+                output = (result.stdout + result.stderr).decode(errors='replace')
+                entry['ok'] = (result.returncode == 0)
+                entry['lines'] = output.strip().splitlines()[-20:]  # last 20 lines
+                logger.info(f"Sync step {key}: exit {result.returncode}")
+            except Exception as step_err:
+                entry['ok'] = False
+                entry['lines'] = [str(step_err)]
+                logger.error(f"Sync step {key} failed: {step_err}")
+    except Exception as e:
+        with _sync_lock:
+            _sync_status['error'] = str(e)
+        logger.error(f"Sync background error: {e}", exc_info=True)
+    finally:
+        with _sync_lock:
+            _sync_status['running'] = False
+            _sync_status['finished_at'] = datetime.utcnow().isoformat() + 'Z'
+
+
+@app.route('/api/admin/sync', methods=['POST'])
+def admin_sync():
+    with _sync_lock:
+        if _sync_status['running']:
+            return jsonify({'status': 'already_running'})
+    t = threading.Thread(target=_run_sync_background, daemon=True)
+    t.start()
+    return jsonify({'status': 'started'})
+
+
+@app.route('/api/admin/sync-status', methods=['GET'])
+def admin_sync_status():
+    with _sync_lock:
+        return jsonify({
+            'running': _sync_status['running'],
+            'steps': _sync_status['steps'],
+            'finished_at': _sync_status['finished_at'],
+            'error': _sync_status['error'],
+        })
 
 
 # Add error handler for 404 to debug (at end of file, after all routes)

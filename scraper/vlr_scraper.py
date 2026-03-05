@@ -194,12 +194,16 @@ class VLRScraper:
 
         return None
     
-    # Current ongoing VCT 2026 Kickoff events
+    # Current VCT 2026 Tier-1 events (Kickoff + International).
+    # Live-scraped only when the event is NOT yet completed in the DB;
+    # once populate_database.py has cached it, _get_ongoing_event_match_data
+    # skips it so we never show the same event as both LIVE and CACHED.
     VCT_2026_KICKOFF_EVENTS = [
-        {'name': 'VCT 2026: Americas Kickoff', 'url': '/event/2682/vct-2026-americas-kickoff', 'region': 'Americas'},
-        {'name': 'VCT 2026: EMEA Kickoff', 'url': '/event/2684/vct-2026-emea-kickoff', 'region': 'EMEA'},
-        {'name': 'VCT 2026: Pacific Kickoff', 'url': '/event/2683/vct-2026-pacific-kickoff', 'region': 'Pacific'},
-        {'name': 'VCT 2026: China Kickoff', 'url': '/event/2685/vct-2026-china-kickoff', 'region': 'China'},
+        {'name': 'VCT 2026: Americas Kickoff',     'url': '/event/2682/vct-2026-americas-kickoff',       'region': 'Americas'},
+        {'name': 'VCT 2026: EMEA Kickoff',          'url': '/event/2684/vct-2026-emea-kickoff',           'region': 'EMEA'},
+        {'name': 'VCT 2026: Pacific Kickoff',       'url': '/event/2683/vct-2026-pacific-kickoff',        'region': 'Pacific'},
+        {'name': 'VCT 2026: China Kickoff',         'url': '/event/2685/vct-2026-china-kickoff',          'region': 'China'},
+        {'name': 'Valorant Masters Santiago 2026',  'url': '/event/2760/valorant-masters-santiago-2026',  'region': 'International'},
     ]
 
     # Current ongoing Challengers 2026 events (live scrape for OCR leaderboard)
@@ -1127,8 +1131,17 @@ class VLRScraper:
             return {}
     
     def _get_ongoing_event_match_data(self, player_name: str, team: str) -> Optional[Dict]:
-        """Get match-level data from ongoing 2026 Kickoff events"""
+        """Get match-level data from ongoing 2026 Kickoff/International events.
+        Skips events that are already completed in the DB — those are served by
+        _get_cached_event_match_data instead, which prevents showing the same
+        event as both LIVE and CACHED.
+        """
         for kickoff in self.VCT_2026_KICKOFF_EVENTS:
+            # Skip if this event is already fully cached in the DB
+            if self.db:
+                event_db = self.db.get_vct_event(kickoff['url'])
+                if event_db and event_db.get('status') == 'completed':
+                    continue
             # Check if player is in this event
             stats = self._get_player_event_kpr(kickoff['url'], player_name)
             if stats:

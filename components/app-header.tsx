@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { ChevronDown, Menu, X } from 'lucide-react'
+import { ChevronDown, Menu, X, RefreshCw, Check, AlertCircle } from 'lucide-react'
 
 // Dropdown nav items matching original HTML nav structure
 const NAV_DROPDOWNS = [
@@ -42,13 +42,65 @@ interface AppHeaderProps {
   activePage?: string
 }
 
+type SyncState = 'idle' | 'running' | 'done' | 'error'
+
 export function AppHeader({ activePage }: AppHeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [isClosingMobile, setIsClosingMobile] = useState(false)
   const [openDropdown, setOpenDropdown] = useState<string | null>(null)
+  const [syncState, setSyncState] = useState<SyncState>('idle')
+  const [syncStep, setSyncStep] = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pathname = usePathname()
 
   const currentPath = activePage ?? pathname
+
+  const STEP_LABELS: Record<string, string> = {
+    populate_db: 'Fetching matches…',
+    atk_def:     'Atk/def data…',
+    pick_bans:   'Pick/bans…',
+    moneyline:   'Odds data…',
+    clear_cache: 'Clearing cache…',
+  }
+
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  useEffect(() => () => stopPolling(), [])
+
+  async function handleSync() {
+    if (syncState === 'running') return
+    setSyncState('running')
+    setSyncStep('Starting…')
+    try {
+      await fetch('/api/admin/sync', { method: 'POST' })
+    } catch {
+      setSyncState('error')
+      setSyncStep('Network error')
+      return
+    }
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch('/api/admin/sync-status')
+        const data = await res.json()
+        // Show label for last in-progress step
+        const running = (data.steps ?? []).filter((s: { ok: boolean | null }) => s.ok === null)
+        const last    = (data.steps ?? []).at(-1)
+        if (running.length > 0) {
+          setSyncStep(STEP_LABELS[running[0].step] ?? running[0].step)
+        } else if (last) {
+          setSyncStep(STEP_LABELS[last.step] ?? last.step)
+        }
+        if (!data.running) {
+          stopPolling()
+          const anyFailed = (data.steps ?? []).some((s: { ok: boolean | null }) => s.ok === false)
+          setSyncState(anyFailed || data.error ? 'error' : 'done')
+          setTimeout(() => { setSyncState('idle'); setSyncStep('') }, 4000)
+        }
+      } catch { /* ignore transient poll errors */ }
+    }, 1500)
+  }
 
   const isActive = (href: string) => currentPath === href
 
@@ -207,6 +259,54 @@ export function AppHeader({ activePage }: AppHeaderProps) {
             </span>
           )}
         </nav>
+
+        {/* Sync data button */}
+        <button
+          onClick={handleSync}
+          disabled={syncState === 'running'}
+          title={syncState === 'running' ? syncStep : 'Sync latest VCT data'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            padding: '0.35rem 0.75rem',
+            background: syncState === 'done'  ? 'rgba(34,197,94,0.15)'
+                      : syncState === 'error' ? 'rgba(239,68,68,0.15)'
+                      : syncState === 'running' ? 'rgba(240,224,64,0.1)'
+                      : 'rgba(255,255,255,0.07)',
+            border: `1px solid ${
+              syncState === 'done'    ? 'rgba(34,197,94,0.4)'
+            : syncState === 'error'  ? 'rgba(239,68,68,0.4)'
+            : syncState === 'running'? 'rgba(240,224,64,0.3)'
+            : 'rgba(255,255,255,0.12)'}`,
+            borderRadius: '6px',
+            color: syncState === 'done'  ? '#22c55e'
+                 : syncState === 'error' ? '#ef4444'
+                 : syncState === 'running' ? '#F0E040'
+                 : 'rgba(255,255,255,0.6)',
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            cursor: syncState === 'running' ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s',
+            whiteSpace: 'nowrap',
+            opacity: syncState === 'running' ? 0.9 : 1,
+          }}
+        >
+          {syncState === 'running' ? (
+            <RefreshCw size={12} className="animate-spin" />
+          ) : syncState === 'done' ? (
+            <Check size={12} />
+          ) : syncState === 'error' ? (
+            <AlertCircle size={12} />
+          ) : (
+            <RefreshCw size={12} />
+          )}
+          {syncState === 'running' ? syncStep
+         : syncState === 'done'    ? 'Up to date'
+         : syncState === 'error'   ? 'Sync failed'
+         : 'Sync Data'}
+        </button>
 
         {/* Mobile hamburger */}
         <button

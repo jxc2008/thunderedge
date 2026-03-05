@@ -42,10 +42,11 @@ class RibScraper:
     BASE_URL = "https://www.rib.gg"
 
     VCT_2026_KICKOFF_EVENTS = [
-        {'name': 'VCT 2026: Americas Kickoff', 'slug': 'vct-2026-americas-kickoff',   'id': '6242', 'region': 'Americas', 'tier': 1},
-        {'name': 'VCT 2026: EMEA Kickoff',     'slug': 'vct-2026-emea-kickoff',       'id': '6240', 'region': 'EMEA',     'tier': 1},
-        {'name': 'VCT 2026: Pacific Kickoff',  'slug': 'vct-2026-pacific-kickoff',    'id': '6244', 'region': 'Pacific',  'tier': 1},
-        {'name': 'VCT 2026: China Kickoff',    'slug': 'vct-2026-china-kickoff',      'id': '6246', 'region': 'China',    'tier': 1},
+        {'name': 'VCT 2026: Americas Kickoff',        'slug': 'vct-2026-americas-kickoff',                     'id': '6242', 'region': 'Americas',      'tier': 1},
+        {'name': 'VCT 2026: EMEA Kickoff',            'slug': 'vct-2026-emea-kickoff',                         'id': '6240', 'region': 'EMEA',          'tier': 1},
+        {'name': 'VCT 2026: Pacific Kickoff',         'slug': 'vct-2026-pacific-kickoff',                      'id': '6244', 'region': 'Pacific',        'tier': 1},
+        {'name': 'VCT 2026: China Kickoff',           'slug': 'vct-2026-china-kickoff',                        'id': '6246', 'region': 'China',          'tier': 1},
+        {'name': 'Valorant Masters Santiago 2026',    'slug': 'valorant-masters-santiago-2026-main-event',     'id': '6262', 'region': 'International',   'tier': 1},
     ]
 
     # VCL Challengers 2026 events

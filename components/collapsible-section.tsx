@@ -20,54 +20,45 @@ export function CollapsibleSection({
 
   return (
     <div
-      style={{
-        background: '#0D0D0D',
-        border: '1px solid rgba(240,224,64,0.12)',
-        borderLeft: `3px solid ${accentColor}`,
-        overflow: 'hidden',
-      }}
+      className="bg-[#0D0D0D] border border-[rgba(240,224,64,0.12)] overflow-hidden"
+      style={{ borderLeft: `3px solid ${accentColor}` }}
     >
+      {/* Toggle button */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          padding: '1rem 1.25rem',
-          background: open ? 'rgba(255,255,255,0.02)' : 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-          fontFamily: 'var(--font-display)',
-          fontWeight: 700,
-          fontSize: '0.9rem',
-          textTransform: 'uppercase',
-          letterSpacing: '0.06em',
-          color: '#e4e4e7',
-          transition: 'background 0.15s',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = open ? 'rgba(255,255,255,0.02)' : 'transparent'
-        }}
+        className={
+          'w-full flex items-center gap-3 px-5 py-4 text-left cursor-pointer ' +
+          'font-display font-bold text-[0.9rem] uppercase tracking-[0.06em] text-[#e4e4e7] ' +
+          'transition-colors duration-150 border-none ' +
+          (open
+            ? 'bg-[rgba(255,255,255,0.02)] hover:bg-[rgba(255,255,255,0.04)]'
+            : 'bg-transparent hover:bg-[rgba(255,255,255,0.04)]')
+        }
       >
         {open ? (
-          <ChevronDown size={18} style={{ color: accentColor, flexShrink: 0 }} />
+          <ChevronDown size={16} style={{ color: accentColor }} className="shrink-0" />
         ) : (
-          <ChevronRight size={18} style={{ color: accentColor, flexShrink: 0 }} />
+          <ChevronRight size={16} style={{ color: accentColor }} className="shrink-0" />
         )}
         {title}
       </button>
-      {open && (
-        <div style={{ padding: '0 1.25rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ paddingTop: '1.25rem' }}>{children}</div>
+
+      {/* Animated content via CSS grid trick */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateRows: open ? '1fr' : '0fr',
+          transition: 'grid-template-rows 0.2s ease',
+        }}
+      >
+        <div style={{ overflow: 'hidden' }}>
+          <div className="px-5 pb-5 border-t border-[rgba(255,255,255,0.06)]">
+            <div className="pt-5">{children}</div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Loader2, RefreshCw, Upload, History } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
 import { OverUnderDisplay } from '@/components/over-under-display'
@@ -9,6 +9,7 @@ import { RecommendationCard } from '@/components/recommendation-card'
 import { DistributionChart } from '@/components/distribution-chart'
 import { EmptyState } from '@/components/ux-patterns'
 import { CollapsibleSection } from '@/components/collapsible-section'
+import { API_BASE } from '@/lib/api'
 
 const ACCENT = '#8B2BFA'
 const ACCENT_BG = 'rgba(139,43,250,0.08)'
@@ -196,10 +197,11 @@ function LbCard({ row, onAddToParlay }: { row: LbRow; onAddToParlay: (ign: strin
 
 // ─── Leaderboard tab ──────────────────────────────────────────────────────────
 
-function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory }: {
+function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory, sharedData }: {
   onAddToParlay: (ign: string, line: number) => void
   onSwitchToParlay: () => void
   onSwitchToHistory: () => void
+  sharedData: { leaderboard: LbRow[]; message: string } | null
 }) {
   const [rows, setRows] = useState<LbRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -216,6 +218,17 @@ function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory }: 
   const [currentLb, setCurrentLb] = useState<LbRow[]>([])
   const uploadRef = useRef<HTMLInputElement>(null)
   const oddsRef = useRef<HTMLInputElement>(null)
+  const appliedSharedData = useRef<typeof sharedData>(null)
+
+  // Apply snapshot data pushed from the history tab
+  useEffect(() => {
+    if (sharedData && sharedData !== appliedSharedData.current) {
+      appliedSharedData.current = sharedData
+      setRows(sharedData.leaderboard)
+      setCurrentLb(sharedData.leaderboard)
+      setMessage(sharedData.message)
+    }
+  }, [sharedData])
 
   const renderLb = useCallback((data: { leaderboard?: LbRow[]; message?: string; created_at?: string }) => {
     const lb = data.leaderboard || []
@@ -259,15 +272,24 @@ function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory }: 
 
     xhr.onload = () => {
       clearInterval(interval); setProgress(100); setProgressMsg('Done!')
+      const text = xhr.responseText || ''
       try {
-        const d = JSON.parse(xhr.responseText)
+        const d = JSON.parse(text)
         if (xhr.status >= 400 || d.error) { setMessage(d.error || 'Upload failed'); }
         else renderLb(d)
-      } catch { setMessage('Parse error') }
+      } catch {
+        // Server returned non-JSON (HTML error page) — likely Flask crashed or Infinity/NaN in response
+        if (xhr.status >= 500) {
+          setMessage(`Server error (${xhr.status}) — restart the Flask backend and try again`)
+        } else {
+          setMessage(`Unexpected response (${xhr.status || 'no status'}) — check Flask logs`)
+        }
+      }
       setLoading(false)
     }
     xhr.onerror = () => { clearInterval(interval); setLoading(false); setMessage('Network error') }
-    xhr.open('POST', `/api/prizepicks/leaderboard/upload${comboVal}`, true)
+    const uploadUrl = `${API_BASE || 'http://localhost:5000'}/api/prizepicks/leaderboard/upload${comboVal}`
+    xhr.open('POST', uploadUrl, true)
     xhr.send(fd)
   }
 
@@ -375,9 +397,9 @@ function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory }: 
         </button>
 
         {/* Upload leaderboard screenshot */}
-        <label style={{ cursor: 'pointer', padding: '0.5rem 1rem', background: 'linear-gradient(135deg,#16a34a 0%,#22c55e 100%)', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, color: '#fff' }}>
+        <label style={{ cursor: loading ? 'not-allowed' : 'pointer', padding: '0.5rem 1rem', background: 'linear-gradient(135deg,#16a34a 0%,#22c55e 100%)', borderRadius: 8, fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, color: '#fff', opacity: loading ? 0.5 : 1, pointerEvents: loading ? 'none' : 'auto' }}>
           <Upload size={14} /> Upload
-          <input type="file" accept="image/*" multiple ref={uploadRef} style={{ display: 'none' }} onChange={(e) => handleUpload(e.target as HTMLInputElement)} />
+          <input type="file" accept="image/*" multiple ref={uploadRef} style={{ display: 'none' }} disabled={loading} onChange={(e) => handleUpload(e.target as HTMLInputElement)} />
         </label>
 
         <select
@@ -637,18 +659,20 @@ function AnalyzeTab() {
 // ─── Parlay tab ───────────────────────────────────────────────────────────────
 
 function ParlayTab({ prefillLegs }: { prefillLegs: ParlayLeg[] }) {
-  const [legs, setLegs] = useState<ParlayLeg[]>(
-    prefillLegs.length >= 2 ? prefillLegs : [{ ign: '', line: 30.5, side: 'over' }, { ign: '', line: 30.5, side: 'over' }]
-  )
+  const [legs, setLegs] = useState<ParlayLeg[]>(() => {
+    if (prefillLegs.length === 0) return [
+      { ign: '', line: 30.5, side: 'over' },
+      { ign: '', line: 30.5, side: 'over' },
+    ]
+    // Show all prefilled legs; pad to minimum 2 with empty slots
+    const padded = [...prefillLegs]
+    while (padded.length < 2) padded.push({ ign: '', line: 30.5, side: 'over' })
+    return padded
+  })
   const [comboMaps, setComboMaps] = useState(2)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ParlayResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  // Sync if prefill legs arrive later
-  if (prefillLegs.length >= 2 && legs.every((l) => l.ign === '')) {
-    setLegs(prefillLegs)
-  }
 
   function updateLeg(i: number, field: keyof ParlayLeg, val: string) {
     setLegs((ls) => ls.map((l, idx) => idx === i ? { ...l, [field]: field === 'line' ? parseFloat(val) || l.line : val } : l))
@@ -763,10 +787,13 @@ function ParlayTab({ prefillLegs }: { prefillLegs: ParlayLeg[] }) {
 
 // ─── History tab ──────────────────────────────────────────────────────────────
 
-function HistoryTab() {
+function HistoryTab({ onViewSnapshot }: {
+  onViewSnapshot: (data: { leaderboard: LbRow[]; message: string }) => void
+}) {
   const [snapshots, setSnapshots] = useState<HistoryItem[]>([])
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [viewing, setViewing] = useState<number | null>(null)
 
   async function load() {
     setLoading(true)
@@ -777,6 +804,18 @@ function HistoryTab() {
       setLoaded(true)
     } catch { setLoaded(true) }
     finally { setLoading(false) }
+  }
+
+  async function viewSnapshot(id: number) {
+    setViewing(id)
+    try {
+      const r = await fetch(`/api/prizepicks/leaderboard/${id}`)
+      const d = await r.json()
+      if (!r.ok || d.error) return
+      const msg = d.created_at ? `Loaded from history – ${new Date(d.created_at).toLocaleString()}` : ''
+      onViewSnapshot({ leaderboard: d.leaderboard || [], message: msg })
+    } catch { /* ignore */ }
+    finally { setViewing(null) }
   }
 
   if (!loaded && !loading) load()
@@ -796,12 +835,13 @@ function HistoryTab() {
               {(s.ranked_count ?? s.parsed_count ?? 0)} players · {s.source || 'manual'}
             </div>
           </div>
-          <a
-            href={`/api/prizepicks/leaderboard/${s.id}`} target="_blank" rel="noreferrer"
-            style={{ fontSize: '0.8rem', color: ACCENT, textDecoration: 'none', padding: '0.35rem 0.7rem', border: `1px solid ${ACCENT}`, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}
+          <button
+            onClick={() => viewSnapshot(s.id)}
+            disabled={viewing === s.id}
+            style={{ fontSize: '0.8rem', color: ACCENT, background: 'transparent', padding: '0.35rem 0.7rem', border: `1px solid ${ACCENT}`, fontFamily: 'var(--font-display)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', opacity: viewing === s.id ? 0.5 : 1 }}
           >
-            View
-          </a>
+            {viewing === s.id ? '...' : 'View'}
+          </button>
         </div>
       ))}
     </div>
@@ -813,12 +853,18 @@ function HistoryTab() {
 export default function PrizePicksPage() {
   const [tab, setTab] = useState<Tab>('leaderboard')
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([])
+  const [sharedLbData, setSharedLbData] = useState<{ leaderboard: LbRow[]; message: string } | null>(null)
 
   function addToParlay(ign: string, line: number) {
     setParlayLegs((ls) => {
       const next = [...ls, { ign, line, side: 'over' as const }]
       return next.slice(0, 6)
     })
+  }
+
+  function handleViewSnapshot(data: { leaderboard: LbRow[]; message: string }) {
+    setSharedLbData(data)
+    setTab('leaderboard')
   }
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
@@ -850,12 +896,13 @@ export default function PrizePicksPage() {
             <LeaderboardTab
               onAddToParlay={addToParlay}
               onSwitchToParlay={() => setTab('parlay')}
-              onSwitchToHistory={() => { setTab('history') }}
+              onSwitchToHistory={() => setTab('history')}
+              sharedData={sharedLbData}
             />
           )}
           {tab === 'analyze' && <AnalyzeTab />}
           {tab === 'parlay' && <ParlayTab prefillLegs={parlayLegs} />}
-          {tab === 'history' && <HistoryTab />}
+          {tab === 'history' && <HistoryTab onViewSnapshot={handleViewSnapshot} />}
         </div>
       </div>
 

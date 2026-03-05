@@ -2246,12 +2246,26 @@ class Database:
         t1_by_map = {r['map']: r for r in t1_records}
         t2_by_map = {r['map']: r for r in t2_records}
 
-        shared_maps = set(t1_by_map.keys()) & set(t2_by_map.keys())
+        # Use all maps either team has played; skip only if BOTH have no data
+        active_maps = set(t1_by_map.keys()) | set(t2_by_map.keys())
         result: Dict[str, Dict] = {}
 
-        for map_name in sorted(shared_maps):
-            t1 = t1_by_map[map_name]
-            t2 = t2_by_map[map_name]
+        for map_name in sorted(active_maps):
+            t1 = t1_by_map.get(map_name)
+            t2 = t2_by_map.get(map_name)
+
+            # If only one team has data, show partial info with no projection
+            if t1 is None or t2 is None:
+                result[map_name] = {
+                    'projectedWinner': None,
+                    'projectedScore': 'N/A',
+                    'confidence': 0,
+                    'team1AvgRounds': t1['avg_team_rounds'] if t1 else None,
+                    'team2AvgRounds': t2['avg_team_rounds'] if t2 else None,
+                    'sampleMaps1': t1['played'] if t1 else 0,
+                    'sampleMaps2': t2['played'] if t2 else 0,
+                }
+                continue
 
             # Project rounds: average of team's offense vs opponent's defense
             # team1 projected = avg of (t1 avg scored, t2 avg conceded)
@@ -2281,7 +2295,6 @@ class Database:
             sample1 = t1['played']
             sample2 = t2['played']
             min_sample = min(sample1, sample2)
-            total_sample = sample1 + sample2
             # Sample size factor: ramps from 0 to 1, saturates around 10+ maps each
             sample_factor = min(1.0, min_sample / 10.0)
             # Win rate margin factor

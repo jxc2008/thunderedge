@@ -52,7 +52,15 @@ def _teams_match(vlr_team: str, db_team: str) -> bool:
     dn = _normalize(db_team)
     if not vn or not dn:
         return False
-    return vn == dn or vn in dn or dn in vn or vn[:5] == dn[:5]
+    if vn == dn or vn in dn or dn in vn or vn[:5] == dn[:5]:
+        return True
+    # Acronym check: vn spells out the first letters of db_team words
+    words = [w for w in db_team.strip().split() if w and w[0].isalpha()]
+    if words:
+        acronym = _normalize(''.join(w[0] for w in words))
+        if vn == acronym:
+            return True
+    return False
 
 
 def _fetch_page(url: str) -> str:
@@ -162,16 +170,24 @@ def _extract_pick_bans_attributed(soup, team1: str, team2: str) -> dict:
     return result
 
 
-def _get_2026_matches(db_path: str) -> list:
+def _get_2026_matches(db_path: str, new_only: bool = False) -> list:
     conn = sqlite3.connect(db_path, timeout=30.0)
     c = conn.cursor()
-    c.execute('''
+    query = '''
         SELECT m.id, m.match_url, m.team1, m.team2
         FROM matches m
         JOIN vct_events ve ON m.event_id = ve.id
         WHERE ve.year = 2026
-        ORDER BY m.id
-    ''')
+    '''
+    if new_only:
+        query += '''
+          AND NOT EXISTS (
+            SELECT 1 FROM match_pick_bans pb
+            WHERE pb.match_id = m.id AND pb.t1_pick IS NOT NULL
+          )
+        '''
+    query += ' ORDER BY m.id'
+    c.execute(query)
     rows = c.fetchall()
     conn.close()
     return [{'id': r[0], 'match_url': r[1], 'team1': r[2], 'team2': r[3]} for r in rows]
@@ -180,14 +196,17 @@ def _get_2026_matches(db_path: str) -> list:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--new-only', action='store_true',
+                        help='Only process matches that have no team-attributed pick/ban data yet')
     args = parser.parse_args()
 
     from backend.database import Database
     db = Database(Config.DATABASE_PATH)
     db._init_db()  # runs migration to add t1/t2 columns if missing
 
-    matches = _get_2026_matches(Config.DATABASE_PATH)
-    print(f"Repopulating pick/bans for {len(matches)} 2026 matches...")
+    matches = _get_2026_matches(Config.DATABASE_PATH, new_only=args.new_only)
+    label = 'new unattributed' if args.new_only else 'all'
+    print(f"Repopulating pick/bans for {len(matches)} {label} 2026 matches...")
 
     ok = skipped = failed = 0
 

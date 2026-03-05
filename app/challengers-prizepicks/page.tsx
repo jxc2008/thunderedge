@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback } from 'react'
+import { API_BASE } from '@/lib/api'
 import { Loader2, RefreshCw, Upload, History } from 'lucide-react'
 import { AppHeader } from '@/components/app-header'
 import { OverUnderDisplay } from '@/components/over-under-display'
@@ -246,7 +247,8 @@ function LeaderboardTab({ onAddToParlay, onSwitchToParlay, onSwitchToHistory }: 
       setLoading(false)
     }
     xhr.onerror = () => { clearInterval(interval); setLoading(false); setMessage('Network error') }
-    xhr.open('POST', `/api/prizepicks/leaderboard/upload${query}`, true)
+    const uploadUrl = `${API_BASE || 'http://localhost:5000'}/api/prizepicks/leaderboard/upload${query}`
+    xhr.open('POST', uploadUrl, true)
     xhr.send(fd)
   }
 

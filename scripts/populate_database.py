@@ -73,6 +73,12 @@ VCT_2026_KICKOFF_EVENTS = [
     {'url': '/event/2685/vct-2026-china-kickoff',    'name': 'VCT 2026: China Kickoff',    'region': 'China',    'year': 2026},
 ]
 
+# 2026 VCT International events (Masters, Champions)
+# Event IDs verified from VLR.gg on 2026-03-01
+VCT_2026_INTERNATIONAL_EVENTS = [
+    {'url': '/event/2760/valorant-masters-santiago-2026', 'name': 'Valorant Masters Santiago 2026', 'region': 'International', 'year': 2026},
+]
+
 class DatabasePopulator:
     def __init__(self):
         self.db = Database(Config.DATABASE_PATH)
@@ -567,18 +573,24 @@ def main():
     print("  VCT Database Population Script")
     print("="*60)
     print("\nSelect events to populate:")
-    print("  1) VCT 2026 Kickoff (all 4 regions) — NEW")
-    print("  2) VCT 2025 (all 12 events)")
-    print("  3) Both 2026 Kickoff + 2025")
+    print("  1) VCT 2026 Kickoff (all 4 regions)")
+    print("  2) VCT 2026 Masters Santiago — LIVE")
+    print("  3) VCT 2025 (all 12 events)")
+    print("  4) All 2026 (Kickoff + Masters Santiago)")
+    print("  5) Everything (2026 Kickoff + Masters + 2025)")
     print("\n" + "-"*60)
 
-    choice = input("Choice [1/2/3]: ").strip()
+    choice = input("Choice [1/2/3/4/5]: ").strip()
     if choice == '1':
         events = VCT_2026_KICKOFF_EVENTS
     elif choice == '2':
-        events = VCT_2025_EVENTS
+        events = VCT_2026_INTERNATIONAL_EVENTS
     elif choice == '3':
-        events = VCT_2026_KICKOFF_EVENTS + VCT_2025_EVENTS
+        events = VCT_2025_EVENTS
+    elif choice == '4':
+        events = VCT_2026_KICKOFF_EVENTS + VCT_2026_INTERNATIONAL_EVENTS
+    elif choice == '5':
+        events = VCT_2026_KICKOFF_EVENTS + VCT_2026_INTERNATIONAL_EVENTS + VCT_2025_EVENTS
     else:
         print("Aborted.")
         return

@@ -121,6 +121,7 @@ MONEYLINE_EVENTS = [
     {'url': '/event/2683/vct-2026-pacific-kickoff', 'name': 'VCT 2026: Pacific Kickoff', 'year': 2026},
     {'url': '/event/2684/vct-2026-emea-kickoff', 'name': 'VCT 2026: EMEA Kickoff', 'year': 2026},
     {'url': '/event/2685/vct-2026-china-kickoff', 'name': 'VCT 2026: China Kickoff', 'year': 2026},
+    {'url': '/event/2760/valorant-masters-santiago-2026', 'name': 'Masters Santiago 2026', 'year': 2026},
 ]
 
 
@@ -148,7 +149,7 @@ def _team_matches(a: str, b: str) -> bool:
 def _is_international(event_name: str) -> bool:
     """True if event is International (Masters, Champions, EWC)."""
     n = (event_name or '').lower()
-    if 'masters madrid' in n or 'masters toronto' in n:
+    if 'masters madrid' in n or 'masters toronto' in n or 'masters santiago' in n:
         return True
     if 'valorant champions' in n and 'ascension' not in n:
         return True
@@ -169,14 +170,19 @@ def main():
                         help='Skip International events (Masters, Champions, EWC)')
     parser.add_argument('--challengers-only', action='store_true',
                         help='ONLY populate Challengers events - skip Tier 1 (regional VCT)')
+    parser.add_argument('--year', type=int, default=None,
+                        help='Only populate events from this year (e.g. 2026)')
     args = parser.parse_args()
 
     events = MONEYLINE_EVENTS
+    if args.year:
+        events = [e for e in events if e.get('year') == args.year]
+        logger.info(f"Filtering to year {args.year} - {len(events)} events")
     if args.challengers_only:
-        events = [e for e in MONEYLINE_EVENTS if _is_challengers(e['name'])]
-        logger.info(f"Challengers only - processing {len(events)} Challengers events")
+        events = [e for e in events if _is_challengers(e['name'])]
+        logger.info(f"Challengers only - processing {len(events)} events")
     elif args.skip_international:
-        events = [e for e in MONEYLINE_EVENTS if not _is_international(e['name'])]
+        events = [e for e in events if not _is_international(e['name'])]
         logger.info(f"Skipping International - processing {len(events)} events")
     else:
         logger.info(f"Processing all {len(events)} events")

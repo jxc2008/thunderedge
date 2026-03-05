@@ -51,8 +51,14 @@ function StatCard({ label, value, delta, icon, semantic = 'neutral', monospace }
 
       {/* Value */}
       <p
-        className={`font-bold tabular-nums leading-none${monospace ? ' font-mono' : ''}`}
-        style={{ fontSize: '1.75rem', color: valueColor }}
+        className={`tabular-nums leading-none${monospace ? ' font-mono' : ''}`}
+        style={{
+          fontFamily: monospace ? undefined : 'var(--font-display)',
+          fontWeight: 900,
+          fontSize: '2rem',
+          letterSpacing: '-0.01em',
+          color: valueColor,
+        }}
       >
         {value}
       </p>

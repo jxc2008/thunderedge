@@ -22,10 +22,10 @@ const CONFIG: Record<
 > = {
   BET_OVER: {
     label: 'BET OVER',
-    accentColor: '#3b82f6',
-    dimColor: 'rgba(59,130,246,0.05)',
+    accentColor: '#22c55e',
+    dimColor: 'rgba(34,197,94,0.05)',
     Icon: ArrowUp,
-    iconBg: 'rgba(59,130,246,0.15)',
+    iconBg: 'rgba(34,197,94,0.15)',
   },
   BET_UNDER: {
     label: 'BET UNDER',
@@ -77,7 +77,7 @@ export function RecommendationCard({
 
   return (
     <div
-      className="w-full rounded-[12px] border relative overflow-hidden flex items-stretch"
+      className="w-full rounded-[12px] border relative flex items-stretch flex-col md:flex-row"
       style={{
         borderColor: '#27272a',
         background: `linear-gradient(to right, ${cfg.dimColor}, transparent 40%)`,
@@ -95,10 +95,16 @@ export function RecommendationCard({
       </div>
 
       {/* Center: recommendation text + reason */}
-      <div className="flex-1 flex flex-col justify-center py-5 pr-4">
+      <div className="flex-1 flex flex-col justify-center py-5 px-5 md:pl-0 md:pr-4">
         <p
-          className="font-bold tracking-tight"
-          style={{ fontSize: '1.5rem', color: '#ffffff' }}
+          className="uppercase"
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 900,
+            fontSize: '1.75rem',
+            letterSpacing: '-0.01em',
+            color: '#ffffff',
+          }}
         >
           {cfg.label}
         </p>
@@ -110,10 +116,16 @@ export function RecommendationCard({
       </div>
 
       {/* Right: EV + confidence */}
-      <div className="flex flex-col items-end justify-center py-5 px-5 shrink-0">
+      <div className="flex flex-col items-start md:items-end justify-center py-5 px-5 shrink-0">
         <p
-          className="font-extrabold tabular-nums leading-none"
-          style={{ fontSize: '2rem', color: evColor }}
+          className="tabular-nums leading-none"
+          style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 900,
+            fontSize: '2.5rem',
+            letterSpacing: '-0.02em',
+            color: evColor,
+          }}
         >
           {evPositive ? '+' : ''}{ev.toFixed(2)}
         </p>

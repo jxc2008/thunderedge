@@ -1,6 +1,7 @@
 # backend/database.py
 import sqlite3
 import json
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
@@ -758,14 +759,20 @@ class Database:
         finally:
             conn.close()
     
-    def get_player_agent_aggregation(self, player_name: str, tier: Optional[int] = None) -> List[Dict]:
-        """Get aggregated stats per agent. tier: 1=VCT, 2=Challengers, None=all."""
+    def get_player_agent_aggregation(self, player_name: str, tier: Optional[int] = None, kill_line: Optional[float] = None) -> List[Dict]:
+        """Get aggregated stats per agent. tier: 1=VCT, 2=Challengers, None=all. kill_line for over/under counts."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         
+        over_under = ''
+        if kill_line is not None:
+            over_under = ''',
+                        SUM(CASE WHEN pms.kills > ? THEN 1 ELSE 0 END) as over_count,
+                        SUM(CASE WHEN pms.kills <= ? THEN 1 ELSE 0 END) as under_count'''
+        
         try:
             if tier is not None:
-                cursor.execute('''
+                sql = '''
                     SELECT 
                         pms.agent,
                         COUNT(DISTINCT pms.match_id) as matches_played,
@@ -776,16 +783,17 @@ class Database:
                         AVG(pms.acs) as avg_acs,
                         AVG(pms.adr) as avg_adr,
                         AVG(pms.kast) as avg_kast,
-                        SUM(pms.first_bloods) as total_first_bloods
+                        SUM(pms.first_bloods) as total_first_bloods''' + over_under + '''
                     FROM player_map_stats pms
                     JOIN matches m ON pms.match_id = m.id
                     JOIN vct_events ve ON m.event_id = ve.id
                     WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0 AND ve.tier = ?
                     GROUP BY pms.agent
                     ORDER BY maps_played DESC
-                ''', (player_name, tier))
+                '''
+                params = (player_name, tier) if kill_line is None else (kill_line, kill_line, player_name, tier)
             else:
-                cursor.execute('''
+                sql = '''
                     SELECT 
                         pms.agent,
                         COUNT(DISTINCT pms.match_id) as matches_played,
@@ -796,30 +804,46 @@ class Database:
                         AVG(pms.acs) as avg_acs,
                         AVG(pms.adr) as avg_adr,
                         AVG(pms.kast) as avg_kast,
-                        SUM(pms.first_bloods) as total_first_bloods
+                        SUM(pms.first_bloods) as total_first_bloods''' + over_under + '''
                     FROM player_map_stats pms
                     WHERE LOWER(pms.player_name) = LOWER(?) AND pms.agent IS NOT NULL AND pms.kills > 0
                     GROUP BY pms.agent
                     ORDER BY maps_played DESC
-                ''', (player_name,))
+                '''
+                params = (player_name,) if kill_line is None else (kill_line, kill_line, player_name)
             
+            cursor.execute(sql, params)
             rows = cursor.fetchall()
             
             agents = []
+            has_over_under = kill_line is not None
             for row in rows:
-                agents.append({
+                maps_played = row[2]
+                total_kills = row[3]
+                avg_kills = round(total_kills / maps_played, 1) if maps_played > 0 else 0
+                over_count = row[10] if has_over_under and len(row) > 10 else None
+                under_count = row[11] if has_over_under and len(row) > 11 else None
+                over_pct = round(over_count / maps_played * 100, 1) if over_count is not None and maps_played > 0 else None
+                
+                agent_dict = {
                     'agent': row[0],
                     'matches_played': row[1],
-                    'maps_played': row[2],
-                    'total_kills': row[3],
+                    'maps_played': maps_played,
+                    'maps': maps_played,
+                    'total_kills': total_kills,
                     'total_deaths': row[4],
                     'total_assists': row[5],
                     'avg_acs': round(row[6], 1) if row[6] else 0,
                     'avg_adr': round(row[7], 1) if row[7] else 0,
                     'avg_kast': round(row[8], 1) if row[8] else 0,
                     'total_first_bloods': row[9],
-                    'kd_ratio': round(row[3] / row[4], 2) if row[4] > 0 else 0
-                })
+                    'kd_ratio': round(row[3] / row[4], 2) if row[4] > 0 else 0,
+                    'avg_kills': avg_kills,
+                    'over_count': over_count,
+                    'under_count': under_count,
+                    'over_pct': over_pct,
+                }
+                agents.append(agent_dict)
             
             return agents
             
@@ -1317,6 +1341,444 @@ class Database:
             return None
         finally:
             conn.close()
+
+    # ==================== Team Matchup ====================
+
+    def _normalize_team(self, team_name: str) -> str:
+        """Return LIKE pattern for flexible team name matching."""
+        return f'%{team_name.strip()}%'
+
+    @staticmethod
+    def _clean_team_name(raw: str) -> str:
+        """Strip event-name pollution from a stored team name.
+
+        The scraper sometimes stores team names with the event context appended,
+        e.g. 'Nrg Vct 2025 Americas Stage 2 Lbf' instead of 'Nrg Esports'.
+        We strip everything from the first year-digit or known event keyword.
+        """
+        import re
+        if not raw:
+            return raw
+        # Truncate at first occurrence of a 4-digit year or event keyword
+        m = re.search(
+            r'\s+(?:20\d{2}|vct\b|champions?\s+tour\b|challengers?\b)',
+            raw,
+            flags=re.IGNORECASE,
+        )
+        return raw[:m.start()].strip() if m else raw.strip()
+
+    def get_team_overview(self, team_name: str, year: int = 2026) -> Dict:
+        """Aggregate team stats derived from player_map_stats + matches + players."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        try:
+            cursor.execute('''
+                SELECT pms.match_id, pms.map_number, pms.kills, pms.deaths,
+                       pms.map_score, ve.event_name, ve.id as event_id, p.team
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE LOWER(p.team) LIKE LOWER(?)
+                  AND pms.kills > 0
+                  AND ve.year = ?
+                ORDER BY ve.id DESC
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            resolved_name = team_name
+            # Per-event accumulators: {event_id: {event_name, kills, deaths, maps set, matches set, round_map dict}}
+            event_data: Dict[int, Dict] = {}
+            # Track rounds per unique (match_id, map_number) globally to avoid overcounting
+            global_round_map: Dict[tuple, int] = {}
+
+            for (match_id, map_number, kills, deaths, map_score, event_name, event_id, team) in rows:
+                if not resolved_name or resolved_name == team_name:
+                    resolved_name = team
+
+                if event_id not in event_data:
+                    event_data[event_id] = {
+                        'event_name': event_name,
+                        'kills': 0,
+                        'deaths': 0,
+                        'maps': set(),
+                        'matches': set(),
+                        'round_map': {},
+                    }
+                ed = event_data[event_id]
+                ed['kills'] += kills or 0
+                ed['deaths'] += deaths or 0
+                ed['maps'].add((match_id, map_number))
+                ed['matches'].add(match_id)
+
+                map_key = (match_id, map_number)
+                if map_key not in ed['round_map'] and map_score and '-' in map_score:
+                    parts = map_score.split('-')
+                    if len(parts) == 2:
+                        try:
+                            ed['round_map'][map_key] = int(parts[0]) + int(parts[1])
+                        except ValueError:
+                            pass
+
+                # Global round tracking
+                if map_key not in global_round_map and map_score and '-' in map_score:
+                    parts = map_score.split('-')
+                    if len(parts) == 2:
+                        try:
+                            global_round_map[map_key] = int(parts[0]) + int(parts[1])
+                        except ValueError:
+                            pass
+
+            total_kills = total_deaths = 0
+            total_maps_set: set = set()
+            total_matches_set: set = set()
+            events = []
+            for event_id in sorted(event_data.keys(), reverse=True):
+                ed = event_data[event_id]
+                e_kills = ed['kills']
+                e_deaths = ed['deaths']
+                e_rounds = sum(ed['round_map'].values())
+                e_maps = len(ed['maps'])
+                e_matches = len(ed['matches'])
+                total_kills += e_kills
+                total_deaths += e_deaths
+                total_maps_set.update(ed['maps'])
+                total_matches_set.update(ed['matches'])
+                events.append({
+                    'event_name': ed['event_name'],
+                    'event_id': event_id,
+                    'fights_per_round': None,
+                    'kills': e_kills,
+                    'deaths': e_deaths,
+                    'rounds': e_rounds,
+                    'matches_played': e_matches,
+                    'maps_played': e_maps,
+                })
+
+            total_rounds = sum(global_round_map.values())
+            total_maps = len(total_maps_set)
+            total_matches = len(total_matches_set)
+            overall_kd = round(total_kills / total_deaths, 2) if total_deaths > 0 else None
+            avg_rounds_per_map = round(total_rounds / total_maps, 1) if total_maps > 0 else None
+
+            return {
+                'resolved_name': resolved_name,
+                'total_kills': total_kills,
+                'total_deaths': total_deaths,
+                'total_rounds': total_rounds,
+                'total_matches': total_matches,
+                'total_maps': total_maps,
+                'avg_rounds_per_map': avg_rounds_per_map,
+                'overall_kd': overall_kd,
+                'overall_fpr': None,
+                'events': events,
+            }
+        except Exception as e:
+            logger.error(f"Error getting team overview for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_team_pick_ban_stats(self, team_name: str, year: int = 2026) -> Dict:
+        """Aggregate map pick/ban rates from match_pick_bans for matches the team played."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        try:
+            cursor.execute('''
+                SELECT mpb.first_ban, mpb.second_ban, mpb.first_pick, mpb.second_pick
+                FROM match_pick_bans mpb
+                JOIN matches m ON mpb.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND ve.year = ?
+            ''', (pat, pat, year))
+            rows = cursor.fetchall()
+            total = len(rows)
+            counts: Dict[str, Dict] = {
+                'first_ban': {}, 'second_ban': {},
+                'first_pick': {}, 'second_pick': {},
+            }
+            for (fb, sb, fp, sp) in rows:
+                for key, val in [('first_ban', fb), ('second_ban', sb), ('first_pick', fp), ('second_pick', sp)]:
+                    if val:
+                        counts[key][val] = counts[key].get(val, 0) + 1
+            result: Dict = {'total_matches': total}
+            for action in counts:
+                result[action] = sorted(
+                    [{'map': m, 'rate': round(c / total, 3) if total else 0}
+                     for m, c in counts[action].items()],
+                    key=lambda x: -x['rate']
+                )[:5]
+            return result
+        except Exception as e:
+            logger.error(f"Error getting team pick/ban stats for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_team_map_records(self, team_name: str, year: int = 2026) -> List[Dict]:
+        """Per-map win/loss record and avg rounds for a team."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        try:
+            cursor.execute('''
+                SELECT m.id, m.team1, m.team2, pms.map_name, MIN(pms.map_score) as map_score
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND pms.map_score IS NOT NULL AND pms.map_score LIKE '%-%'
+                  AND pms.kills > 0 AND pms.map_name IS NOT NULL
+                  AND ve.year = ?
+                GROUP BY m.id, pms.map_number, pms.map_name
+            ''', (pat, pat, year))
+            rows = cursor.fetchall()
+            map_stats: Dict[str, Dict] = {}
+            tname_lower = team_name.lower()
+            for (match_id, team1, team2, map_name, map_score) in rows:
+                if not map_score or '-' not in map_score:
+                    continue
+                parts = map_score.split('-')
+                if len(parts) != 2:
+                    continue
+                try:
+                    t1_rounds = int(parts[0])
+                    t2_rounds = int(parts[1])
+                except ValueError:
+                    continue
+                is_team1 = tname_lower in (team1 or '').lower()
+                is_team2 = tname_lower in (team2 or '').lower()
+                if not is_team1 and not is_team2:
+                    continue
+                team_rounds = t1_rounds if is_team1 else t2_rounds
+                opp_rounds = t2_rounds if is_team1 else t1_rounds
+                total_rounds = t1_rounds + t2_rounds
+                won = team_rounds > opp_rounds
+                if map_name not in map_stats:
+                    map_stats[map_name] = {'map': map_name, 'wins': 0, 'losses': 0,
+                                           'team_rounds': 0, 'opp_rounds': 0,
+                                           'total_rounds': 0, 'played': 0}
+                map_stats[map_name]['wins'] += 1 if won else 0
+                map_stats[map_name]['losses'] += 0 if won else 1
+                map_stats[map_name]['team_rounds'] += team_rounds
+                map_stats[map_name]['opp_rounds'] += opp_rounds
+                map_stats[map_name]['total_rounds'] += total_rounds
+                map_stats[map_name]['played'] += 1
+            result = []
+            for ms in map_stats.values():
+                played = ms['played']
+                result.append({
+                    'map': ms['map'],
+                    'wins': ms['wins'],
+                    'losses': ms['losses'],
+                    'played': played,
+                    'win_rate': round(100 * ms['wins'] / played, 1) if played > 0 else 0,
+                    'avg_team_rounds': round(ms['team_rounds'] / played, 1) if played > 0 else 0,
+                    'avg_opp_rounds': round(ms['opp_rounds'] / played, 1) if played > 0 else 0,
+                    'avg_total_rounds': round(ms['total_rounds'] / played, 1) if played > 0 else 0,
+                })
+            return sorted(result, key=lambda x: -x['played'])
+        except Exception as e:
+            logger.error(f"Error getting team map records for {team_name}: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_team_recent_matches(self, team_name: str, limit: int = 15, year: int = 2026) -> List[Dict]:
+        """Recent matches for a team ordered by newest first."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
+        try:
+            cursor.execute('''
+                SELECT m.id, m.match_url, m.team1, m.team2, ve.event_name,
+                       mn.winner, mn.team1_maps, mn.team2_maps
+                FROM matches m
+                JOIN vct_events ve ON m.event_id = ve.id
+                LEFT JOIN moneyline_matches mn ON m.match_url = mn.match_url
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND ve.year = ?
+                ORDER BY m.id DESC
+                LIMIT ?
+            ''', (pat, pat, year, limit))
+            rows = cursor.fetchall()
+            results = []
+            for (mid, url, t1, t2, event_name, winner, t1_maps, t2_maps) in rows:
+                is_team1 = tname_lower in (t1 or '').lower()
+                raw_opp = t2 if is_team1 else t1
+                opponent = self._clean_team_name(raw_opp or '')
+                team_maps = (t1_maps or 0) if is_team1 else (t2_maps or 0)
+                opp_maps = (t2_maps or 0) if is_team1 else (t1_maps or 0)
+                won = None
+                if winner:
+                    won = tname_lower in (winner or '').lower()
+                results.append({
+                    'match_id': mid,
+                    'match_url': url,
+                    'opponent': opponent,
+                    'event_name': event_name,
+                    'result': 'W' if won is True else ('L' if won is False else None),
+                    'score': f'{team_maps}-{opp_maps}' if (t1_maps is not None and t2_maps is not None) else None,
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Error getting recent matches for {team_name}: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_team_comps_per_map(self, team_name: str, year: int = 2026) -> Dict[str, List[Dict]]:
+        """Full 5-agent compositions per map for a team.
+
+        Primary: joins players.team for team assignment.
+        Fallback: uses row-insertion order (pms.id) to split 10 players into team1/team2
+                  when the players table lacks enough coverage for this team.
+        """
+        from collections import Counter as _Counter
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        pat = self._normalize_team(team_name)
+        tname_lower = team_name.lower()
+
+        def _build_result(map_plays: Dict) -> Dict[str, List[Dict]]:
+            map_comp_counts: Dict[str, _Counter] = {}
+            for (match_id, map_number, map_name), agents in map_plays.items():
+                if len(agents) < 4:
+                    continue
+                comp = tuple(sorted(agents))
+                if map_name not in map_comp_counts:
+                    map_comp_counts[map_name] = _Counter()
+                map_comp_counts[map_name][comp] += 1
+            out: Dict[str, List[Dict]] = {}
+            for map_name, comp_counter in sorted(map_comp_counts.items()):
+                total = sum(comp_counter.values())
+                out[map_name] = [
+                    {'agents': list(comp), 'count': cnt, 'pct': round(cnt / total * 100, 1)}
+                    for comp, cnt in comp_counter.most_common()
+                ]
+            return out
+
+        try:
+            # ── Primary: players.team join ──────────────────────────────────
+            cursor.execute('''
+                SELECT pms.match_id, pms.map_number, pms.map_name, pms.agent
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                JOIN players p ON LOWER(pms.player_name) = LOWER(p.ign)
+                WHERE LOWER(p.team) LIKE LOWER(?)
+                  AND pms.agent IS NOT NULL AND pms.map_name IS NOT NULL AND pms.kills > 0
+                  AND ve.year = ?
+            ''', (pat, year))
+            rows = cursor.fetchall()
+
+            map_plays: Dict[tuple, List[str]] = {}
+            for (match_id, map_number, map_name, agent) in rows:
+                key = (match_id, map_number, map_name)
+                map_plays.setdefault(key, []).append(agent)
+
+            # Count valid maps (>= 4 agents found via players table)
+            valid_maps = sum(1 for agents in map_plays.values() if len(agents) >= 4)
+
+            if valid_maps >= 3:
+                return _build_result(map_plays)
+
+            # ── Fallback: row-insertion order split ─────────────────────────
+            # For each match, the populate script inserted team1's players first
+            # (lower pms.id) then team2's players. Split accordingly.
+            cursor.execute('''
+                SELECT pms.id, pms.match_id, pms.map_number, pms.map_name,
+                       pms.agent, m.team1, m.team2
+                FROM player_map_stats pms
+                JOIN matches m ON pms.match_id = m.id
+                JOIN vct_events ve ON m.event_id = ve.id
+                WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
+                  AND pms.agent IS NOT NULL AND pms.map_name IS NOT NULL AND pms.kills > 0
+                  AND ve.year = ?
+                ORDER BY pms.match_id, pms.map_number, pms.id
+            ''', (pat, pat, year))
+            fb_rows = cursor.fetchall()
+
+            # Group by (match_id, map_number) preserving insertion order
+            from collections import defaultdict as _dd
+            grp: Dict = _dd(lambda: {'map_name': None, 'team1': None, 'team2': None, 'agents': []})
+            for (row_id, match_id, map_number, map_name, agent, t1, t2) in fb_rows:
+                key = (match_id, map_number)
+                grp[key]['map_name'] = map_name
+                grp[key]['team1'] = t1
+                grp[key]['team2'] = t2
+                grp[key]['agents'].append(agent)
+
+            fb_plays: Dict[tuple, List[str]] = {}
+            for (match_id, map_number), info in grp.items():
+                agents_all = info['agents']
+                n = len(agents_all)
+                if n < 8:
+                    continue
+                is_team1 = tname_lower in (info['team1'] or '').lower()
+                half = n // 2
+                team_agents = agents_all[:half] if is_team1 else agents_all[half:]
+                fb_plays[(match_id, map_number, info['map_name'])] = team_agents
+
+            return _build_result(fb_plays)
+
+        except Exception as e:
+            logger.error(f"Error getting team comps for {team_name}: {e}")
+            return {}
+        finally:
+            conn.close()
+
+    def get_head_to_head(self, team1_name: str, team2_name: str, year: int = 2026) -> List[Dict]:
+        """All matches between two teams."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        cursor = conn.cursor()
+        p1 = self._normalize_team(team1_name)
+        p2 = self._normalize_team(team2_name)
+        try:
+            cursor.execute('''
+                SELECT m.id, m.match_url, m.team1, m.team2, ve.event_name,
+                       mn.winner, mn.team1_maps, mn.team2_maps
+                FROM matches m
+                JOIN vct_events ve ON m.event_id = ve.id
+                LEFT JOIN moneyline_matches mn ON m.match_url = mn.match_url
+                WHERE ((LOWER(m.team1) LIKE LOWER(?) AND LOWER(m.team2) LIKE LOWER(?))
+                   OR  (LOWER(m.team1) LIKE LOWER(?) AND LOWER(m.team2) LIKE LOWER(?)))
+                  AND ve.year = ?
+                ORDER BY m.id DESC
+            ''', (p1, p2, p2, p1, year))
+            rows = cursor.fetchall()
+            results = []
+            for (mid, url, t1, t2, event_name, winner, t1_maps, t2_maps) in rows:
+                results.append({
+                    'match_id': mid,
+                    'match_url': url,
+                    'team1': self._clean_team_name(t1 or ''),
+                    'team2': self._clean_team_name(t2 or ''),
+                    'event_name': event_name,
+                    'winner': self._clean_team_name(winner or '') if winner else None,
+                    'team1_maps': t1_maps,
+                    'team2_maps': t2_maps,
+                })
+            return results
+        except Exception as e:
+            logger.error(f"Error getting H2H for {team1_name} vs {team2_name}: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_team_matchup_data(self, team_name: str) -> Dict:
+        """Master method: all matchup data for one team."""
+        return {
+            'overview': self.get_team_overview(team_name),
+            'pick_ban': self.get_team_pick_ban_stats(team_name),
+            'map_records': self.get_team_map_records(team_name),
+            'recent_matches': self.get_team_recent_matches(team_name),
+            'comps_per_map': self.get_team_comps_per_map(team_name),
+        }
 
     # ==================== Legacy Methods ====================
     

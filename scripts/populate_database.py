@@ -47,21 +47,30 @@ VCT_2025_EVENTS = [
     {'url': '/event/2274/vct-2025-americas-kickoff', 'name': 'VCT 2025: Americas Kickoff', 'region': 'Americas', 'year': 2025},
     {'url': '/event/2347/vct-2025-americas-stage-1', 'name': 'VCT 2025: Americas Stage 1', 'region': 'Americas', 'year': 2025},
     {'url': '/event/2501/vct-2025-americas-stage-2', 'name': 'VCT 2025: Americas Stage 2', 'region': 'Americas', 'year': 2025},
-    
+
     # EMEA
     {'url': '/event/2276/vct-2025-emea-kickoff', 'name': 'VCT 2025: EMEA Kickoff', 'region': 'EMEA', 'year': 2025},
     {'url': '/event/2380/vct-2025-emea-stage-1', 'name': 'VCT 2025: EMEA Stage 1', 'region': 'EMEA', 'year': 2025},
     {'url': '/event/2498/vct-2025-emea-stage-2', 'name': 'VCT 2025: EMEA Stage 2', 'region': 'EMEA', 'year': 2025},
-    
+
     # Pacific
     {'url': '/event/2277/vct-2025-pacific-kickoff', 'name': 'VCT 2025: Pacific Kickoff', 'region': 'Pacific', 'year': 2025},
     {'url': '/event/2379/vct-2025-pacific-stage-1', 'name': 'VCT 2025: Pacific Stage 1', 'region': 'Pacific', 'year': 2025},
     {'url': '/event/2500/vct-2025-pacific-stage-2', 'name': 'VCT 2025: Pacific Stage 2', 'region': 'Pacific', 'year': 2025},
-    
+
     # China
     {'url': '/event/2275/vct-2025-china-kickoff', 'name': 'VCT 2025: China Kickoff', 'region': 'China', 'year': 2025},
     {'url': '/event/2359/vct-2025-china-stage-1', 'name': 'VCT 2025: China Stage 1', 'region': 'China', 'year': 2025},
     {'url': '/event/2499/vct-2025-china-stage-2', 'name': 'VCT 2025: China Stage 2', 'region': 'China', 'year': 2025},
+]
+
+# 2026 VCT Kickoff events (all 4 regions completed)
+# Event IDs verified from VLR.gg on 2026-02-27
+VCT_2026_KICKOFF_EVENTS = [
+    {'url': '/event/2682/vct-2026-americas-kickoff', 'name': 'VCT 2026: Americas Kickoff', 'region': 'Americas', 'year': 2026},
+    {'url': '/event/2684/vct-2026-emea-kickoff',     'name': 'VCT 2026: EMEA Kickoff',     'region': 'EMEA',     'year': 2026},
+    {'url': '/event/2683/vct-2026-pacific-kickoff',  'name': 'VCT 2026: Pacific Kickoff',  'region': 'Pacific',  'year': 2026},
+    {'url': '/event/2685/vct-2026-china-kickoff',    'name': 'VCT 2026: China Kickoff',    'region': 'China',    'year': 2026},
 ]
 
 class DatabasePopulator:
@@ -555,21 +564,37 @@ class DatabasePopulator:
 
 def main():
     print("\n" + "="*60)
-    print("  VCT 2025 Database Population Script")
+    print("  VCT Database Population Script")
     print("="*60)
-    print("\nThis script will populate the database with all 2025 VCT events.")
-    print(f"Events to process: {len(VCT_2025_EVENTS)}")
-    print("\nEstimated time: 5-10 minutes")
+    print("\nSelect events to populate:")
+    print("  1) VCT 2026 Kickoff (all 4 regions) — NEW")
+    print("  2) VCT 2025 (all 12 events)")
+    print("  3) Both 2026 Kickoff + 2025")
     print("\n" + "-"*60)
-    
+
+    choice = input("Choice [1/2/3]: ").strip()
+    if choice == '1':
+        events = VCT_2026_KICKOFF_EVENTS
+    elif choice == '2':
+        events = VCT_2025_EVENTS
+    elif choice == '3':
+        events = VCT_2026_KICKOFF_EVENTS + VCT_2025_EVENTS
+    else:
+        print("Aborted.")
+        return
+
+    print(f"\nEvents to process: {len(events)}")
+    print("Estimated time: ~2 min per event")
+    print("\n" + "-"*60)
+
     response = input("Continue? (y/n): ").strip().lower()
     if response != 'y':
         print("Aborted.")
         return
-    
+
     populator = DatabasePopulator()
-    populator.populate_all_events()
-    
+    populator.populate_all_events(events)
+
     # Print final database stats
     print("\n" + "-"*60)
     print("Database Stats:")

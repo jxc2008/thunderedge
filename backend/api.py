@@ -139,8 +139,8 @@ def get_player_analysis(ign):
                 'input_method': matchup.get('method')
             }
         
-        # Add agent and map aggregations
-        agent_stats = db.get_player_agent_aggregation(ign)
+        # Add agent and map aggregations (pass kill_line for over/under counts)
+        agent_stats = db.get_player_agent_aggregation(ign, kill_line=kill_line)
         map_stats = db.get_player_map_aggregation(ign)
         
         # Return response
@@ -218,7 +218,7 @@ def get_challengers_player_analysis(ign):
                 'components': adj.get('components', {}),
                 'input_method': matchup.get('method')
             }
-        agent_stats = db.get_player_agent_aggregation(ign, tier=2)
+        agent_stats = db.get_player_agent_aggregation(ign, tier=2, kill_line=kill_line)
         map_stats = db.get_player_map_aggregation(ign, tier=2)
         return jsonify({
             'success': True,
@@ -758,6 +758,56 @@ def get_team_analysis(team_name):
         logger.error(f"Error processing team {team_name}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/matchup', methods=['GET'])
+def get_matchup_analysis():
+    """Get matchup analysis for two teams.
+    Query params: team1, team2, team1_odds (optional), team2_odds (optional)
+    """
+    try:
+        team1 = request.args.get('team1', '').strip()
+        team2 = request.args.get('team2', '').strip()
+        if not team1 or not team2:
+            return jsonify({'error': 'Both team1 and team2 are required'}), 400
+
+        team1_data = db.get_team_matchup_data(team1)
+        team2_data = db.get_team_matchup_data(team2)
+        h2h = db.get_head_to_head(team1, team2)
+
+        # Parse odds if provided
+        odds_info = None
+        try:
+            t1o_raw = request.args.get('team1_odds', '')
+            t2o_raw = request.args.get('team2_odds', '')
+            if t1o_raw and t2o_raw:
+                t1o = float(t1o_raw)
+                t2o = float(t2o_raw)
+                raw1 = 1.0 / t1o
+                raw2 = 1.0 / t2o
+                vig = raw1 + raw2
+                odds_info = {
+                    'team1_odds': t1o,
+                    'team2_odds': t2o,
+                    'team1_win_prob': round(raw1 / vig, 4),
+                    'team2_win_prob': round(raw2 / vig, 4),
+                    'vig_pct': round((vig - 1) * 100, 2),
+                }
+        except (ValueError, ZeroDivisionError):
+            pass
+
+        response = jsonify({
+            'success': True,
+            'team1': {'name': team1, **team1_data},
+            'team2': {'name': team2, **team2_data},
+            'head_to_head': h2h,
+            'odds': odds_info,
+        })
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in matchup analysis: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/prizepicks/<ign>', methods=['GET'])
 def get_prizepicks_analysis(ign):
     """Get PrizePicks analysis for a specific player.
@@ -1239,7 +1289,9 @@ def get_prizepicks_leaderboard():
                 'message': 'No Valorant kill lines available from PrizePicks (may be off-season or API unavailable).'
             })
 
-        results, skipped = _build_leaderboard_from_projections(projections)
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
+        results, skipped = _build_leaderboard_from_projections(projections, combo_maps=combo_maps)
         if results:
             db.save_leaderboard_snapshot('api', results, parsed_count=len(projections))
         return jsonify({
@@ -1273,7 +1325,9 @@ def get_challengers_prizepicks_leaderboard():
                 'success': True, 'leaderboard': [],
                 'message': 'No Valorant kill lines from PrizePicks.'
             })
-        results, skipped = _build_leaderboard_from_projections(projections, use_challengers=True)
+        combo_maps = int(request.args.get('combo_maps', 2))
+        combo_maps = 2 if combo_maps not in (2, 3) else combo_maps
+        results, skipped = _build_leaderboard_from_projections(projections, combo_maps=combo_maps, use_challengers=True)
         if results:
             db.save_leaderboard_snapshot('challengers_api', results, parsed_count=len(projections))
         return jsonify({
@@ -1589,13 +1643,16 @@ def apply_leaderboard_matchup():
 
 @app.route('/api/prizepicks/leaderboard/history', methods=['GET'])
 def get_leaderboard_history():
-    """List recent leaderboard snapshots. ?challengers=true filters to Challengers snapshots."""
+    """List recent leaderboard snapshots. ?challengers=true = tier 2 only; ?challengers=false = tier 1 (VCT) only; omit = all."""
     try:
         limit = int(request.args.get('limit', 50))
         limit = min(limit, 200)
         snapshots = db.get_leaderboard_snapshots(limit=limit)
-        if request.args.get('challengers', 'false').lower() == 'true':
+        ch = request.args.get('challengers', '').lower()
+        if ch == 'true':
             snapshots = [s for s in snapshots if s.get('source', '').startswith('challengers')]
+        elif ch == 'false':
+            snapshots = [s for s in snapshots if not s.get('source', '').startswith('challengers')]
         return jsonify({'success': True, 'snapshots': snapshots})
     except Exception as e:
         logger.error(f"Error getting leaderboard history: {e}", exc_info=True)

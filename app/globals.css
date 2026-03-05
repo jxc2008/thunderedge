@@ -1,10 +1,14 @@
+@config "../tailwind.config.js";
+@source "../app/**/*.{ts,tsx,js,jsx}";
+@source "../components/**/*.{ts,tsx,js,jsx}";
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'Inter', 'Inter Fallback', system-ui, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Barlow Condensed', Impact, 'Arial Narrow', sans-serif;
   --font-mono: 'JetBrains Mono', 'Courier New', monospace;
 
   /* ThunderEdge design tokens */
@@ -15,10 +19,15 @@
   --color-border-subtle: rgba(255, 255, 255, 0.06);
   --color-border-muted: #3f3f46;
 
-  --color-text-primary: #ffffff;
+  --color-text-primary: #e4e4e7;
   --color-text-secondary: #a1a1aa;
   --color-text-muted: #71717a;
   --color-text-placeholder: #52525b;
+
+  /* Yellow accent — primary brand color matching the original HTML */
+  --color-accent-yellow: #F0E040;
+  --color-accent-yellow-dim: rgba(240, 224, 64, 0.15);
+  --color-accent-yellow-border: rgba(240, 224, 64, 0.2);
 
   --color-primary: #3b82f6;
   --color-primary-dim: rgba(59, 130, 246, 0.15);
@@ -45,11 +54,11 @@
 
   /* Shadcn compatibility */
   --background: #000000;
-  --foreground: #ffffff;
+  --foreground: #e4e4e7;
   --card: #0a0a0a;
-  --card-foreground: #ffffff;
+  --card-foreground: #e4e4e7;
   --popover: #18181b;
-  --popover-foreground: #ffffff;
+  --popover-foreground: #e4e4e7;
   --primary: #3b82f6;
   --primary-foreground: #ffffff;
   --secondary: #18181b;
@@ -62,7 +71,7 @@
   --destructive-foreground: #ffffff;
   --border: #27272a;
   --input: #27272a;
-  --ring: #3b82f6;
+  --ring: #F0E040;
   --radius: 10px;
 }
 
@@ -79,14 +88,27 @@ html {
 
 body {
   background-color: #000000;
-  color: #ffffff;
+  color: #e4e4e7;
   font-family: var(--font-sans);
   line-height: 1.5;
   min-height: 100vh;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+/* Display / condensed font — Barlow Condensed for headings and big numbers */
+.font-display {
+  font-family: var(--font-display);
+}
+
+.page-container {
+  width: min(1400px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 24px;
+  padding-right: 24px;
 }
 
 /* Tabular numerics for all number-heavy UI */
@@ -125,17 +147,24 @@ body {
   background-clip: text;
 }
 
-/* Placeholder styling for dark inputs */
-input::placeholder,
-textarea::placeholder {
-  color: #71717a;
+/* Yellow accent text */
+.accent-text {
+  color: #F0E040;
 }
 
-/* CSS-based focus styles — replaces inline JS onFocus/onBlur handlers */
+/* Accent left-border card style — matches original .search-section/.player-card */
+.accent-card {
+  background: #0D0D0D;
+  border: 1px solid rgba(240, 224, 64, 0.15);
+  border-left: 3px solid #F0E040;
+  padding: 2rem;
+}
+
+/* CSS-based focus styles */
 input:focus-visible,
 textarea:focus-visible {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+  border-color: #F0E040 !important;
+  box-shadow: 0 0 0 3px rgba(240, 224, 64, 0.12) !important;
   outline: none;
 }
 

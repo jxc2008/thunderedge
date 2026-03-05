@@ -33,9 +33,11 @@ export function OverUnderDisplay({
           <div
             className="flex items-center gap-2 tabular-nums"
             style={{
-              fontSize: '4rem',
+              fontFamily: 'var(--font-display)',
+              fontSize: '4.5rem',
               fontWeight: 900,
               lineHeight: 1,
+              letterSpacing: '-0.02em',
               color: '#22c55e',
             }}
           >
@@ -74,9 +76,11 @@ export function OverUnderDisplay({
           <div
             className="flex items-center gap-2 tabular-nums"
             style={{
-              fontSize: '4rem',
+              fontFamily: 'var(--font-display)',
+              fontSize: '4.5rem',
               fontWeight: 900,
               lineHeight: 1,
+              letterSpacing: '-0.02em',
               color: '#ef4444',
             }}
           >
@@ -104,7 +108,10 @@ export function OverUnderDisplay({
 
       {/* Hit-rate progress bar */}
       <div className="px-6 pb-5 pt-4 border-t" style={{ borderColor: '#27272a' }}>
-        <div className="flex justify-between mb-1.5 text-[0.7rem] tabular-nums" style={{ color: '#52525b' }}>
+        <div
+          className="flex justify-between mb-1.5 text-[0.7rem] tabular-nums flex-wrap gap-2"
+          style={{ color: '#52525b', columnGap: 12, rowGap: 4 }}
+        >
           <span style={{ color: '#22c55e' }}>{overPct.toFixed(1)}% Over</span>
           {killLine !== undefined && (
             <span style={{ color: '#71717a' }}>Line: {killLine}</span>

@@ -18,7 +18,7 @@ const NAV_DROPDOWNS = [
     label: 'PrizePicks',
     links: [
       { label: 'PrizePicks', href: '/prizepicks' },
-      { label: 'Challengers PP', href: '/challengers-prizepicks' },
+      { label: 'Challengers PP', href: '/challengers/prizepicks' },
     ],
   },
 ]

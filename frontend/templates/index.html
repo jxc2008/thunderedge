@@ -196,18 +196,14 @@
             font-size: 0.8rem;
         }
         .result-grid {
-            display: grid;
-            grid-template-columns: minmax(0, 58%) minmax(0, 42%);
+            display: flex;
+            flex-direction: column;
             gap: 1.5rem;
-            max-width: 100%;
-            overflow: hidden;
+            width: 100%;
         }
         #resultLeft, #resultRight {
             min-width: 0;
             overflow-wrap: break-word;
-        }
-        @media (max-width: 768px) {
-            .result-grid { grid-template-columns: 1fr; }
         }
         .event-timeline .event-card {
             display: flex;
@@ -1259,26 +1255,6 @@
             
             resultDiv.innerHTML = `
                 <div class="result-grid">
-                <div id="resultLeft">
-                <div class="performance-bar">
-                    <div class="perf-item">Query Time: <span>${elapsed}s</span></div>
-                    <div class="perf-item">Events: <span>${cachedCount} cached</span> / <span class="live-badge">${liveCount} live</span></div>
-                    <div class="perf-item">Maps Analyzed: <span>${analysis.total_maps}</span></div>
-                </div>
-                ${edgeData && edgeData.visualization ? `
-                <div class="edge-chart-container" style="margin: 1rem 0;">
-                    <div class="edge-chart-title">Kill Distribution: Model vs Market</div>
-                    <div class="edge-chart-wrapper"><canvas id="distributionChart"></canvas></div>
-                </div>
-                ` : ''}
-                <div class="events-section">
-                    <h3>VCT Events Analyzed</h3>
-                    <p>
-                        Total KPR: ${analysis.total_kpr || analysis.weighted_kpr} | Weighted KPR: ${analysis.weighted_kpr} | Total Rounds: ${analysis.total_rounds}
-                    </p>
-                    <div class="event-timeline">${eventCardsHtml || '<p style="color: #71717a;">No event details available</p>'}</div>
-                </div>
-                </div>
                 <div id="resultRight">
                 <div class="player-card">
                     <div class="player-header">
@@ -1350,6 +1326,26 @@
                 ${renderAgentStats(agentStats, analysis.kill_line)}
                 ${renderMapStats(mapStats, analysis.kill_line)}
                 ${renderEdgeAnalysis(edgeData, analysis.kill_line, true)}
+                </div>
+                <div id="resultLeft">
+                <div class="performance-bar">
+                    <div class="perf-item">Query Time: <span>${elapsed}s</span></div>
+                    <div class="perf-item">Events: <span>${cachedCount} cached</span> / <span class="live-badge">${liveCount} live</span></div>
+                    <div class="perf-item">Maps Analyzed: <span>${analysis.total_maps}</span></div>
+                </div>
+                ${edgeData && edgeData.visualization ? `
+                <div class="edge-chart-container" style="margin: 1rem 0;">
+                    <div class="edge-chart-title">Kill Distribution: Model vs Market</div>
+                    <div class="edge-chart-wrapper"><canvas id="distributionChart"></canvas></div>
+                </div>
+                ` : ''}
+                <div class="events-section">
+                    <h3>VCT Events Analyzed</h3>
+                    <p>
+                        Total KPR: ${analysis.total_kpr || analysis.weighted_kpr} | Weighted KPR: ${analysis.weighted_kpr} | Total Rounds: ${analysis.total_rounds}
+                    </p>
+                    <div class="event-timeline">${eventCardsHtml || '<p style="color: #71717a;">No event details available</p>'}</div>
+                </div>
                 </div>
                 </div>
                 ${analysis.all_map_kills && analysis.all_map_kills.length > 0 ? `

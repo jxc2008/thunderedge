@@ -1120,6 +1120,7 @@
         function switchToLeaderboardTab() {
             document.querySelectorAll('.mode-tabs button').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-content-panel').forEach(p => p.classList.remove('active'));
             const btn = document.getElementById('leaderboardTabBtn');
             const panel = document.getElementById('leaderboardPanel');
             if (btn) btn.classList.add('active');
@@ -1128,26 +1129,35 @@
         function switchToAnalyzeTab() {
             document.querySelectorAll('.mode-tabs button').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-content-panel').forEach(p => p.classList.remove('active'));
             const btn = document.getElementById('analyzeTabBtn');
             const panel = document.getElementById('analyzePanel');
+            const tab = document.getElementById('analyzeTab');
             if (btn) btn.classList.add('active');
             if (panel) panel.classList.add('active');
+            if (tab) tab.classList.add('active');
         }
         function switchToParlayTab() {
             document.querySelectorAll('.mode-tabs button').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-content-panel').forEach(p => p.classList.remove('active'));
             const btn = document.getElementById('parlayTabBtn');
             const panel = document.getElementById('parlayPanel');
+            const tab = document.getElementById('parlayTab');
             if (btn) btn.classList.add('active');
             if (panel) panel.classList.add('active');
+            if (tab) tab.classList.add('active');
         }
         function switchToHistoryTab() {
             document.querySelectorAll('.mode-tabs button').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-content-panel').forEach(p => p.classList.remove('active'));
             const btn = document.getElementById('historyTabBtn');
             const panel = document.getElementById('historyPanel');
+            const tab = document.getElementById('historyTab');
             if (btn) btn.classList.add('active');
             if (panel) panel.classList.add('active');
+            if (tab) tab.classList.add('active');
         }
 
         function createParlayLegRow(index, leg = {}) {

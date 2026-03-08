@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def db_path():
     """Return the path to the real SQLite database (local-only, no CI)."""
     return Config.DATABASE_PATH

@@ -12,7 +12,7 @@ ThunderEdge adds an ML prediction engine (player embeddings + quantile regressio
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data Pipeline & Embeddings** - Feature extraction, temporal splitting, and player embedding model training
+- [x] **Phase 1: Data Pipeline & Embeddings** - Feature extraction, temporal splitting, and player embedding model training (completed 2026-03-08)
 - [ ] **Phase 2: From-Scratch Algorithms** - Quantile regression (pinball loss) and k-NN similarity search, numpy-only
 - [ ] **Phase 3: Inference Integration** - Wire trained models into Flask API with dual predictions and graceful degradation
 - [ ] **Phase 4: UI Foundation & Navigation** - Dark design system, loading states, and unified navigation across all pages
@@ -111,7 +111,7 @@ Note: Phase 4 (UI) can begin in parallel with Phases 2-3 (ML) since it has no ba
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Pipeline & Embeddings | 1/2 | In progress | - |
+| 1. Data Pipeline & Embeddings | 2/2 | Complete   | 2026-03-08 |
 | 2. From-Scratch Algorithms | 0/3 | Not started | - |
 | 3. Inference Integration | 0/3 | Not started | - |
 | 4. UI Foundation & Navigation | 0/3 | Not started | - |

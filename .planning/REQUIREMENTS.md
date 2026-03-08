@@ -15,7 +15,7 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### Player Embeddings
 
-- [ ] **EMBED-01**: Player embedding model trained via PyTorch that maps player+map+context features into a low-dimensional vector space (4-8 dims)
+- [x] **EMBED-01**: Player embedding model trained via PyTorch that maps player+map+context features into a low-dimensional vector space (4-8 dims)
 - [ ] **EMBED-02**: k-NN similarity search (implemented from scratch, no sklearn) over player embeddings to find historically similar player-map matchups
 - [ ] **EMBED-03**: Embedding vectors stored in SQLite and retrievable via API endpoint
 - [ ] **EMBED-04**: Interactive 2D/3D scatter visualization of player embedding space using PCA/UMAP projection
@@ -86,7 +86,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-01 | Phase 1 | Complete |
 | DATA-02 | Phase 1 | Complete |
 | DATA-03 | Phase 1 | Complete |
-| EMBED-01 | Phase 1 | Pending |
+| EMBED-01 | Phase 1 | Complete |
 | EMBED-02 | Phase 2 | Pending |
 | EMBED-03 | Phase 3 | Pending |
 | EMBED-04 | Phase 5 | Pending |

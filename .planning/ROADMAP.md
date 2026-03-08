@@ -30,12 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Players with sparse histories get valid feature vectors (missing values handled, not dropped)
   4. A trained PyTorch embedding model exists that produces 4-8 dimensional vectors for any player+map combination
   5. Training loss converges and validation loss does not diverge (no gross overfitting)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
-- [ ] 01-03: TBD
+- [ ] 01-01-PLAN.md -- Feature extraction pipeline and temporal dataset (DATA-01, DATA-02, DATA-03)
+- [ ] 01-02-PLAN.md -- Embedding model training and CLI (EMBED-01)
 
 ### Phase 2: From-Scratch Algorithms
 **Goal**: Two from-scratch algorithm implementations (no sklearn) that consume embeddings to produce kill quantiles and similar-player lookups
@@ -112,7 +111,7 @@ Note: Phase 4 (UI) can begin in parallel with Phases 2-3 (ML) since it has no ba
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Pipeline & Embeddings | 0/3 | Not started | - |
+| 1. Data Pipeline & Embeddings | 0/2 | Planning complete | - |
 | 2. From-Scratch Algorithms | 0/3 | Not started | - |
 | 3. Inference Integration | 0/3 | Not started | - |
 | 4. UI Foundation & Navigation | 0/3 | Not started | - |

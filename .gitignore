@@ -55,5 +55,9 @@ build/
 *.pyc
 __pycache__/
 
+# Trained model artifacts
+models/*.pt
+models/training_meta.json
+
 # Setup scripts (optional - remove if you want to keep it)
 # setup-git.ps1

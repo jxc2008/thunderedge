@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Feature extraction pipeline and temporal dataset (DATA-01, DATA-02, DATA-03)
+- [x] 01-01-PLAN.md -- Feature extraction pipeline and temporal dataset (DATA-01, DATA-02, DATA-03)
 - [ ] 01-02-PLAN.md -- Embedding model training and CLI (EMBED-01)
 
 ### Phase 2: From-Scratch Algorithms
@@ -111,7 +111,7 @@ Note: Phase 4 (UI) can begin in parallel with Phases 2-3 (ML) since it has no ba
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Pipeline & Embeddings | 0/2 | Planning complete | - |
+| 1. Data Pipeline & Embeddings | 1/2 | In progress | - |
 | 2. From-Scratch Algorithms | 0/3 | Not started | - |
 | 3. Inference Integration | 0/3 | Not started | - |
 | 4. UI Foundation & Navigation | 0/3 | Not started | - |

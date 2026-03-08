@@ -9,9 +9,9 @@ Requirements for this milestone. Each maps to roadmap phases.
 
 ### ML Data Pipeline
 
-- [ ] **DATA-01**: Feature extraction pipeline produces per-player-per-map feature vectors from existing SQLite data (KPR, ADR, map win%, agent role, opponent strength)
-- [ ] **DATA-02**: Temporal train/test splitting using event_id as chronological proxy (no data leakage)
-- [ ] **DATA-03**: Feature normalization and missing value handling for sparse player histories
+- [x] **DATA-01**: Feature extraction pipeline produces per-player-per-map feature vectors from existing SQLite data (KPR, ADR, map win%, agent role, opponent strength)
+- [x] **DATA-02**: Temporal train/test splitting using event_id as chronological proxy (no data leakage)
+- [x] **DATA-03**: Feature normalization and missing value handling for sparse player histories
 
 ### Player Embeddings
 
@@ -83,9 +83,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
+| DATA-01 | Phase 1 | Complete |
+| DATA-02 | Phase 1 | Complete |
+| DATA-03 | Phase 1 | Complete |
 | EMBED-01 | Phase 1 | Pending |
 | EMBED-02 | Phase 2 | Pending |
 | EMBED-03 | Phase 3 | Pending |

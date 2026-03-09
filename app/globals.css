@@ -190,6 +190,20 @@ textarea:focus-visible {
   color: #ffffff;
 }
 
+/* Dashboard layout — sticky left sidebar below header */
+:root {
+  --header-h: 56px;
+}
+
+@media (min-width: 768px) {
+  .sidebar-sticky {
+    position: sticky;
+    top: var(--header-h);
+    max-height: calc(100vh - var(--header-h));
+    overflow-y: auto;
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

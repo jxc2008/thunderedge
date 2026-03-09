@@ -37,10 +37,13 @@ Dark-mode Valorant/esports analytics aesthetic. Data-dense, terminal-inspired, m
 
 ## Layout Rules
 
-- **Max width**: `1400px`, centered, `24px` horizontal padding (`.page-container`)
-- **Column pattern**: Single column on all viewports; `.page-container` handles centering
-- **Section gaps**: `gap-3` (12px) between collapsible sections; `gap-4`/`gap-5` within cards
+- **Dashboard layout**: `flex flex-col md:flex-row` — stacked on mobile, side-by-side on desktop
+- **Left panel**: `w-full md:w-[300px]`, `sticky top-[56px]`, `max-height: calc(100vh - 56px)`, bg `#060608`
+- **Right panel**: `flex-1 min-w-0`, natural document flow / scrollable
+- **Header height**: `--header-h: 56px` CSS variable (used for sticky offset)
+- **Section gaps**: `gap-4` between SectionCards; `gap-3` inside KPI strip
 - **Z-index scale**: `z-50` (sticky header), `z-10` (table sticky thead)
+- **Page container** (non-dashboard pages): `max-width: 1400px`, centered, `24px` horizontal padding
 
 ---
 
@@ -88,24 +91,51 @@ Use Tailwind arbitrary values or inline `style={{ color }}` for dynamic semantic
 AppHeader
 └── Navigation (dropdowns + direct links + sync button)
 
-page.tsx (HomePage)
-├── Hero
-├── CommandBar
-│   ├── PlayerInput + AnalyzeButton
-│   └── ParamsBar (KillLine, Over/Under Odds, Team Odds)
-├── ErrorBanner (conditional)
-├── LoadingSkeleton (conditional)
-└── Results (conditional)
-    ├── StatusBar
-    └── CollapsibleSection × N
-        ├── Recommendation → RecommendationCard
-        ├── Over/Under → OverUnderDisplay
-        ├── Expected Rounds (inline display)
-        ├── Key Stats → StatsGrid
-        ├── Matchup Adjustment → MatchupBox (conditional)
-        ├── Agent & Map Breakdown → Radix Tabs → DataTable
-        ├── VCT Events Timeline → EventTimeline → KillChips
-        └── Edge Analysis → EdgeSection → DistributionChart
+page.tsx (HomePage) — split-panel dashboard
+├── LEFT PANEL (300px sticky)
+│   └── InputPanel (app/_components/input-panel.tsx)
+│       ├── Panel header (title + tagline)
+│       ├── Player IGN input
+│       ├── Kill Line input
+│       ├── Over/Under Odds (2-col grid)
+│       ├── Team/Opp Odds (2-col grid)
+│       ├── Analyze CTA button
+│       └── Quick summary (post-analysis: player name + recType badge)
+└── RIGHT PANEL (flex-1 scrollable)
+    ├── ErrorBanner (conditional)
+    ├── LoadingSkeleton (conditional)
+    ├── EmptyState (conditional — "Ready" typographic placeholder)
+    └── Results (conditional)
+        ├── KpiStrip (app/_components/kpi-strip.tsx)
+        │   └── 6× KpiCard (Kill Line / Over% / Under% / Wtd KPR / Maps / Confidence)
+        └── Radix Tabs (Overview / Stats / History / Edge)
+            ├── Overview → SectionCard × N
+            │   ├── Recommendation → RecommendationCard
+            │   ├── Over/Under → OverUnderDisplay
+            │   ├── Expected Rounds (inline display)
+            │   └── Matchup Adjustment → MatchupBox (conditional)
+            ├── Stats → SectionCard × 2
+            │   ├── Key Stats → StatsGrid
+            │   └── Agent & Map Breakdown → Radix Tabs → DataTable
+            ├── History → SectionCard
+            │   └── VCT Events Timeline → EventTimeline → KillChips
+            └── Edge → SectionCard (conditional)
+                └── EdgeSection → DistributionChart
+```
+
+### SectionCard
+Reusable content wrapper with title + optional badge:
+```html
+<div class="bg-[#0D0D0D] border border-[rgba(255,255,255,0.06)]"
+     style="border-left: 3px solid {accentColor}">  <!-- optional -->
+  <div class="px-5 py-3 border-b ...">
+    <span class="font-display font-bold text-[0.72rem] uppercase tracking-[0.1em] text-white/55">
+      {title}
+    </span>
+    {badge}  <!-- optional ReactNode -->
+  </div>
+  <div class="px-5 py-4">{children}</div>
+</div>
 ```
 
 ---

@@ -1,9 +1,107 @@
 # backend/calculator.py
 """
-Advanced KPR calculation utilities
+Advanced KPR calculation utilities.
+
+Also contains blend_with_ml() which merges the Poisson/NB baseline with the
+XGBoost ML signal (kill_mean_xgb + kill_over_xgb) trained by
+scripts/train_kill_model.py.
 """
-from typing import Dict, List
+from typing import Dict, List, Optional
 import statistics
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# ML blending
+# ---------------------------------------------------------------------------
+
+def blend_with_ml(
+    dist_params: Dict,
+    db,
+    player_name: str,
+    map_name: Optional[str],
+    line: float,
+    ml_weight: float = 0.4,
+    min_sample_size: int = 10,
+) -> Dict:
+    """
+    Blend the Poisson/NB baseline distribution with the XGBoost ML signal.
+
+    Only blends when the baseline has sufficient data (sample_size >=
+    min_sample_size).  Falls back gracefully if models are not installed.
+
+    Args:
+        dist_params:     Output of get_player_distribution() / apply_matchup_adjustment().
+                         Must contain 'mu' and 'sample_size'.
+        db:              Database instance (passed through to ml_adjust).
+        player_name:     Player IGN.
+        map_name:        Map name, or None.
+        line:            Betting line (e.g. 18.5).
+        ml_weight:       Weight given to ML mu signal (default 0.4).
+                         Baseline weight = 1 - ml_weight.
+        min_sample_size: Only blend if sample_size >= this threshold.
+
+    Returns:
+        Updated dist_params dict (may be the original if blending is skipped).
+        Adds keys:
+            - ml_signal: dict with raw ML predictions, or None
+            - ml_blended: bool — whether blending was applied
+    """
+    from backend.model_params import ml_adjust
+
+    sample_size = dist_params.get('sample_size', 0)
+    baseline_mu = float(dist_params.get('mu', 0.0))
+
+    result = dict(dist_params)
+    result['ml_signal'] = None
+    result['ml_blended'] = False
+
+    if sample_size < min_sample_size:
+        logger.debug(
+            f"ML blend skipped for {player_name}: sample_size={sample_size} < {min_sample_size}"
+        )
+        return result
+
+    ml = ml_adjust(db, player_name, map_name, line)
+
+    if ml is None:
+        logger.debug(f"ML signal unavailable for {player_name} (models not loaded or insufficient data)")
+        return result
+
+    ml_mu = ml['ml_mu']
+    final_mu = (1.0 - ml_weight) * baseline_mu + ml_weight * ml_mu
+    final_mu = max(0.5, final_mu)
+
+    logger.info(
+        f"[ML blend] {player_name} | map={map_name or 'any'} | line={line} | "
+        f"baseline_mu={baseline_mu:.2f}  ml_mu={ml_mu:.2f}  final_mu={final_mu:.2f} | "
+        f"ml_p_over={ml['ml_p_over']:.3f}"
+    )
+
+    result['mu'] = final_mu
+    if result.get('dist') == 'poisson':
+        result['lambda'] = final_mu
+    elif result.get('dist') == 'nbinom':
+        k = float(result.get('k', 1.0))
+        k = max(1e-6, k)
+        result['p'] = k / (k + final_mu)
+
+    result['ml_signal'] = {
+        'ml_mu': ml_mu,
+        'ml_p_over': ml['ml_p_over'],
+        'ml_p_under': ml['ml_p_under'],
+        'rolling_mean_5': ml.get('rolling_mean_5'),
+        'rolling_mean_10': ml.get('rolling_mean_10'),
+        'agent': ml.get('agent'),
+        'ml_weight': ml_weight,
+        'baseline_mu_pre_blend': baseline_mu,
+        'final_mu_post_blend': final_mu,
+    }
+    result['ml_blended'] = True
+
+    return result
 
 class KPRCalculator:
     """Advanced KPR calculations and predictions"""

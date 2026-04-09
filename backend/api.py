@@ -23,6 +23,7 @@ from backend.prop_prob import compute_prop_probabilities, generate_pmf
 from backend.market_implied import compute_market_parameters
 from backend.odds_utils import expected_value_per_1
 from backend.matchup_adjust import infer_team_win_probability, apply_matchup_adjustment
+from backend.calculator import blend_with_ml
 from config import Config
 import logging
 
@@ -487,11 +488,18 @@ def get_edge_analysis(ign):
         if 'error' in dist_params:
             return jsonify({'error': dist_params['error']}), 404
         
-        # Step 2: Apply optional matchup adjustment and compute model probabilities
+        # Step 2: Apply optional matchup adjustment
         adj = apply_matchup_adjustment(dist_params, matchup.get('team_win_prob'))
         dist_for_probs = adj['dist_params']
+
+        # Step 2b: Blend ML signal on top of the Poisson/NB baseline
+        map_name_param = request.args.get('map_name', None)
+        dist_for_probs = blend_with_ml(
+            dist_for_probs, db, ign, map_name_param, line
+        )
+
         model_probs = compute_prop_probabilities(dist_for_probs, line)
-        
+
         # Step 3: Compute market-implied parameters
         market_params = compute_market_parameters(
             line=line,
@@ -570,6 +578,10 @@ def get_edge_analysis(ign):
                 'multiplier': adj.get('multiplier'),
                 'components': adj.get('components', {})
             },
+            'ml_adjustment': {
+                'blended': dist_for_probs.get('ml_blended', False),
+                'signal': dist_for_probs.get('ml_signal'),
+            },
             'market': {
                 'over_odds': over_odds,
                 'under_odds': under_odds,
@@ -595,9 +607,9 @@ def get_edge_analysis(ign):
                 'line_position': line
             }
         }
-        
+
         return jsonify(response)
-        
+
     except Exception as e:
         logger.error(f"Error in edge analysis for {ign}: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500

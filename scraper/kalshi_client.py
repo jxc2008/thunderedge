@@ -21,6 +21,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
 
+# Load .env automatically so callers don't need to call load_dotenv() themselves.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed; rely on env vars already being set.
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"

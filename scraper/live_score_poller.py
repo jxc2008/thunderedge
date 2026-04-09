@@ -143,6 +143,14 @@ def classify_economy(equipment_value: int, economy_level: Optional[str] = None) 
 def gun_eco_advantage(econ1: str, econ2: str) -> Optional[int]:
     """
     Return which team (1 or 2) has gun advantage, or None if no clear mismatch.
+
+    OT note: Valorant OT resets both teams to 5,000 credits per player at the
+    start of each OT pair (rounds 25, 27, 29...). This means a full eco (<5k)
+    at the start of an OT round requires deliberate saving. In practice, OT
+    produces full vs semi-buy mismatches (not full vs eco), which are NOT in
+    GUN_ECO_PAIRS and correctly produce no signal. Only a genuine save-eco in
+    OT would fire — rare, but does happen when one team force-saves through the
+    OT pair opener to get a better buy the following round.
     """
     if (econ1, econ2) in GUN_ECO_PAIRS:
         return 1   # team1 is gun team
@@ -657,9 +665,14 @@ def run_simulation(max_spread: float = 8.0) -> None:
         (14, 7,  6, 25000, 2900),   # C9 wins pistol → C9 gun, SEN eco
         (15, 7,  7, 25000, 8000),   # C9 bonus round
         (19, 10, 9, 25000, 2900),   # late-game: SEN gun, C9 eco
-        (25, 13,12, 2900,  2900),   # OT pistol
-        (26, 13,13, 25000, 2900),   # OT: SEN gun, C9 eco
-        (27, 13,13, 25950, 17800),  # OT: SEN full vs C9 semi-buy (real data from match!)
+        # OT economy note: each player gets 5,000 credits at start of each OT pair
+        # (rounds 25, 27, 29...). Both teams start each OT pair with ~25k total
+        # equipment — so the OT "pistol" is actually a light rifle buy, NOT a pistol.
+        # True eco (<5k) in OT requires deliberate saving through the OT pair opener.
+        # In practice you see full vs semi-buy, not full vs eco.
+        (25, 13,12, 22000, 22000),  # OT pair 1 open — both semi-rifle buys (5k credit grant)
+        (26, 13,13, 25000, 4000),   # OT anti-eco ONLY if C9 saved on round 25 (rare but possible)
+        (27, 13,13, 25950, 17800),  # OT pair 2 open — real data: full vs semi-buy (no signal)
     ]
 
     signals = 0

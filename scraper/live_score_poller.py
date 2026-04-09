@@ -187,29 +187,150 @@ def _get_json(url: str, timeout: int = 15) -> Optional[dict]:
 # Bo3.gg API queries
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VLR.gg live match discovery (more reliable than bo3.gg REST)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_html(url: str) -> Optional[str]:
+    req = urllib.request.Request(url, headers={'User-Agent': _UA, 'Accept': 'text/html'})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=15) as resp:
+            return resp.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        log.debug(f"HTML fetch failed {url}: {e}")
+        return None
+
+
+def scrape_vlr_live_matches() -> List[dict]:
+    """
+    Scrape vlr.gg/matches to find currently-live Valorant matches.
+    Returns list of dicts with keys: vlr_id, team1, team2, event, url.
+
+    VLR.gg server-renders LIVE badges reliably — this is our match discovery source.
+    Actual HTML structure confirmed from live matches:
+      <a class="wf-module-item match-item ...">
+        <div class="match-item-vs-team-name">TeamName</div>
+        <div class="match-item-eta">
+          <div class="ml mod-live">
+            <div class="ml-status">LIVE</div>
+          </div>
+        </div>
+      </a>
+    """
+    import re as _re
+    html = _fetch_html("https://www.vlr.gg/matches")
+    if not html:
+        return []
+
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        log.warning("BeautifulSoup not installed; cannot parse VLR.gg HTML")
+        return []
+
+    soup = BeautifulSoup(html, 'html.parser')
+    live_matches = []
+
+    # Match items are <a class="wf-module-item match-item ...">
+    for item in soup.select('a.wf-module-item.match-item'):
+        href = item.get('href', '')
+        m = _re.match(r'^/(\d+)/', href)
+        if not m:
+            continue
+
+        # Check for LIVE badge: div.ml.mod-live or ml-status containing LIVE
+        live_badge = item.select_one('.ml.mod-live') or item.select_one('.ml-status')
+        if not live_badge:
+            continue
+        if 'LIVE' not in live_badge.get_text(strip=True).upper():
+            # Also check if parent contains mod-live class
+            if not item.select_one('[class*="mod-live"]'):
+                continue
+
+        match_id = int(m.group(1))
+        teams = [t.get_text(strip=True) for t in item.select('.match-item-vs-team-name')]
+        event_el = (item.select_one('.match-item-event') or
+                    item.select_one('.match-item-league') or
+                    item.select_one('.match-item-event-series'))
+        event_name = event_el.get_text(separator=' ', strip=True) if event_el else ''
+
+        team1 = teams[0] if len(teams) > 0 else 'Team1'
+        team2 = teams[1] if len(teams) > 1 else 'Team2'
+
+        live_matches.append({
+            'vlr_id':  match_id,
+            'team1':   team1,
+            'team2':   team2,
+            'event':   event_name,
+            'url':     f"https://www.vlr.gg{href}",
+        })
+        log.info(f"VLR LIVE: [{match_id}] {team1} vs {team2} — {event_name}")
+
+    return live_matches
+
+
+def probe_live_matches(verbose: bool = False) -> None:
+    """
+    Diagnostic: show all live Valorant matches via VLR.gg (reliable),
+    then check bo3.gg to compare coverage.
+    """
+    print("\n=== VLR.gg live Valorant matches ===")
+    vlr_matches = scrape_vlr_live_matches()
+    if vlr_matches:
+        for m in vlr_matches:
+            print(f"  VLR [{m['vlr_id']}] {m['team1']} vs {m['team2']}  |  {m['event']}")
+            print(f"    URL: {m['url']}")
+    else:
+        print("  (none found or VLR.gg unreachable)")
+
+    print("\n=== bo3.gg REST API check ===")
+    data = _get_json(f"{BO3_API}/matches?status=live&limit=10")
+    if data and 'results' in data:
+        results = data['results']
+        discipline_names = {1: 'CS2', 2: 'Valorant', 3: 'LoL', 4: 'Dota2'}
+        by_game: Dict[int, List] = {}
+        for r in results:
+            by_game.setdefault(r.get('discipline_id', 0), []).append(r)
+        for did, ms in sorted(by_game.items()):
+            print(f"  {discipline_names.get(did, f'discipline_{did}')}: {len(ms)} matches "
+                  f"(dates: {ms[0].get('start_date','?')[:10]} ... {ms[-1].get('start_date','?')[:10]})")
+        if all(r.get('start_date', '9')[:4] == '2020' for r in results):
+            print("  NOTE: bo3.gg 'live' filter returns historical data — REST API is unreliable.")
+            print("        bo3.gg WebSocket (wss://live.bo3.gg/) is needed for real-time scores.")
+    print()
+
+
 def fetch_live_valorant_matches() -> List[dict]:
     """
-    Return list of currently live Valorant match objects from bo3.gg.
+    Return live Valorant matches by scraping VLR.gg (primary) + bo3.gg (fallback).
 
-    Note: discipline_id=2 is Valorant. Also try game=valorant as a fallback
-    since the filter parameter name may vary between API versions.
+    Returns synthetic match dicts compatible with _refresh_match().
+    VLR match IDs (vlr_id) are stored but bo3.gg match IDs are 0 when unknown.
+
+    Note: round-level scores still require bo3.gg WebSocket or --match-id.
     """
-    # Primary: filter by discipline_id
-    data = _get_json(f"{BO3_API}/matches?discipline_id={VALORANT_DISCIPLINE_ID}&status=live&limit=20")
-    matches = []
-    if data and 'results' in data:
-        matches = [m for m in data['results'] if m.get('discipline_id') == VALORANT_DISCIPLINE_ID]
-        if matches:
-            log.debug(f"Found {len(matches)} live Valorant matches via discipline_id filter")
+    vlr_matches = scrape_vlr_live_matches()
+    if vlr_matches:
+        # Wrap as minimal match objects for the poller
+        return [{
+            'id': m['vlr_id'],   # VLR ID (used as key; may differ from bo3 ID)
+            'vlr_id': m['vlr_id'],
+            'team1_id': 0,
+            'team2_id': 0,
+            'team1_name': m['team1'],
+            'team2_name': m['team2'],
+            'bo_type': 3,
+            'discipline_id': VALORANT_DISCIPLINE_ID,
+            'source': 'vlr',
+        } for m in vlr_matches]
 
-    # Fallback: status=live with broader filter, check discipline_id manually
-    if not matches:
-        data = _get_json(f"{BO3_API}/matches?status=live&limit=50")
-        if data and 'results' in data:
-            matches = [m for m in data['results'] if m.get('discipline_id') == VALORANT_DISCIPLINE_ID]
-            log.debug(f"Fallback: {len(matches)} Valorant matches in live feed")
-
-    return matches
+    # Fallback: bo3.gg (known to be unreliable for live Valorant)
+    data = _get_json(f"{BO3_API}/matches?status=live&limit=100")
+    if not data or 'results' not in data:
+        return []
+    val_matches = [m for m in data['results'] if m.get('discipline_id') == VALORANT_DISCIPLINE_ID]
+    return val_matches
 
 
 def fetch_match_games(match_id: int) -> List[dict]:
@@ -574,14 +695,19 @@ class LivePoller:
 
             time.sleep(poll_score_every)
 
-    def run_websocket(self) -> None:
+    def run_websocket(self, sniff_only: bool = False) -> None:
         """
-        Attempt WebSocket connection to wss://live.bo3.gg/ for real-time updates.
-        Falls back to REST polling if WebSocket connection fails.
+        Connect to wss://live.bo3.gg/ for real-time score updates.
 
-        NOTE: The exact message format is unknown without live network inspection.
-        We try several common subscribe patterns and log all received messages to
-        help reverse-engineer the protocol.
+        If sniff_only=True (--ws-sniff flag): just log every message received
+        without attempting to parse scores. Use this during a live match to
+        reverse-engineer the bo3.gg WebSocket protocol.
+
+        To capture messages:
+          1. Find a live VCT match on bo3.gg (use --probe to find VLR match ID,
+             then search bo3.gg/valorant/matches)
+          2. Run: python scraper/live_score_poller.py --ws-sniff --match-id {id}
+          3. Copy the JSON structure seen in logs and update _handle_ws_message()
         """
         try:
             import websockets
@@ -595,25 +721,36 @@ class LivePoller:
         import asyncio
 
         async def _ws_connect(match_ids: List[int]) -> None:
-            async with websockets.connect(BO3_WS) as ws:
+            headers = {
+                'Origin': 'https://bo3.gg',
+                'User-Agent': _UA,
+            }
+            async with websockets.connect(BO3_WS, additional_headers=headers) as ws:
                 log.info(f"WebSocket connected: {BO3_WS}")
 
-                # Try multiple subscribe formats (reverse-engineered guesses)
+                if sniff_only:
+                    log.info("SNIFF MODE: logging all raw messages. Press Ctrl+C to stop.")
+
+                # Try multiple subscribe formats
                 for match_id in match_ids:
                     for fmt in [
                         {"type": "subscribe", "topic": f"match:{match_id}"},
                         {"event": "subscribe", "data": {"match_id": match_id}},
                         {"action": "subscribe", "channel": "MatchChannel", "match_id": match_id},
+                        {"subscribe": f"match:{match_id}"},
                     ]:
                         await ws.send(json.dumps(fmt))
-                        log.debug(f"Sent subscribe: {fmt}")
+                        log.debug(f"Sent: {fmt}")
+                    await asyncio.sleep(0.1)
 
                 async for raw_msg in ws:
+                    if sniff_only:
+                        print(f"[WS RAW] {raw_msg[:500]}")
+                        continue
                     try:
                         msg = json.loads(raw_msg)
                         log.debug(f"WS message: {json.dumps(msg)[:200]}")
-                        # TODO: parse actual message format once observed in production
-                        # Expected fields: match_id, game_id, team1_score, team2_score, round_num
+                        # TODO: update _handle_ws_message() once message format observed
                         self._handle_ws_message(msg)
                     except json.JSONDecodeError:
                         log.debug(f"WS non-JSON: {raw_msg[:100]}")
@@ -721,11 +858,18 @@ def run_simulation(max_spread: float = 8.0) -> None:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VCT live score poller for Kalshi eco-round strategy')
-    parser.add_argument('--test',        action='store_true', help='Run simulation instead of live polling')
+    parser.add_argument('--test',        action='store_true', help='Run signal detection simulation')
+    parser.add_argument('--probe',       action='store_true', help='Show all live Valorant matches (VLR.gg + bo3.gg) and exit')
     parser.add_argument('--spread',      type=float, default=8.0, help='Max spread in cents (default: 8.0)')
     parser.add_argument('--websocket',   action='store_true', help='Use WebSocket instead of REST polling')
+    parser.add_argument('--ws-sniff',    action='store_true',
+                        help='Connect to bo3.gg WebSocket and log raw messages (for protocol discovery). '
+                             'Use with --match-id during a live match.')
     parser.add_argument('--poll-match',  type=int, default=30, help='Seconds between match scans (default: 30)')
     parser.add_argument('--poll-score',  type=int, default=5,  help='Seconds between score refreshes (default: 5)')
+    parser.add_argument('--match-id',    type=int, default=None,
+                        help='Force-track a specific match ID. For bo3.gg: find in match URL. '
+                             'For VLR matches: use VLR match ID from --probe output.')
     parser.add_argument('--verbose',     action='store_true', help='Enable debug logging')
     args = parser.parse_args()
 
@@ -734,6 +878,33 @@ if __name__ == '__main__':
 
     if args.test:
         run_simulation(max_spread=args.spread)
+    elif args.probe:
+        probe_live_matches(verbose=args.verbose)
+    elif args.ws_sniff:
+        # WebSocket sniffer: connect and log raw messages to reverse-engineer protocol
+        log.info("WebSocket sniff mode. Looking for live matches...")
+        match_ids = [args.match_id] if args.match_id else [m['id'] for m in fetch_live_valorant_matches()]
+        if not match_ids:
+            print("No live matches found. Use --match-id to specify one directly.")
+        else:
+            print(f"Subscribing to match IDs: {match_ids}")
+            print("All WebSocket messages will be printed. Use Ctrl+C to stop.\n")
+            poller = LivePoller(max_spread_cents=args.spread)
+            try:
+                poller.run_websocket(sniff_only=True)
+            except KeyboardInterrupt:
+                print("\nSniff complete.")
+    elif args.match_id:
+        # Directly track a known match without relying on live discovery
+        log.info(f"Forcing tracking of match ID {args.match_id}")
+        poller = LivePoller(max_spread_cents=args.spread)
+        mock_match = {'id': args.match_id, 'team1_id': 0, 'team2_id': 0, 'bo_type': 3}
+        try:
+            while True:
+                poller._refresh_match(mock_match)
+                time.sleep(args.poll_score)
+        except KeyboardInterrupt:
+            print(f"\nStopped. Total signals: {len(poller._signals)}")
     elif args.websocket:
         poller = LivePoller(max_spread_cents=args.spread, use_websocket=True)
         try:

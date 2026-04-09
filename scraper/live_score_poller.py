@@ -40,6 +40,7 @@ Usage:
   python scraper/live_score_poller.py --probe         # show live matches
   python scraper/live_score_poller.py                 # live polling
   python scraper/live_score_poller.py --spread 4.0    # tighter spread filter
+  python scraper/live_score_poller.py --kalshi        # live polling + auto-order on Kalshi
 """
 
 import re
@@ -516,14 +517,26 @@ def process_live_update(tracker: MatchTracker, match_data: dict,
 # ─────────────────────────────────────────────────────────────────────────────
 
 class LivePoller:
-    def __init__(self, max_spread_cents: float = 8.0):
+    def __init__(self, max_spread_cents: float = 8.0,
+                 order_manager=None):
+        """
+        Args:
+            max_spread_cents: Maximum Kalshi spread to accept for a taker trade.
+            order_manager:    Optional KalshiOrderManager instance. When provided,
+                              signals automatically trigger limit orders.
+        """
         self.max_spread = max_spread_cents
         self._trackers: Dict[str, MatchTracker] = {}   # bo3_slug -> MatchTracker
         self._signals:  List[TradingSignal] = []
         self._lock = threading.Lock()
+        self._order_manager = order_manager   # KalshiOrderManager | None
+
+        # Cache of open Valorant markets refreshed lazily
+        self._kalshi_markets: List[dict] = []
+        self._kalshi_markets_ts: float = 0.0
 
     def _on_signal(self, signal: TradingSignal) -> None:
-        """Print signal and append to list. Override to connect to Kalshi."""
+        """Print signal, append to list, and optionally place a Kalshi order."""
         self._signals.append(signal)
         print(f"\n{'='*65}")
         print(f"  *** TRADING SIGNAL — {signal.timestamp} ***")
@@ -538,6 +551,79 @@ class LivePoller:
         print(f"  Taker EV:   +{signal.taker_ev:.2f}c  (at {self.max_spread}c spread)")
         print(f"  ACTION: {signal.kalshi_hint}")
         print(f"{'='*65}\n")
+
+        if self._order_manager is not None:
+            ticker = self._resolve_kalshi_ticker(signal)
+            if ticker:
+                try:
+                    self._order_manager.on_signal(signal, ticker)
+                except Exception as exc:
+                    log.error("KalshiOrderManager.on_signal raised: %s", exc)
+            else:
+                log.warning(
+                    "Could not resolve Kalshi ticker for %s vs %s — order skipped.",
+                    signal.team1_name, signal.team2_name,
+                )
+
+    def _resolve_kalshi_ticker(self, signal: TradingSignal) -> Optional[str]:
+        """
+        Match the gun-team name from signal against open Kalshi Valorant markets.
+
+        Refreshes the market cache at most once every 5 minutes. Returns the
+        Kalshi ticker string for the best matching market, or None.
+        """
+        import time as _time
+        now = _time.time()
+        if now - self._kalshi_markets_ts > 300:  # refresh every 5 min
+            try:
+                self._kalshi_markets = self._order_manager._client.find_valorant_markets()
+                self._kalshi_markets_ts = now
+                log.info("Refreshed Kalshi markets cache: %d markets", len(self._kalshi_markets))
+            except Exception as exc:
+                log.error("Failed to refresh Kalshi markets: %s", exc)
+
+        if not self._kalshi_markets:
+            return None
+
+        t1 = signal.team1_name.lower().strip()
+        t2 = signal.team2_name.lower().strip()
+
+        best_ticker: Optional[str] = None
+        best_score = 0
+
+        for mkt in self._kalshi_markets:
+            a = (mkt.get("team_a") or "").lower().strip()
+            b = (mkt.get("team_b") or "").lower().strip()
+            title = (mkt.get("title") or "").lower()
+
+            score = 0
+            # Direct team name match in extracted team_a / team_b fields
+            if (a and (a in t1 or t1 in a)) or (b and (b in t1 or t1 in b)):
+                score += 2
+            if (a and (a in t2 or t2 in a)) or (b and (b in t2 or t2 in b)):
+                score += 2
+            # Fallback: team name anywhere in title
+            if t1 in title:
+                score += 1
+            if t2 in title:
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best_ticker = mkt.get("ticker")
+
+        if best_score < 2:
+            log.debug(
+                "No confident Kalshi market match for %s vs %s (best score=%d)",
+                signal.team1_name, signal.team2_name, best_score,
+            )
+            return None
+
+        log.info(
+            "Matched Kalshi ticker %s for %s vs %s (score=%d)",
+            best_ticker, signal.team1_name, signal.team2_name, best_score,
+        )
+        return best_ticker
 
     def _poll_match(self, slug: str) -> None:
         data = _get_json(f"{BO3_API}/matches/{slug}")
@@ -709,7 +795,7 @@ def run_simulation(max_spread: float = 8.0) -> None:
         sig = process_live_update(tracker, mock_data, max_spread)
         if sig:
             signals += 1
-            print(f"  → SIGNAL: BUY {sig.gun_team_name} +{sig.eco_delta:.1f}c delta, EV +{sig.taker_ev:.1f}c")
+            print(f"  -> SIGNAL: BUY {sig.gun_team_name} +{sig.eco_delta:.1f}c delta, EV +{sig.taker_ev:.1f}c")
         else:
             print()
 
@@ -730,10 +816,47 @@ if __name__ == '__main__':
     parser.add_argument('--match',      type=str,   default=None,
                         help='Force-track a bo3.gg match slug directly, e.g. oxen-vs-9z-team-09-04-2026')
     parser.add_argument('--verbose',    action='store_true', help='Debug logging')
+    parser.add_argument('--kalshi',     action='store_true',
+                        help=(
+                            'Enable live Kalshi order placement. '
+                            'Requires env vars KALSHI_KEY_ID and KALSHI_PRIVATE_KEY_PATH. '
+                            'Reads dry_run=False — real orders will be placed.'
+                        ))
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # ----------------------------------------------------------------
+    # Build order manager when --kalshi flag is set
+    # ----------------------------------------------------------------
+    order_manager = None
+    if args.kalshi:
+        import os as _os
+        try:
+            from scraper.kalshi_client import KalshiClient
+            from scraper.kalshi_order_manager import KalshiOrderManager
+        except ImportError:
+            from kalshi_client import KalshiClient          # type: ignore[no-redef]
+            from kalshi_order_manager import KalshiOrderManager  # type: ignore[no-redef]
+
+        key_id   = _os.environ.get('KALSHI_KEY_ID')
+        pem_path = _os.environ.get('KALSHI_PRIVATE_KEY_PATH')
+
+        if not key_id:
+            print("ERROR: KALSHI_KEY_ID env var is not set. Cannot enable Kalshi trading.")
+            raise SystemExit(1)
+        if not pem_path:
+            print("ERROR: KALSHI_PRIVATE_KEY_PATH env var is not set. Cannot enable Kalshi trading.")
+            raise SystemExit(1)
+
+        try:
+            kalshi_client = KalshiClient(key_id=key_id, private_key_path=pem_path)
+            order_manager = KalshiOrderManager(client=kalshi_client, dry_run=False)
+            log.info("Kalshi integration ENABLED — real orders will be placed.")
+        except Exception as exc:
+            print(f"ERROR: Failed to initialize Kalshi client: {exc}")
+            raise SystemExit(1)
 
     if args.test:
         run_simulation(args.spread)
@@ -747,7 +870,7 @@ if __name__ == '__main__':
         else:
             t1 = (data.get('team1') or {}).get('name', 'Team1')
             t2 = (data.get('team2') or {}).get('name', 'Team2')
-            poller = LivePoller(max_spread_cents=args.spread)
+            poller = LivePoller(max_spread_cents=args.spread, order_manager=order_manager)
             with poller._lock:
                 poller._trackers[args.match] = MatchTracker(
                     bo3_slug=args.match, vlr_id=0,
@@ -761,7 +884,7 @@ if __name__ == '__main__':
             except KeyboardInterrupt:
                 print(f"\nStopped. Signals: {len(poller._signals)}")
     else:
-        poller = LivePoller(max_spread_cents=args.spread)
+        poller = LivePoller(max_spread_cents=args.spread, order_manager=order_manager)
         try:
             poller.run(poll_discover=args.poll_match, poll_score=args.poll_score)
         except KeyboardInterrupt:

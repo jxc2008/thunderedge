@@ -141,17 +141,7 @@ def classify_economy(equipment_value: int, economy_level: Optional[str] = None) 
 
 
 def gun_eco_advantage(econ1: str, econ2: str) -> Optional[int]:
-    """
-    Return which team (1 or 2) has gun advantage, or None if no clear mismatch.
-
-    OT note: Valorant OT resets both teams to 5,000 credits per player at the
-    start of each OT pair (rounds 25, 27, 29...). This means a full eco (<5k)
-    at the start of an OT round requires deliberate saving. In practice, OT
-    produces full vs semi-buy mismatches (not full vs eco), which are NOT in
-    GUN_ECO_PAIRS and correctly produce no signal. Only a genuine save-eco in
-    OT would fire — rare, but does happen when one team force-saves through the
-    OT pair opener to get a better buy the following round.
-    """
+    """Return which team (1 or 2) has gun advantage, or None if no clear mismatch."""
     if (econ1, econ2) in GUN_ECO_PAIRS:
         return 1   # team1 is gun team
     if (econ2, econ1) in GUN_ECO_PAIRS:
@@ -408,12 +398,8 @@ def resolve_bo3_slug(team1: str, team2: str, match_date: str) -> Optional[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _is_pistol_round(round_num: int) -> bool:
-    """Rounds 1, 13, and OT odd rounds (25, 28, 31, ...) are pistol rounds."""
-    if round_num in (1, 13):
-        return True
-    if round_num >= 25 and (round_num - 25) % 3 == 0:
-        return True
-    return False
+    """Rounds 1 and 13 are pistol rounds (regulation only)."""
+    return round_num in (1, 13)
 
 
 def process_live_update(tracker: MatchTracker, match_data: dict,
@@ -446,6 +432,10 @@ def process_live_update(tracker: MatchTracker, match_data: dict,
 
     # Only evaluate during BUY_TIME (window before round starts)
     if round_phase != 'BUY_TIME':
+        return None
+
+    # Only regulation rounds (1-24); OT economy is a full reset for both teams
+    if round_num > 24:
         return None
 
     # Deduplicate: only fire once per round per match
@@ -698,15 +688,7 @@ def run_simulation(max_spread: float = 8.0) -> None:
         (14, 7,  6, 25000, 2900),   # C9 wins pistol → C9 gun, SEN eco
         (15, 7,  7, 25000, 8000),   # C9 bonus round
         (19, 10, 9, 25000, 2900),   # late-game: SEN gun, C9 eco
-        # OT economy: 5,000 credits per player reset each OT pair opener.
-        # Both teams start ~25k total — no eco unless deliberate save.
-        # Confirmed from OXEN vs 9z round 27: 23,250 vs 29,000 = both full buy.
-        # NOTE: equipment_value updates live during BUY_TIME as players purchase.
-        # An early-BUY_TIME poll may show incomplete buys (e.g. 17,800 before
-        # 9z finished buying up to 29,000). Only eco (<5k) is unambiguous early.
-        (25, 13,12, 22000, 22000),  # OT pair 1 open — both full-ish (5k/player grant)
-        (26, 13,13, 25000, 4000),   # OT anti-eco ONLY if C9 saved on round 25 (rare)
-        (27, 13,13, 23250, 29000),  # OT pair 2 open — actual live data: both full (no signal)
+        (24, 12,11, 25000, 2900),   # regulation final round: SEN gun, C9 eco
     ]
 
     signals = 0

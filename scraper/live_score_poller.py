@@ -452,10 +452,43 @@ def process_live_update(tracker: MatchTracker, match_data: dict,
     if tracker.signal_fired.get(round_num):
         return None
 
-    # Classify economy
+    # Equipment_value updates live as players purchase during BUY_TIME.
+    # An early poll may show incomplete buys (e.g. 17,800 before a player
+    # finishes spending up to 29,000). This creates false semi-buy reads.
+    #
+    # Mitigation: only fire on eco (<5k), which is unambiguously set from the
+    # start of BUY_TIME. If we see a semi-buy vs full, wait for the NEXT poll
+    # to see if the semi-buy resolves upward before deciding it's a real mismatch.
+    # A genuine eco (<5k) cannot be a mid-buy artifact — no one starts at eco
+    # and accidentally shows <5k mid-buy.
     econ1 = classify_economy(t1_equip, t1_econ_lvl)
     econ2 = classify_economy(t2_equip, t2_econ_lvl)
-    gun_team = gun_eco_advantage(econ1, econ2)
+
+    # If either team shows as semi-buy and the other as full, check whether
+    # this might be a mid-buy artifact. Track the previous equipment reading
+    # per round; only fire if the reading is stable across 2 polls.
+    prev_key = f"equip_{round_num}"
+    prev = getattr(tracker, '_equip_cache', {}).get(prev_key)
+    if not hasattr(tracker, '_equip_cache'):
+        tracker._equip_cache = {}
+    tracker._equip_cache[prev_key] = (t1_equip, t2_equip)
+
+    pair = gun_eco_advantage(econ1, econ2)
+    if pair is not None:
+        # If the mismatch involves a semi-buy (not eco), require stability
+        gun_econ = econ1 if pair == 1 else econ2
+        eco_econ = econ2 if pair == 1 else econ1
+        if eco_econ in ('semi-buy', 'semi-eco') and prev is not None:
+            prev_e1, prev_e2 = prev
+            prev_eco = prev_e2 if pair == 1 else prev_e1
+            # If eco team's equipment is growing (still buying), skip this poll
+            curr_eco_val = t2_equip if pair == 1 else t1_equip
+            if curr_eco_val > prev_eco:
+                log.debug(f"  R{round_num} {eco_econ} read may be mid-buy "
+                          f"({prev_eco} → {curr_eco_val}), skipping poll")
+                return None
+
+    gun_team = pair
 
     if gun_team is None:
         log.debug(f"  [{map_name}] R{round_num} {t1_score}-{t2_score} BUY_TIME: "
@@ -665,14 +698,15 @@ def run_simulation(max_spread: float = 8.0) -> None:
         (14, 7,  6, 25000, 2900),   # C9 wins pistol → C9 gun, SEN eco
         (15, 7,  7, 25000, 8000),   # C9 bonus round
         (19, 10, 9, 25000, 2900),   # late-game: SEN gun, C9 eco
-        # OT economy note: each player gets 5,000 credits at start of each OT pair
-        # (rounds 25, 27, 29...). Both teams start each OT pair with ~25k total
-        # equipment — so the OT "pistol" is actually a light rifle buy, NOT a pistol.
-        # True eco (<5k) in OT requires deliberate saving through the OT pair opener.
-        # In practice you see full vs semi-buy, not full vs eco.
-        (25, 13,12, 22000, 22000),  # OT pair 1 open — both semi-rifle buys (5k credit grant)
-        (26, 13,13, 25000, 4000),   # OT anti-eco ONLY if C9 saved on round 25 (rare but possible)
-        (27, 13,13, 25950, 17800),  # OT pair 2 open — real data: full vs semi-buy (no signal)
+        # OT economy: 5,000 credits per player reset each OT pair opener.
+        # Both teams start ~25k total — no eco unless deliberate save.
+        # Confirmed from OXEN vs 9z round 27: 23,250 vs 29,000 = both full buy.
+        # NOTE: equipment_value updates live during BUY_TIME as players purchase.
+        # An early-BUY_TIME poll may show incomplete buys (e.g. 17,800 before
+        # 9z finished buying up to 29,000). Only eco (<5k) is unambiguous early.
+        (25, 13,12, 22000, 22000),  # OT pair 1 open — both full-ish (5k/player grant)
+        (26, 13,13, 25000, 4000),   # OT anti-eco ONLY if C9 saved on round 25 (rare)
+        (27, 13,13, 23250, 29000),  # OT pair 2 open — actual live data: both full (no signal)
     ]
 
     signals = 0

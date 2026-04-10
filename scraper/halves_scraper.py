@@ -312,12 +312,32 @@ def run(db_path: str, limit: int = 50):
 if __name__ == '__main__':
     import sys
     import os
+    import argparse
 
-    # Resolve DB path relative to project root (two dirs up from scraper/)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
-    db_path = os.path.join(project_root, 'data', 'valorant_stats.db')
+    parser = argparse.ArgumentParser(description='Scrape VLR.gg economy tabs for half scores')
+    parser.add_argument('--db', type=str, default=None,
+                        help='Path to valorant_stats.db (default: auto-detect from project root)')
+    parser.add_argument('--limit', type=int, default=500,
+                        help='Max number of unscraped matches to process (default: 500)')
+    args = parser.parse_args()
 
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 50
+    if args.db:
+        db_path = args.db
+    else:
+        # Default: look for DB in the main thunderedge repo, not the worktree
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Try going up until we find a data/valorant_stats.db
+        search = script_dir
+        db_path = None
+        for _ in range(5):
+            candidate = os.path.join(search, 'data', 'valorant_stats.db')
+            if os.path.exists(candidate):
+                db_path = candidate
+                break
+            search = os.path.dirname(search)
+        if not db_path:
+            # Hard fallback to main repo location
+            db_path = r'C:\Users\josep\OneDrive\Desktop\Thunderedge\thunderedge\data\valorant_stats.db'
+
     logger.info(f'Using DB: {db_path}')
-    run(db_path, limit=limit)
+    run(db_path, limit=args.limit)

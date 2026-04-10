@@ -3,9 +3,17 @@
 Compute per-(team, map, side) win rates from match_map_halves and write
 to data/half_win_rates.json.
 
+Event-based recency weighting:
+  - The two most recent events (by latest match date) are included.
+  - Current event rounds are weighted 1.0; previous event rounds 0.5.
+  - Older events are excluded entirely.
+  - New maps that only exist in the current event have no prior data and
+    fall back to the current-event league average for that map/side.
+
 Wilson score confidence intervals are used to smooth small samples.
-If a team has fewer than MIN_ROUNDS rounds on a given (map, side), the
-model falls back to the league-average rate for that (map, side).
+If a team has fewer than MIN_ROUNDS *effective* rounds on a given
+(map, side), the model falls back to the league-average rate for that
+(map, side).
 """
 
 import json
@@ -14,14 +22,16 @@ import os
 import sqlite3
 import sys
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
 
-MIN_ROUNDS = 15          # fall back to league average below this threshold
+MIN_ROUNDS = 15          # fall back to league average below this threshold (effective rounds)
 WILSON_Z = 1.645         # 90% confidence interval (one-tailed)
+CURRENT_EVENT_WEIGHT = 1.0
+PREV_EVENT_WEIGHT    = 0.5
 
 # --------------------------------------------------------------------------- #
 # Wilson score lower bound
@@ -59,23 +69,105 @@ def wilson_point(wins: int, n: int, z: float = WILSON_Z) -> float:
 # Data loading
 # --------------------------------------------------------------------------- #
 
-def load_halves(db_path: str) -> list:
+def detect_event_weights(conn: sqlite3.Connection) -> Dict[int, float]:
     """
-    Return all rows from match_map_halves as list of dicts.
-    Only rows with a valid map_name are included.
+    Auto-detect the two most recent events and assign weights.
+
+    Strategy: rank events by their most recent match date. The event with
+    the latest matches is "current" (weight 1.0); the second most recent
+    is "previous" (weight 0.5). All older events get weight 0.0.
+
+    If match_date is unavailable, falls back to ranking by event id
+    (higher id = more recent).
+
+    Returns: {event_id: weight}
+    """
+    cur = conn.cursor()
+
+    # Try to rank by latest match date per event
+    cur.execute('''
+        SELECT e.id, MAX(m.match_date) AS latest_date
+        FROM vct_events e
+        JOIN matches m ON m.event_id = e.id
+        GROUP BY e.id
+        ORDER BY latest_date DESC
+    ''')
+    rows = cur.fetchall()
+
+    if not rows:
+        # No matches at all — return empty
+        return {}
+
+    weights: Dict[int, float] = {}
+    for rank, (event_id, _) in enumerate(rows):
+        if rank == 0:
+            weights[event_id] = CURRENT_EVENT_WEIGHT
+        elif rank == 1:
+            weights[event_id] = PREV_EVENT_WEIGHT
+        else:
+            weights[event_id] = 0.0   # excluded
+
+    # Log which events were selected
+    cur.execute(
+        'SELECT id, event_name FROM vct_events WHERE id IN ({})'.format(
+            ','.join('?' * len(weights))
+        ),
+        list(weights.keys()),
+    )
+    for eid, ename in cur.fetchall():
+        w = weights[eid]
+        if w > 0:
+            label = 'CURRENT' if w == CURRENT_EVENT_WEIGHT else 'PREVIOUS'
+            print(f'  [{label} weight={w}] {ename} (id={eid})')
+
+    return weights
+
+
+def load_halves(db_path: str,
+                event_weights: Dict[int, float] = None) -> List[dict]:
+    """
+    Return rows from match_map_halves with a 'weight' field attached.
+
+    If event_weights is None, it is auto-detected from the DB (two most
+    recent events). Rows belonging to excluded events (weight=0) are
+    dropped.
     """
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    if event_weights is None:
+        print('Auto-detecting event weights...')
+        event_weights = detect_event_weights(conn)
+
     cur = conn.cursor()
     cur.execute('''
-        SELECT match_id, map_number, map_name, team_name,
-               atk_rounds_won, def_rounds_won, total_rounds
-        FROM match_map_halves
-        WHERE map_name IS NOT NULL AND map_name != ""
+        SELECT h.match_id, h.map_number, h.map_name, h.team_name,
+               h.atk_rounds_won, h.def_rounds_won, h.total_rounds,
+               m.event_id
+        FROM match_map_halves h
+        JOIN matches m ON m.id = h.match_id
+        WHERE h.map_name IS NOT NULL AND h.map_name != ""
     ''')
-    cols = ['match_id', 'map_number', 'map_name', 'team_name',
-            'atk_rounds_won', 'def_rounds_won', 'total_rounds']
-    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    raw = cur.fetchall()
     conn.close()
+
+    rows = []
+    for r in raw:
+        eid = r['event_id']
+        w = event_weights.get(eid, 0.0)
+        if w == 0.0:
+            continue
+        rows.append({
+            'match_id':      r['match_id'],
+            'map_number':    r['map_number'],
+            'map_name':      r['map_name'],
+            'team_name':     r['team_name'],
+            'atk_rounds_won': r['atk_rounds_won'],
+            'def_rounds_won': r['def_rounds_won'],
+            'total_rounds':  r['total_rounds'],
+            'event_id':      eid,
+            'weight':        w,
+        })
     return rows
 
 
@@ -114,62 +206,28 @@ def compute_rates(rows: list) -> dict:
     league_stats: Dict[Tuple[str, str], list] = defaultdict(lambda: [0, 0])
 
     for row in rows:
-        team = row['team_name']
+        team     = row['team_name']
         map_name = row['map_name']
-        total = row['total_rounds']
+        total    = row['total_rounds']
+        w        = row.get('weight', 1.0)   # recency weight (1.0 current, 0.5 prev event)
 
-        # atk_rounds_won / total_atk_rounds
-        # In a standard map (24 rounds), each team plays 12 atk and 12 def.
-        # OT adds extra rounds. We only know total rounds and how many each
-        # team won on attack vs defence.
-        #
-        # To get the denominator for each side we use:
-        #   total_atk_rounds ≈ ceil(total / 2)  (team played atk in first half + OT)
-        #   total_def_rounds ≈ floor(total / 2)
-        # But more precisely: in regulation (24 rds) each side = 12.
-        # In OT (25+), alternating pistols, so each OT pair = 2 rounds per side.
-        # Simplest robust estimate: atk_total = def_total = total // 2 for regulation,
-        # which equals wins_atk_team1 + wins_atk_team2 = total rounds.
-        #
-        # Actually: atk_rounds_won_t1 + def_rounds_won_t2 = total (t2 def = t1 rounds lost on atk)
-        # So: atk_total_t1 = atk_wins_t1 + def_wins_t2  <- but we don't join rows here easily.
-        #
-        # Simplest correct derivation per-row:
-        #   atk_total = atk_rounds_won + (total_rounds - atk_rounds_won - def_rounds_won)
-        #             = total_rounds - def_rounds_won
-        # Because: total = atk_won + def_won + (rounds opponent won on those sides too)
-        # Nope - let's think again:
-        #   total_rounds = rounds played on map
-        #   atk_rounds_won = rounds this team won when playing attack
-        #   def_rounds_won = rounds this team won when playing defense
-        #   atk_rounds_won + def_rounds_won = total rounds won by this team
-        #   total_rounds = total rounds won by both teams
-        #
-        # How many rounds did this team PLAY on attack? = rounds 1-12 = 12 (regulation)
-        # + OT rounds on attack side.
-        # We don't directly have this from the data, but we know:
-        #   atk_rounds_played = rounds where this team was on attack side
-        #   def_rounds_played = rounds where this team was on defense side
-        #   atk_rounds_played + def_rounds_played = total_rounds
-        #
-        # In regulation: atk_rounds_played = 12 for all maps.
-        # After halftime swap: they play 12 on the other side.
-        # In OT: pairs of 2 rounds, so atk_rounds_played += n_ot_rounds / 2
-        #
-        # Approximation: atk_rounds_played ≈ total_rounds / 2 (±1 for odd OT rounds)
-        # This is robust enough for win rate computation.
+        # Each team plays ~half the rounds on attack, half on defense.
+        # atk_total ≈ total // 2 is a robust estimate (±1 for OT).
         atk_total = max(1, total // 2)
         def_total = max(1, total - atk_total)
 
-        team_stats[(team, map_name, 'atk')][0] += row['atk_rounds_won']
-        team_stats[(team, map_name, 'atk')][1] += atk_total
-        team_stats[(team, map_name, 'def')][0] += row['def_rounds_won']
-        team_stats[(team, map_name, 'def')][1] += def_total
+        # Weighted accumulation: treat w*rounds as effective sample size.
+        team_stats[(team, map_name, 'atk')][0] += w * row['atk_rounds_won']
+        team_stats[(team, map_name, 'atk')][1] += w * atk_total
+        team_stats[(team, map_name, 'def')][0] += w * row['def_rounds_won']
+        team_stats[(team, map_name, 'def')][1] += w * def_total
 
-        league_stats[(map_name, 'atk')][0] += row['atk_rounds_won']
-        league_stats[(map_name, 'atk')][1] += atk_total
-        league_stats[(map_name, 'def')][0] += row['def_rounds_won']
-        league_stats[(map_name, 'def')][1] += def_total
+        # League averages use the same weighting so current-event maps
+        # don't get polluted by old-meta data for the fallback either.
+        league_stats[(map_name, 'atk')][0] += w * row['atk_rounds_won']
+        league_stats[(map_name, 'atk')][1] += w * atk_total
+        league_stats[(map_name, 'def')][0] += w * row['def_rounds_won']
+        league_stats[(map_name, 'def')][1] += w * def_total
 
     # ------------------------------------------------------------------ #
     # Build league averages (used as fallback)
@@ -214,11 +272,20 @@ def compute_rates(rows: list) -> dict:
             'used_fallback': used_fallback,
         }
 
+    # Track which maps are present — useful for detecting new maps with no prior data
+    maps_in_data = sorted({k.split('|')[1] for k in team_rates})
+
     return {
         'team_map_side': team_rates,
         'league_map_side': league_rates,
         'overall_avg': round(overall_avg, 6),
         'min_rounds_threshold': MIN_ROUNDS,
+        'maps_in_data': maps_in_data,
+        'event_weights': {
+            'current': CURRENT_EVENT_WEIGHT,
+            'previous': PREV_EVENT_WEIGHT,
+            'note': 'Effective sample sizes are weighted; current event counts fully, previous event at 0.5x',
+        },
     }
 
 
@@ -228,8 +295,8 @@ def compute_rates(rows: list) -> dict:
 
 def main(db_path: str, output_path: str):
     print(f'Loading data from {db_path}...')
-    rows = load_halves(db_path)
-    print(f'  {len(rows)} rows loaded from match_map_halves')
+    rows = load_halves(db_path)   # auto-detects the two most recent events
+    print(f'  {len(rows)} weighted rows loaded from match_map_halves')
 
     if not rows:
         print('ERROR: No data found in match_map_halves. Run halves_scraper.py first.')
@@ -243,9 +310,11 @@ def main(db_path: str, output_path: str):
     n_fallback = sum(1 for v in result['team_map_side'].values() if v['used_fallback'])
 
     print(f'  Teams: {n_teams}, Maps: {n_maps}')
+    print(f'  Maps in data: {", ".join(result["maps_in_data"])}')
     print(f'  Team-map-side entries: {len(result["team_map_side"])}')
-    print(f'  Entries using fallback (n < {MIN_ROUNDS}): {n_fallback}')
+    print(f'  Entries using fallback (eff. n < {MIN_ROUNDS}): {n_fallback}')
     print(f'  Overall avg rate: {result["overall_avg"]:.4f}')
+    print(f'  Weighting: current event={CURRENT_EVENT_WEIGHT}x, previous event={PREV_EVENT_WEIGHT}x')
 
     print('\nLeague averages by map/side:')
     for key in sorted(result['league_map_side']):

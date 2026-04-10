@@ -73,6 +73,15 @@ VCT_2026_KICKOFF_EVENTS = [
     {'url': '/event/2685/vct-2026-china-kickoff',    'name': 'VCT 2026: China Kickoff',    'region': 'China',    'year': 2026},
 ]
 
+# 2026 VCT Stage 1 events (ongoing — Americas starts 2026-04-10)
+# Event IDs verified from VLR.gg on 2026-04-09
+VCT_2026_STAGE1_EVENTS = [
+    {'url': '/event/2860/vct-2026-americas-stage-1', 'name': 'VCT 2026: Americas Stage 1', 'region': 'Americas', 'year': 2026},
+    {'url': '/event/2863/vct-2026-emea-stage-1',     'name': 'VCT 2026: EMEA Stage 1',     'region': 'EMEA',     'year': 2026},
+    {'url': '/event/2775/vct-2026-pacific-stage-1',  'name': 'VCT 2026: Pacific Stage 1',  'region': 'Pacific',  'year': 2026},
+    {'url': '/event/2864/vct-2026-china-stage-1',    'name': 'VCT 2026: China Stage 1',    'region': 'China',    'year': 2026},
+]
+
 class DatabasePopulator:
     def __init__(self):
         self.db = Database(Config.DATABASE_PATH)
@@ -220,11 +229,31 @@ class DatabasePopulator:
             logger.error(f"Error getting matches from {event_url}: {e}")
             return []
     
+    def _match_already_scraped(self, match_url: str) -> bool:
+        """Return True if this match already has player_map_stats rows in the DB."""
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(self.db.db_path, timeout=10)
+        cur = conn.cursor()
+        cur.execute('''
+            SELECT COUNT(*) FROM player_map_stats pms
+            JOIN matches m ON m.id = pms.match_id
+            WHERE m.match_url = ?
+        ''', (match_url,))
+        count = cur.fetchone()[0]
+        conn.close()
+        return count > 0
+
     def process_match(self, match: dict, event_id: int):
         """Process a single match and save all comprehensive player map stats + pick/bans"""
         match_url = match['url']
         full_url = f"{self.base_url}{match_url}"
-        
+
+        # Checkpoint: skip if we already have stats for this match
+        if self._match_already_scraped(match_url):
+            logger.info(f"    [SKIP] Already scraped: {match_url}")
+            self.stats['matches_processed'] += 1
+            return
+
         try:
             # Use urllib to bypass proxy completely
             content = self._make_request(full_url)
@@ -567,18 +596,25 @@ def main():
     print("  VCT Database Population Script")
     print("="*60)
     print("\nSelect events to populate:")
-    print("  1) VCT 2026 Kickoff (all 4 regions) — NEW")
-    print("  2) VCT 2025 (all 12 events)")
-    print("  3) Both 2026 Kickoff + 2025")
+    print("  1) VCT 2026 Stage 1 (ongoing — EMEA/Pacific/China have matches, Americas starts tomorrow)")
+    print("  2) VCT 2026 Kickoff (all 4 regions, completed)")
+    print("  3) Both 2026 Stage 1 + 2026 Kickoff  [RECOMMENDED]")
+    print("  4) VCT 2025 (all 12 events, historical)")
+    print("  5) Everything (2026 Stage 1 + Kickoff + 2025)")
+    print("\n  Note: already-scraped matches are skipped automatically (checkpoint).")
     print("\n" + "-"*60)
 
-    choice = input("Choice [1/2/3]: ").strip()
+    choice = input("Choice [1/2/3/4/5]: ").strip()
     if choice == '1':
-        events = VCT_2026_KICKOFF_EVENTS
+        events = VCT_2026_STAGE1_EVENTS
     elif choice == '2':
-        events = VCT_2025_EVENTS
+        events = VCT_2026_KICKOFF_EVENTS
     elif choice == '3':
-        events = VCT_2026_KICKOFF_EVENTS + VCT_2025_EVENTS
+        events = VCT_2026_STAGE1_EVENTS + VCT_2026_KICKOFF_EVENTS
+    elif choice == '4':
+        events = VCT_2025_EVENTS
+    elif choice == '5':
+        events = VCT_2026_STAGE1_EVENTS + VCT_2026_KICKOFF_EVENTS + VCT_2025_EVENTS
     else:
         print("Aborted.")
         return

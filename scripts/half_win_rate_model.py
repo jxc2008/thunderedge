@@ -84,13 +84,17 @@ def detect_event_weights(conn: sqlite3.Connection) -> Dict[int, float]:
     """
     cur = conn.cursor()
 
-    # Try to rank by latest match date per event
+    # Rank by latest match date per event, falling back to event id when
+    # match_date is NULL (COALESCE maps NULL → '' which sorts before any date,
+    # so events with NULL dates naturally rank lower than events with real dates).
+    # Only consider events that actually have scraped halves data.
     cur.execute('''
         SELECT e.id, MAX(m.match_date) AS latest_date
         FROM vct_events e
         JOIN matches m ON m.event_id = e.id
+        JOIN match_map_halves h ON h.match_id = m.id
         GROUP BY e.id
-        ORDER BY latest_date DESC
+        ORDER BY COALESCE(latest_date, '') DESC, e.id DESC
     ''')
     rows = cur.fetchall()
 

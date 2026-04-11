@@ -204,23 +204,19 @@ def step_regenerate_rates(dry_run: bool, new_halves: int) -> bool:
 # Data threshold check
 # --------------------------------------------------------------------------- #
 
-def check_pickban_threshold() -> dict:
+def check_pickban_coverage() -> dict:
     """
-    Report pick/ban data readiness per team using recency-weighted appearances.
+    Report recency-weighted pick/ban appearances per team.
 
-    Each match is weighted by its stage recency (same scheme as half-win-rate model):
-      current stage = 1.0, previous stage = 0.5, older = excluded.
-
-    Tiers (from PICKBAN_PREDICTION.md):
-      effective < 8:   LOW  — use win-rate model only, no tendency prior
-      effective 8-15:  MED  — blend tendency prior with win-rate score
-      effective > 15:  HIGH — lean on team-specific patterns
+    current stage = 1.0, previous stage = 0.5, older = excluded.
+    α(n) = min(0.4, n/20) — no hard thresholds, model always runs.
     """
     import re as _re
+    from collections import defaultdict
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Detect current and previous stage using event round keys
     _STAGE_ORDER = {'Kickoff': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3}
 
     def _round_key(event_name):
@@ -233,14 +229,9 @@ def check_pickban_threshold() -> dict:
     all_events = cur.fetchall()
     event_rounds = {eid: _round_key(ename) for eid, ename in all_events}
     ranked = sorted(set(event_rounds.values()), reverse=True)
-    round_weights = {}
-    for i, rk in enumerate(ranked):
-        round_weights[rk] = 1.0 if i == 0 else (0.5 if i == 1 else 0.0)
+    round_weights = {rk: (1.0 if i == 0 else (0.5 if i == 1 else 0.0))
+                     for i, rk in enumerate(ranked)}
 
-    def _event_weight(event_id):
-        return round_weights.get(event_rounds.get(event_id, (0, -1)), 0.0)
-
-    # Fetch all pick/ban match event IDs
     cur.execute('''
         SELECT m.team1, m.team2, m.event_id
         FROM match_pick_bans pb
@@ -249,19 +240,18 @@ def check_pickban_threshold() -> dict:
     rows = cur.fetchall()
     conn.close()
 
-    from collections import defaultdict
     effective = defaultdict(float)
     for team1, team2, event_id in rows:
-        w = _event_weight(event_id)
+        w = round_weights.get(event_rounds.get(event_id, (0, -1)), 0.0)
         if w > 0:
             effective[team1] += w
             effective[team2] += w
 
-    low  = {t: round(n, 1) for t, n in effective.items() if n < 8}
-    med  = {t: round(n, 1) for t, n in effective.items() if 8 <= n <= 15}
-    high = {t: round(n, 1) for t, n in effective.items() if n > 15}
-
-    return {'low': low, 'med': med, 'high': high}
+    # α(n) = min(0.4, n/20) — reported for reference
+    return {
+        t: {'n': round(n, 1), 'alpha': round(min(0.4, n / 20), 3)}
+        for t, n in sorted(effective.items(), key=lambda x: -x[1])
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -278,23 +268,18 @@ def run_once(dry_run: bool):
     rates_updated = step_regenerate_rates(dry_run, new_halves)
 
     # Summary
-    threshold = check_pickban_threshold()
-    n_high = len(threshold['high'])
-    n_med  = len(threshold['med'])
-    n_low  = len(threshold['low'])
+    coverage = check_pickban_coverage()
     total_pb = _row_count('match_pick_bans')
+    ready    = {t: v for t, v in coverage.items() if v['n'] >= 1}
 
     logger.info(
-        '=== Done. match_map_halves=%d | pick_bans=%d | '
-        'pick/ban tiers: high=%d med=%d low=%d ===',
-        _row_count('match_map_halves'), total_pb, n_high, n_med, n_low,
+        '=== Done. match_map_halves=%d | pick_bans=%d | teams with pick/ban data=%d ===',
+        _row_count('match_map_halves'), total_pb, len(ready),
     )
 
-    if n_med + n_high > 0 and not dry_run:
-        logger.info(
-            'Teams with MED/HIGH pick/ban signal: %s',
-            ', '.join(sorted({**threshold['med'], **threshold['high']}.keys())),
-        )
+    if ready and not dry_run:
+        summary = ', '.join(f"{t}(n={v['n']},α={v['alpha']})" for t, v in list(ready.items())[:10])
+        logger.info('Pick/ban coverage: %s%s', summary, ' ...' if len(ready) > 10 else '')
 
 
 def main():

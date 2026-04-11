@@ -13,52 +13,115 @@ the veto to complete. Wider trading window, more time to get filled.
 | Source | Table | Fields needed |
 |---|---|---|
 | VLR.gg | `match_pick_bans` | first_ban, second_ban, first_pick, second_pick, decider, match_id |
-| VLR.gg | `matches` | team1, team2, match_id |
+| VLR.gg | `matches` | team1, team2, event_id, match_id |
+| VLR.gg | `vct_events` | id, event_name, year (for stage ordering) |
 | Half-win-rate model | `match_map_halves` | team_name, map_name, atk/def win rates |
 
-**Minimum viable data threshold:**
-- ≥ 15 veto appearances per team before team-specific tendencies are used
-- Below threshold: fall back to league-average veto tendencies
+---
+
+## Data Thresholds
+
+VCT regular season is small — each team plays only ~5 matches per stage.
+Across a full year (Kickoff + Stage 1 + Stage 2) that's ~15 matches per team,
+~25-30 with prior year data included. Thresholds must reflect this reality.
+
+| Effective appearances* | Tier | Action |
+|---|---|---|
+| < 8 | LOW | No signal — use win-rate model only, no tendency prior |
+| 8–15 | MED | Tendencies visible — blend tendency prior with win-rate score |
+| > 15 | HIGH | Reliable enough to lean on team-specific patterns |
+
+*Effective appearances = weighted sum (see recency weighting below).
+A current-stage match counts as 1.0; previous stage counts as 0.5; older = 0.0.
+
+Fully automated pre-veto trading only triggers when **both** teams are MED or HIGH.
+Otherwise flag for manual review.
+
+---
+
+## Recency Weighting
+
+VCT teams adapt their map pools between stages — a team's Kickoff bans may
+not reflect their Stage 1 preferences after roster changes or meta shifts.
+Use the same event-round weighting as the half-win-rate model:
+
+| Stage | Weight |
+|---|---|
+| Current stage (e.g. Stage 1) | 1.0 |
+| Previous stage (e.g. Kickoff) | 0.5 |
+| Older (e.g. prior year) | 0.0 (excluded) |
+
+Applied to both tendency frequencies and win-rate calculations:
+```
+weighted_ban_count(team, map) = Σ w(match) * I(team banned map in match)
+effective_appearances(team)   = Σ w(match) for all matches involving team
+```
+
+Same `_extract_round_key()` logic from `half_win_rate_model.py` to auto-detect
+current vs previous stage from event names.
 
 ---
 
 ## Model
 
-### Step 1: Win-rate scores
+### Step 1: Win-rate scores (quantitative, more reliable)
 
 For each (team, map, opponent) triple:
 
 ```
-ban_score(team, map, opp)  = opp_winrate(map)  - team_winrate(map)   # team bans their disadvantage vs opp
-pick_score(team, map, opp) = team_winrate(map) - opp_winrate(map)    # team picks their advantage over opp
+ban_score(team, map, opp)  = opp_winrate(map)  - team_winrate(map)
+pick_score(team, map, opp) = team_winrate(map) - opp_winrate(map)
 ```
 
-### Step 2: Tendency prior
+Win rates come from `half_win_rates.json` (already recency-weighted).
 
-From `match_pick_bans`, compute per-team historical frequencies:
+### Step 2: Tendency prior (qualitative, noisy at small samples)
+
+From `match_pick_bans`, compute weighted per-team frequencies:
 ```
-P(team bans map X)  = count(team banned X) / count(team vetos)
-P(team picks map X) = count(team picked X) / count(team picks)
+P(team bans map X)  = weighted_ban_count(team, X)  / effective_appearances(team)
+P(team picks map X) = weighted_pick_count(team, X) / effective_appearances(team)
 ```
 
 ### Step 3: Blend
 
 ```
-final_ban_score(team, map, opp)  = α * tendency_prior + (1-α) * ban_score
-final_pick_score(team, map, opp) = α * tendency_prior + (1-α) * pick_score
+final_ban_score  = α * tendency_prior + (1-α) * win_rate_score
+final_pick_score = α * tendency_prior + (1-α) * win_rate_score
 ```
 
-`α` shrinks toward 0 as sample size grows — trust data over prior.
-Suggested starting α = 0.4, decaying to 0.1 at 50+ appearances.
+`α` is the tendency weight — how much to trust historical patterns vs pure math:
 
-### Step 4: Simulate veto
+| Effective appearances | α (tendency weight) |
+|---|---|
+| < 8 | 0.0 (win-rate only) |
+| 8–12 | 0.2 |
+| 12–15 | 0.3 |
+| > 15 | 0.4 (cap — always let win-rate dominate) |
+
+α is capped at 0.4 regardless of sample size because VCT teams change map
+pools between stages and no frequency table should fully override the math.
+
+### Step 4: Manual override
+
+A per-team annotation dict can hard-set known tendencies that data hasn't
+captured yet (e.g. team just overhauled their map pool mid-season):
+```python
+MANUAL_OVERRIDES = {
+    'SEN': {'always_ban': 'Lotus'},   # override: ignore frequency table
+    'NRG': {'never_pick': 'Abyss'},
+}
+```
+Applied after Step 3, before Step 4.
+
+### Step 5: Simulate veto
 
 Standard BO3 veto order: ban → ban → pick → pick → ban → ban → decider
-Each step: the acting team selects the available map with highest score.
+Each step: the acting team selects the available map with the highest score.
 
 Output: probability distribution over (map1, map2, map3) combinations.
 
-### Step 5: Expected theo
+### Step 6: Expected theo
 
 ```
 E[theo] = Σ P(map_pool) * series_theo(team_a, team_b, map_pool)
@@ -77,33 +140,23 @@ Match announced → wait for pick/ban (~5 min window) → compute theo → trade
 
 **With pick/ban prediction:**
 ```
-Match announced → compute expected theo immediately → trade
+Match announced → compute E[theo] immediately → enter small position
                 ↓
-         pick/ban completes → update theo with actual maps → adjust position if needed
+         pick/ban confirmed → update theo with actual maps → adjust size
 ```
 
 Two-stage approach:
-1. Enter position early based on predicted map pool (smaller size, wider edge threshold)
-2. After pick/ban confirmed: re-evaluate, add size if theo confirms or exit if maps were wrong
-
----
-
-## Data Threshold for Automation
-
-| Condition | Action |
-|---|---|
-| Team has < 15 veto appearances | Manual only — flag for human review |
-| Team has 15-40 appearances | Semi-auto — compute predicted theo, require human confirmation |
-| Both teams have > 40 appearances | Fully automated — enter position pre-veto |
+1. Enter early based on predicted map pool — smaller size, wider edge threshold (8+ cents)
+2. After pick/ban: re-evaluate with exact maps, add to position or exit if maps diverged
 
 ---
 
 ## When to Build
 
-- **Now**: infrastructure exists, data is thin (~20-30 vetos per team in 2025 data)
-- **Target**: after VCT 2026 Stage 1 completes — should have 40-60 vetos per major team
-- **Trigger**: when `SELECT COUNT(*) FROM match_pick_bans WHERE match_id IN
-  (SELECT id FROM matches WHERE event_id IN <2026 events>)` exceeds 200
+- **Not yet**: current data is thin (5 matches/team in Stage 1 so far)
+- **Target**: mid-Stage 1 once ~3 matches per team are in for current stage
+- **Practical trigger**: `effective_appearances >= 8` for both teams in a matchup
+- **Auto-check**: `auto_update.py` reports tier counts every run
 
 ---
 
@@ -111,6 +164,6 @@ Two-stage approach:
 
 | File | Purpose |
 |---|---|
-| `scripts/pickban_model.py` | Compute tendency tables + veto simulator |
-| `data/pickban_tendencies.json` | Per-team ban/pick frequency tables |
-| `backend/theo_engine.py` | Add `expected_series_theo()` method using predicted map pool |
+| `scripts/pickban_model.py` | Compute weighted tendency tables + veto simulator |
+| `data/pickban_tendencies.json` | Per-team weighted ban/pick frequency tables |
+| `backend/theo_engine.py` | Add `expected_series_theo()` using predicted map pool |

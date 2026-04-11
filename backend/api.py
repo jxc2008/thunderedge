@@ -73,11 +73,9 @@ def _scrape_tomorrow_matches() -> list:
     from bs4 import BeautifulSoup
     from datetime import date, timedelta
 
-    tomorrow = (date.today() + timedelta(days=1)).strftime('%B %-d').lstrip()
-    # Windows-safe fallback (%-d not supported on Windows)
-    tomorrow_day = str((date.today() + timedelta(days=1)).day)
+    tomorrow_day   = str((date.today() + timedelta(days=1)).day)
     tomorrow_month = (date.today() + timedelta(days=1)).strftime('%B')
-    tomorrow_str = f'{tomorrow_month} {tomorrow_day}'  # e.g. "April 12"
+    tomorrow_str   = f'{tomorrow_month} {tomorrow_day}'  # e.g. "April 12"
 
     url = 'https://www.vlr.gg/matches'
     user_agents = [

@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 
 # Current VCT 2026 active map pool (7 maps)
-VCT_2026_MAP_POOL = ['Abyss', 'Bind', 'Breeze', 'Corrode', 'Haven', 'Lotus', 'Pearl', 'Split']
+VCT_2026_MAP_POOL = ['Bind', 'Breeze', 'Fracture', 'Haven', 'Lotus', 'Pearl', 'Split']
 
 # Standard BO3 veto order: (actor_index, action)
 # actor_index: 0 = team_a, 1 = team_b

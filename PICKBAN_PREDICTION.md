@@ -72,24 +72,26 @@ P(team picks map X) = weighted_pick_count(team, X) / effective_appearances(team)
 ### Step 3: Blend
 
 ```
-α(n) = min(0.4, n / 20)        # n = effective_appearances
+α(n) = 0.4 * (1 - exp(-n / 3))    # n = effective_appearances
 
 final_ban_score  = α * tendency_prior + (1-α) * win_rate_score
 final_pick_score = α * tendency_prior + (1-α) * win_rate_score
 ```
 
-α scales continuously with data — no hard cutoffs:
+Concave curve — rises quickly, plateaus near the cap:
 
 | Effective appearances | α (tendency weight) |
 |---|---|
-| 1 | 0.05 |
-| 5 | 0.25 |
-| 8+ | 0.40 (cap) |
+| 1 | 0.12 |
+| 2 | 0.23 |
+| 3 | 0.31 |
+| 4 | 0.37 |
+| 6+ | ~0.40 (effectively capped) |
 
 α is capped at 0.4 regardless of sample size because VCT teams change map
 pools between stages and no frequency table should fully override the math.
-Teams with only 1-2 matches still get a prediction; tendency just contributes
-less.
+By 4 matches the tendency data is treated as near-definitive; the win-rate
+score still contributes to handle map pool shifts between stages.
 
 ### Step 4: Manual override
 

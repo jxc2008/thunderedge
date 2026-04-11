@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 
 # Current VCT 2026 active map pool (7 maps)
-VCT_2026_MAP_POOL = ['Abyss', 'Bind', 'Breeze', 'Corrode', 'Haven', 'Pearl', 'Split']
+VCT_2026_MAP_POOL = ['Abyss', 'Bind', 'Breeze', 'Corrode', 'Haven', 'Lotus', 'Pearl', 'Split']
 
 # Standard BO3 veto order: (actor_index, action)
 # actor_index: 0 = team_a, 1 = team_b
@@ -419,6 +419,8 @@ def main():
                         help='Top N map pools to show (default: 8)')
     parser.add_argument('--tendencies', action='store_true',
                         help='Print raw tendency tables for both teams')
+    parser.add_argument('--json', action='store_true',
+                        help='Output result as JSON (for API consumption)')
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
@@ -433,6 +435,15 @@ def main():
     model  = PickBanModel(db_path=db_path, rates_path=rates_path, map_pool=args.maps)
     team_a = normalise(args.team_a)
     team_b = normalise(args.team_b)
+
+    if args.json:
+        import json as _json
+        result = model.predict(team_a, team_b, args.ask, n_sims=args.sims, top_n=args.top)
+        # Make top_pools serialisable (tuples → lists)
+        for p in result['top_pools']:
+            p['maps'] = list(p['maps'])
+        print(_json.dumps(result))
+        return
 
     if args.tendencies:
         td = model.tendencies()

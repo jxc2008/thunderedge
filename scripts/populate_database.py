@@ -592,6 +592,29 @@ class DatabasePopulator:
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--events', choices=['active', '2026', 'kickoff', '2025', 'all'],
+                        default=None, help='Non-interactive event selection for auto_update.py')
+    args, _ = parser.parse_known_args()
+
+    if args.events:
+        # Non-interactive mode for auto_update.py
+        if args.events == 'active':
+            events = VCT_2026_STAGE1_EVENTS
+        elif args.events == '2026':
+            events = VCT_2026_STAGE1_EVENTS + VCT_2026_KICKOFF_EVENTS
+        elif args.events == 'kickoff':
+            events = VCT_2026_KICKOFF_EVENTS
+        elif args.events == '2025':
+            events = VCT_2025_EVENTS
+        elif args.events == 'all':
+            events = VCT_2026_STAGE1_EVENTS + VCT_2026_KICKOFF_EVENTS + VCT_2025_EVENTS
+        populator = DatabasePopulator()
+        populator.populate_all_events(events)
+        return
+
+    # Interactive mode
     print("\n" + "="*60)
     print("  VCT Database Population Script")
     print("="*60)

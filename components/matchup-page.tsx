@@ -99,11 +99,29 @@ export interface TeamMatchupData {
   comps_per_map: Record<string, CompEntry[]>
 }
 
+export interface PoolEntry {
+  maps: [string, string, string]
+  prob: number
+  theo: number
+  data_w: number
+}
+
+export interface PredictionResult {
+  expected_theo: number
+  model_confidence: 'HIGH' | 'MED' | 'LOW'
+  data_weight: number
+  top_pools: PoolEntry[]
+  team_a_data: { n: number; alpha: number }
+  team_b_data: { n: number; alpha: number }
+}
+
 export interface MatchupData {
   team1: TeamMatchupData
   team2: TeamMatchupData
   head_to_head: H2HMatch[]
   odds: OddsInfo | null
+  prediction?: PredictionResult | null
+  ask?: number
 }
 
 /* ─── Constants ──────────────────────────────────────────── */
@@ -576,6 +594,122 @@ function TeamColumnHeaders({ t1Name, t2Name }: { t1Name: string; t2Name: string 
   )
 }
 
+/* ─── Prediction panel ───────────────────────────────────── */
+function confColor(conf: string) {
+  if (conf === 'HIGH') return '#22c55e'
+  if (conf === 'MED')  return '#f59e0b'
+  return '#71717a'
+}
+
+function PredictionPanel({
+  pred,
+  ask,
+  t1Name,
+  t2Name,
+}: {
+  pred: PredictionResult
+  ask: number
+  t1Name: string
+  t2Name: string
+}) {
+  const edge = pred.expected_theo - ask / 100
+  const edgeAbs = Math.abs(edge)
+  const edgeColor = edgeAbs >= 0.05 ? (edge > 0 ? '#22c55e' : '#ef4444')
+                  : edgeAbs >= 0.02 ? '#f59e0b'
+                  : '#71717a'
+  const side = edge > 0 ? `BUY YES (${t1Name})` : `BUY NO (${t2Name})`
+
+  return (
+    <Card style={{ padding: '1.25rem 1.5rem' }}>
+      <SectionLabel>Model Prediction (Pre-Veto)</SectionLabel>
+
+      {/* Summary row */}
+      <div className="flex flex-wrap gap-4 mb-4">
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Expected Theo
+          </p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: '#e4e4e7' }}>
+            {(pred.expected_theo * 100).toFixed(1)}c
+          </p>
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Kalshi Ask
+          </p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            {ask}c
+          </p>
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Edge
+          </p>
+          <p className="text-2xl font-bold tabular-nums" style={{ color: edgeColor }}>
+            {edge >= 0 ? '+' : ''}{(edge * 100).toFixed(1)}c
+          </p>
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Signal
+          </p>
+          <p className="text-sm font-bold" style={{ color: edgeColor }}>
+            {edgeAbs >= 0.02 ? side : 'No edge'}
+          </p>
+        </div>
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-wide mb-0.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            Confidence
+          </p>
+          <p className="text-sm font-bold" style={{ color: confColor(pred.model_confidence) }}>
+            {pred.model_confidence}
+          </p>
+        </div>
+      </div>
+
+      {/* Data coverage */}
+      <div className="flex gap-4 mb-4 text-[0.7rem]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+        <span style={{ color: T1_COLOR }}>{t1Name}: n={pred.team_a_data.n} alpha={pred.team_a_data.alpha.toFixed(2)}</span>
+        <span style={{ color: T2_COLOR }}>{t2Name}: n={pred.team_b_data.n} alpha={pred.team_b_data.alpha.toFixed(2)}</span>
+      </div>
+
+      {/* Top map pools */}
+      {pred.top_pools.length > 0 && (
+        <div>
+          <p className="text-[0.6rem] uppercase tracking-[0.12em] mb-2" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            Top Predicted Map Pools
+          </p>
+          <div className="flex flex-col gap-1">
+            {pred.top_pools.slice(0, 6).map((p, i) => {
+              const poolEdge = p.theo - ask / 100
+              const poolEdgeColor = Math.abs(poolEdge) >= 0.05
+                ? (poolEdge > 0 ? '#22c55e' : '#ef4444')
+                : '#71717a'
+              return (
+                <div
+                  key={p.maps.join('/')}
+                  className="flex items-center gap-3 px-3 py-1.5 text-[0.75rem]"
+                  style={{ background: i === 0 ? '#0f0f0f' : 'transparent', border: `1px solid ${i === 0 ? '#27272a' : '#1c1c1e'}` }}
+                >
+                  <span className="tabular-nums w-10 text-right shrink-0" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    {(p.prob * 100).toFixed(1)}%
+                  </span>
+                  <span className="flex-1" style={{ color: '#e4e4e7' }}>
+                    {p.maps[0]} &middot; {p.maps[1]} &middot; {p.maps[2]}
+                  </span>
+                  <span className="tabular-nums shrink-0" style={{ color: poolEdgeColor }}>
+                    {p.theo > ask / 100 ? '+' : ''}{((p.theo - ask / 100) * 100).toFixed(1)}c
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 /* ─── Main MatchupPage component ─────────────────────────── */
 export function MatchupPage({ data }: { data: MatchupData }) {
   const t1 = data.team1
@@ -617,6 +751,16 @@ export function MatchupPage({ data }: { data: MatchupData }) {
 
       {/* Map records */}
       <MapRecordsSection t1={t1} t2={t2} />
+
+      {/* Model prediction */}
+      {data.prediction && (
+        <PredictionPanel
+          pred={data.prediction}
+          ask={data.ask ?? 50}
+          t1Name={t1DisplayName}
+          t2Name={t2DisplayName}
+        />
+      )}
 
       {/* Pick/Ban tendencies */}
       <PickBanSection t1={t1} t2={t2} />

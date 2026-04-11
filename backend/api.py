@@ -33,6 +33,121 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------- #
+# Pick/ban prediction — subprocess bridge to market-maker worktree
+# --------------------------------------------------------------------------- #
+_REPO_ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_MM_ROOT        = os.path.normpath(os.path.join(_REPO_ROOT, '..', 'worktrees', 'market-maker'))
+_PICKBAN_SCRIPT = os.path.join(_MM_ROOT, 'scripts', 'pickban_model.py')
+_RATES_PATH     = os.path.join(_MM_ROOT, 'data', 'half_win_rates.json')
+_PREDICTION_AVAILABLE = os.path.isfile(_PICKBAN_SCRIPT) and os.path.isfile(_RATES_PATH)
+
+
+def _run_prediction(team1: str, team2: str, ask: int = 50, sims: int = 5000) -> dict:
+    """Call pickban_model.py as a subprocess and return parsed JSON."""
+    import subprocess
+    db_path = os.path.join(_REPO_ROOT, 'data', 'valorant_stats.db')
+    result = subprocess.run(
+        [
+            sys.executable, _PICKBAN_SCRIPT,
+            team1, team2,
+            '--ask', str(ask),
+            '--sims', str(sims),
+            '--json',
+            '--db', db_path,
+            '--rates', _RATES_PATH,
+        ],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or 'pickban_model failed')
+    return json.loads(result.stdout)
+
+
+def _scrape_tomorrow_matches() -> list:
+    """
+    Scrape VLR.gg /matches for upcoming VCT matches.
+    Returns list of {team_a, team_b, event, match_url, day_label}.
+    """
+    import urllib.request, urllib.error, random
+    from bs4 import BeautifulSoup
+    from datetime import date, timedelta
+
+    tomorrow = (date.today() + timedelta(days=1)).strftime('%B %-d').lstrip()
+    # Windows-safe fallback (%-d not supported on Windows)
+    tomorrow_day = str((date.today() + timedelta(days=1)).day)
+    tomorrow_month = (date.today() + timedelta(days=1)).strftime('%B')
+    tomorrow_str = f'{tomorrow_month} {tomorrow_day}'  # e.g. "April 12"
+
+    url = 'https://www.vlr.gg/matches'
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
+    ]
+    req = urllib.request.Request(url, headers={
+        'User-Agent': random.choice(user_agents),
+        'Accept': 'text/html,*/*',
+    })
+    try:
+        resp = urllib.request.urlopen(req, timeout=20)
+        html = resp.read()
+    except Exception as e:
+        raise RuntimeError(f'Failed to fetch VLR.gg/matches: {e}')
+
+    soup = BeautifulSoup(html, 'html.parser')
+    matches = []
+    current_day = None
+
+    VCT_KEYWORDS = ('vct', 'masters', 'champions', 'lock//in')
+
+    for node in soup.find_all(['div'], class_=True):
+        classes = ' '.join(node.get('class', []))
+
+        # Day header
+        if 'wf-label' in classes:
+            text = node.get_text(strip=True)
+            # e.g. "Saturday, April 12" or "Today" or "Tomorrow"
+            if 'tomorrow' in text.lower() or tomorrow_str in text:
+                current_day = 'tomorrow'
+            elif 'today' in text.lower():
+                current_day = 'today'
+            else:
+                current_day = text
+            continue
+
+        if 'match-item' not in classes:
+            continue
+
+        # Only collect today/tomorrow
+        if current_day not in ('today', 'tomorrow'):
+            continue
+
+        teams = node.find_all('div', class_=re.compile(r'match-item-team'))
+        if len(teams) < 2:
+            continue
+        team_a = teams[0].get_text(strip=True)
+        team_b = teams[1].get_text(strip=True)
+        if not team_a or not team_b or 'TBD' in (team_a, team_b):
+            continue
+
+        event_div = node.find('div', class_=re.compile(r'match-item-event'))
+        event = event_div.get_text(strip=True) if event_div else ''
+
+        if not any(k in event.lower() for k in VCT_KEYWORDS):
+            continue
+
+        link = node.find('a', href=True)
+        match_url = ('https://www.vlr.gg' + link['href']) if link else ''
+
+        matches.append({
+            'team_a': team_a,
+            'team_b': team_b,
+            'event': event,
+            'match_url': match_url,
+            'day': current_day,
+        })
+
+    return matches
+
 
 def _parse_matchup_inputs(args):
     """Parse optional matchup inputs from request args."""
@@ -807,6 +922,75 @@ def get_matchup_analysis():
     except Exception as e:
         logger.error(f"Error in matchup analysis: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/matchup/prediction', methods=['GET'])
+def get_matchup_prediction():
+    """
+    Run pick/ban model prediction for two teams.
+    Query params: team1, team2, ask (Kalshi YES ask in cents, default 50)
+    """
+    if not _PREDICTION_AVAILABLE:
+        return jsonify({'error': 'Prediction model not available (market-maker worktree missing)'}), 503
+
+    team1 = request.args.get('team1', '').strip()
+    team2 = request.args.get('team2', '').strip()
+    if not team1 or not team2:
+        return jsonify({'error': 'team1 and team2 are required'}), 400
+
+    try:
+        ask = int(request.args.get('ask', 50))
+        ask = max(1, min(99, ask))
+    except ValueError:
+        ask = 50
+
+    try:
+        result = _run_prediction(team1, team2, ask=ask, sims=5000)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error(f'Prediction error for {team1} vs {team2}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/tomorrow', methods=['GET'])
+def get_tomorrow_matches():
+    """
+    Scrape VLR.gg for today/tomorrow's VCT matches and run pick/ban predictions.
+    Query params: ask (default 50, applied to all matches)
+    """
+    if not _PREDICTION_AVAILABLE:
+        return jsonify({'error': 'Prediction model not available'}), 503
+
+    try:
+        ask = int(request.args.get('ask', 50))
+    except ValueError:
+        ask = 50
+
+    try:
+        raw_matches = _scrape_tomorrow_matches()
+    except Exception as e:
+        logger.error(f'VLR.gg scrape failed: {e}')
+        return jsonify({'error': f'Failed to scrape VLR.gg: {e}'}), 502
+
+    results = []
+    for m in raw_matches:
+        entry = {
+            'team_a': m['team_a'],
+            'team_b': m['team_b'],
+            'event':  m['event'],
+            'match_url': m['match_url'],
+            'day':    m['day'],
+            'prediction': None,
+            'error': None,
+        }
+        try:
+            pred = _run_prediction(m['team_a'], m['team_b'], ask=ask, sims=5000)
+            entry['prediction'] = pred
+        except Exception as e:
+            entry['error'] = str(e)
+        results.append(entry)
+
+    return jsonify({'success': True, 'matches': results, 'count': len(results)})
+
 
 @app.route('/api/prizepicks/<ign>', methods=['GET'])
 def get_prizepicks_analysis(ign):

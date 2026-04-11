@@ -175,6 +175,7 @@ def main() -> None:
     from backend.market_maker import MarketMaker
     from scraper.pickban_watcher import get_upcoming_matches, get_pickban
     from backend.team_names import normalise as normalise_team
+    from scripts.pickban_model import PickBanModel
 
     rates_path = os.path.join(os.path.dirname(args.db), 'half_win_rates.json')
     if not os.path.isfile(rates_path):
@@ -189,6 +190,9 @@ def main() -> None:
 
     log.info("Initialising TheoEngine (rates=%s)…", rates_path)
     theo_engine = TheoEngine(rates_path=rates_path)
+
+    log.info("Initialising PickBanModel…")
+    pickban_model = PickBanModel(db_path=args.db, rates_path=rates_path)
 
     log.info(
         "Initialising MarketMaker — dry_run=%s, spread=%dc, max_pos=%dc, min_edge=%dc",
@@ -274,13 +278,43 @@ def main() -> None:
                 pb = get_pickban(match_url)
 
                 if not pb or not pb.get('complete'):
+                    # Pick/ban not announced yet — use pre-veto predicted map pool
                     log.info(
-                        "%s: pick/ban not ready for %s — skipping this cycle",
-                        ticker, match_url,
+                        "%s: pick/ban not ready — computing pre-veto E[theo]",
+                        ticker,
                     )
+                    try:
+                        pre = pickban_model.predict(team_a, team_b, yes_ask, n_sims=5000)
+                        log.info(
+                            "%s: pre-veto E[theo]=%.3f conf=%s "
+                            "(A:%s n=%.1f α=%.2f | B:%s n=%.1f α=%.2f)",
+                            ticker,
+                            pre['expected_theo'], pre['model_confidence'],
+                            team_a, pre['team_a_data']['n'], pre['team_a_data']['alpha'],
+                            team_b, pre['team_b_data']['n'], pre['team_b_data']['alpha'],
+                        )
+                        if pre['top_pools']:
+                            top = pre['top_pools'][0]
+                            log.info(
+                                "%s: top predicted pool: %s (%.1f%%)  theo=%.3f",
+                                ticker, ' / '.join(top['maps']),
+                                top['prob'] * 100, top['theo'],
+                            )
+                        # Pre-veto: quote with wider spread (double), smaller size
+                        mm.update_market(
+                            ticker=ticker,
+                            team_a=team_a,
+                            team_b=team_b,
+                            map_pool=list(pre['top_pools'][0]['maps']),
+                            team_a_sides=None,
+                            pre_veto=True,
+                            pre_veto_theo=pre['expected_theo'],
+                        )
+                    except Exception as exc:
+                        log.warning("%s: pre-veto prediction failed: %s", ticker, exc)
                     continue
 
-                # Step 5: extract map pool and sides
+                # Step 5: pick/ban confirmed — extract map pool and sides
                 map_pool = [m['map'] for m in pb['maps']]
                 team_a_sides = {
                     m['map']: m['team_a_side']
@@ -289,11 +323,14 @@ def main() -> None:
                 }
 
                 log.info(
-                    "%s: pick/ban ready — maps=%s sides=%s",
+                    "%s: pick/ban confirmed — maps=%s sides=%s",
                     ticker, map_pool, team_a_sides,
                 )
 
-                # Step 6: quote
+                # Invalidate pre-veto cache so tendencies reload for next match
+                pickban_model.invalidate_cache()
+
+                # Step 6: quote with exact maps
                 mm.update_market(
                     ticker=ticker,
                     team_a=team_a,

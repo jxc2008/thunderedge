@@ -324,6 +324,8 @@ class MarketMaker:
         team_b: str,
         map_pool: Optional[List[str]] = None,
         team_a_sides: Optional[Dict[str, str]] = None,
+        pre_veto: bool = False,
+        pre_veto_theo: Optional[float] = None,
     ) -> None:
         """
         Run one quoting cycle for a single market.
@@ -332,16 +334,20 @@ class MarketMaker:
           1. Fetch current market data.
           2. Guard: skip if near close or API error streak too high.
           3. Compute theo from TheoEngine using map_pool + sides.
+             If pre_veto=True, use pre_veto_theo directly with 2× spread and
+             half position size (wider, smaller to reflect map pool uncertainty).
           4. Cancel stale quotes if needed.
           5. Place new quotes if edge exists.
           6. Log state.
 
         Args:
-            ticker:       Kalshi market ticker.
-            team_a:       Team A name (YES side).
-            team_b:       Team B name (NO side).
-            map_pool:     Ordered list of maps to be played (from pick/ban).
-            team_a_sides: {map_name: 'atk'|'def'} for team_a's starting side.
+            ticker:        Kalshi market ticker.
+            team_a:        Team A name (YES side).
+            team_b:        Team B name (NO side).
+            map_pool:      Ordered list of maps (from pick/ban or top predicted pool).
+            team_a_sides:  {map_name: 'atk'|'def'} for team_a's starting side.
+            pre_veto:      True when using predicted map pool (not confirmed).
+            pre_veto_theo: E[theo] from PickBanModel.predict() — used directly.
         """
         # --- Fetch market ---
         try:
@@ -375,22 +381,23 @@ class MarketMaker:
         yes_ask: int = mkt.get("yes_ask", 100) or 100
 
         # --- Theo ---
-        if map_pool:
+        if pre_veto and pre_veto_theo is not None:
+            theo_prob = pre_veto_theo
+            data_w, conf = 0.0, 'PRE'
+        elif map_pool:
             theo_prob, data_w, conf = self.theo.series_theo(
                 team_a, team_b, map_pool, team_a_sides or {}, yes_ask
             )
-            tier = 'markov'
         else:
-            # No map data yet — fall back to side-agnostic estimate using
-            # the most common maps for these teams if available, else skip.
             logger.info('%s: no map pool yet — skipping', ticker)
             return
 
         theo_c = round(theo_prob * 100)
 
         logger.info(
-            "%s | %s vs %s | theo=%dc (data_w=%.2f, %s) | bid=%dc ask=%dc",
-            ticker, team_a, team_b, theo_c, data_w, conf, yes_bid, yes_ask,
+            "%s | %s vs %s | theo=%dc (%s) | bid=%dc ask=%dc%s",
+            ticker, team_a, team_b, theo_c, conf, yes_bid, yes_ask,
+            ' [PRE-VETO]' if pre_veto else '',
         )
 
         # --- Cancel stale quotes ---
@@ -403,8 +410,19 @@ class MarketMaker:
             logger.debug("%s: quotes still live — skipping placement", ticker)
             return
 
-        # --- Compute new quotes ---
+        # --- Compute new quotes (wider spread + smaller size for pre-veto) ---
+        effective_width    = self.quote_width * 2 if pre_veto else self.quote_width
+        effective_max_pos  = self.max_position // 2 if pre_veto else self.max_position
+
+        saved_width   = self.quote_width
+        saved_max_pos = self.max_position
+        self.quote_width   = effective_width
+        self.max_position  = effective_max_pos
+
         bid_q, ask_q = self._compute_quotes(ticker, theo_prob, yes_bid, yes_ask)
+
+        self.quote_width  = saved_width
+        self.max_position = saved_max_pos
 
         new_quotes: Dict[str, Optional[Quote]] = {}
         for leg, q in (("bid", bid_q), ("ask", ask_q)):

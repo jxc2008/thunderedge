@@ -66,23 +66,26 @@ def _run_prediction(team1: str, team2: str, ask: int = 50, sims: int = 5000) -> 
 
 def _scrape_tomorrow_matches() -> list:
     """
-    Scrape VLR.gg /matches for upcoming VCT matches.
-    Returns list of {team_a, team_b, event, match_url, day_label}.
+    Scrape VLR.gg /matches for upcoming VCT matches (today + tomorrow).
+
+    VLR.gg structure:
+      div.wf-label  — day header, e.g. "Sat, April 11, 2026Today"
+      div.wf-card   — all matches for that day
+        a.match-item
+          div.match-item-vs > div.match-item-vs-team × 2
+          div.match-item-event.text-of
     """
-    import urllib.request, urllib.error, random
+    import urllib.request, urllib.error
     from bs4 import BeautifulSoup
     from datetime import date, timedelta
 
     tomorrow_day   = str((date.today() + timedelta(days=1)).day)
     tomorrow_month = (date.today() + timedelta(days=1)).strftime('%B')
-    tomorrow_str   = f'{tomorrow_month} {tomorrow_day}'  # e.g. "April 12"
+    tomorrow_str   = f'{tomorrow_month} {tomorrow_day}'   # e.g. "April 12"
 
     url = 'https://www.vlr.gg/matches'
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
-    ]
     req = urllib.request.Request(url, headers={
-        'User-Agent': random.choice(user_agents),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
         'Accept': 'text/html,*/*',
     })
     try:
@@ -93,56 +96,47 @@ def _scrape_tomorrow_matches() -> list:
 
     soup = BeautifulSoup(html, 'html.parser')
     matches = []
-    current_day = None
-
     VCT_KEYWORDS = ('vct', 'masters', 'champions', 'lock//in')
 
-    for node in soup.find_all(['div'], class_=True):
-        classes = ' '.join(node.get('class', []))
-
-        # Day header
-        if 'wf-label' in classes:
-            text = node.get_text(strip=True)
-            # e.g. "Saturday, April 12" or "Today" or "Tomorrow"
-            if 'tomorrow' in text.lower() or tomorrow_str in text:
-                current_day = 'tomorrow'
-            elif 'today' in text.lower():
-                current_day = 'today'
-            else:
-                current_day = text
+    for label in soup.find_all('div', class_=re.compile(r'wf-label')):
+        text = label.get_text(strip=True)
+        if 'today' in text.lower():
+            day = 'today'
+        elif tomorrow_str in text:
+            day = 'tomorrow'
+        else:
             continue
 
-        if 'match-item' not in classes:
+        card = label.find_next_sibling('div', class_='wf-card')
+        if not card:
             continue
 
-        # Only collect today/tomorrow
-        if current_day not in ('today', 'tomorrow'):
-            continue
+        for a in card.find_all('a', class_=re.compile(r'match-item')):
+            team_divs = a.find_all('div', class_='match-item-vs-team')
+            if len(team_divs) < 2:
+                continue
+            # Strip trailing flag/unicode chars that VLR appends
+            team_a = re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', team_divs[0].get_text(strip=True)).strip()
+            team_b = re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', team_divs[1].get_text(strip=True)).strip()
+            if not team_a or not team_b or 'TBD' in (team_a, team_b):
+                continue
 
-        teams = node.find_all('div', class_=re.compile(r'match-item-team'))
-        if len(teams) < 2:
-            continue
-        team_a = teams[0].get_text(strip=True)
-        team_b = teams[1].get_text(strip=True)
-        if not team_a or not team_b or 'TBD' in (team_a, team_b):
-            continue
+            event_div = a.find('div', class_=re.compile(r'match-item-event'))
+            event = re.sub(r'[^\x20-\x7E\u00C0-\u024F]', ' ', event_div.get_text(strip=True)).strip() if event_div else ''
+            event = re.sub(r'\s+', ' ', event)
+            if not any(k in event.lower() for k in VCT_KEYWORDS):
+                continue
 
-        event_div = node.find('div', class_=re.compile(r'match-item-event'))
-        event = event_div.get_text(strip=True) if event_div else ''
+            href = a.get('href', '')
+            match_url = ('https://www.vlr.gg' + href) if href else ''
 
-        if not any(k in event.lower() for k in VCT_KEYWORDS):
-            continue
-
-        link = node.find('a', href=True)
-        match_url = ('https://www.vlr.gg' + link['href']) if link else ''
-
-        matches.append({
-            'team_a': team_a,
-            'team_b': team_b,
-            'event': event,
-            'match_url': match_url,
-            'day': current_day,
-        })
+            matches.append({
+                'team_a': team_a,
+                'team_b': team_b,
+                'event':  event,
+                'match_url': match_url,
+                'day':    day,
+            })
 
     return matches
 

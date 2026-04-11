@@ -173,7 +173,8 @@ def main() -> None:
     from scraper.kalshi_client import KalshiClient
     from backend.theo_engine import TheoEngine
     from backend.market_maker import MarketMaker
-    from scraper.pickban_watcher import get_upcoming_matches, wait_for_pickban
+    from scraper.pickban_watcher import get_upcoming_matches, get_pickban
+    from backend.team_names import normalise as normalise_team
 
     rates_path = os.path.join(os.path.dirname(args.db), 'half_win_rates.json')
     if not os.path.isfile(rates_path):
@@ -228,8 +229,14 @@ def main() -> None:
                 time.sleep(args.interval)
                 continue
 
-            # Step 2: discover upcoming VLR.gg matches
-            vlr_matches = get_upcoming_matches(max_matches=20)
+            # Step 2: discover upcoming VCT matches on VLR.gg (filter out Challengers)
+            all_vlr = get_upcoming_matches(max_matches=40)
+            vlr_matches = [
+                m for m in all_vlr
+                if 'vct' in m['event'].lower() or 'masters' in m['event'].lower()
+                or 'champions' in m['event'].lower()
+            ]
+            log.info('%d VCT matches found on VLR.gg', len(vlr_matches))
 
             # Step 3: for each Kalshi market, find matching VLR.gg match
             for mkt in kalshi_markets:
@@ -237,11 +244,15 @@ def main() -> None:
                 title  = mkt.get('title', '')
                 yes_ask = mkt.get('yes_ask', 50) or 50
 
-                # Extract team names from Kalshi title
-                team_a, team_b = mm._parse_teams_from_title(title)
-                if team_a == 'Unknown':
+                # Extract and normalise team names from Kalshi title
+                team_a_raw, team_b_raw = mm._parse_teams_from_title(title)
+                if team_a_raw == 'Unknown':
                     log.warning("Could not parse teams from: %s", title)
                     continue
+                team_a = normalise_team(team_a_raw)
+                team_b = normalise_team(team_b_raw)
+                log.info('%s: %s vs %s (raw: %s vs %s)',
+                         ticker, team_a, team_b, team_a_raw, team_b_raw)
 
                 # Find the VLR.gg match
                 vlr_match = _match_vlr_to_kalshi(team_a, team_b, vlr_matches)
@@ -260,7 +271,6 @@ def main() -> None:
                     log.debug("%s: already processed, re-quoting", ticker)
 
                 # Step 4: get pick/ban (non-blocking — returns None if not ready)
-                from scraper.pickban_watcher import get_pickban
                 pb = get_pickban(match_url)
 
                 if not pb or not pb.get('complete'):

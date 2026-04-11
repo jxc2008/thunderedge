@@ -30,7 +30,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://trading-api.kalshi.com/trade-api/v2"
+BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
 
 class KalshiAPIError(Exception):
@@ -86,12 +86,25 @@ class KalshiClient:
         """
         Build authentication headers for a request.
 
-        Signed message: f"{timestamp_ms} {METHOD} {path}"
-        Signature is PKCS1v15 with SHA-256, base64-encoded.
+        Kalshi signing spec (from official kalshi-python client):
+          message = timestamp_ms + METHOD_UPPER + full_path
+          (no spaces, full path includes /trade-api/v2 prefix)
+          padding: RSA-PSS with MGF1(SHA-256), salt_length=DIGEST_LENGTH
+          encoding: standard base64
         """
         ts = self._timestamp_ms()
-        message = f"{ts} {method.upper()} {path}".encode("utf-8")
-        signature = self._private_key.sign(message, padding.PKCS1v15(), hashes.SHA256())
+        from urllib.parse import urlparse
+        base_path = urlparse(self.base_url).path  # "/trade-api/v2"
+        full_path = base_path + path               # "/trade-api/v2/portfolio/balance"
+        message = (ts + method.upper() + full_path).encode("utf-8")
+        signature = self._private_key.sign(
+            message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.DIGEST_LENGTH,
+            ),
+            hashes.SHA256(),
+        )
         sig_b64 = base64.b64encode(signature).decode("utf-8")
         return {
             "KALSHI-ACCESS-KEY": self.key_id,

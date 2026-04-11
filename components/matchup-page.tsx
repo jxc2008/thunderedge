@@ -224,13 +224,14 @@ function OverviewSection({ t1, t2 }: { t1: TeamOverview; t2: TeamOverview }) {
 
 /* ─── Pick/Ban section ───────────────────────────────────── */
 function BarCell({ rate, count, color }: { rate: number; count: number; color: string }) {
+  const pct = Math.round(rate * 100)
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full" style={{ background: '#27272a' }}>
-        <div className="h-full rounded-full" style={{ width: `${Math.min(100, rate)}%`, background: color }} />
+        <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
       </div>
       <span className="text-[0.7rem] tabular-nums w-10 text-right" style={{ color: 'rgba(255,255,255,0.6)' }}>
-        {rate}%
+        {pct}%
       </span>
     </div>
   )

@@ -1588,41 +1588,83 @@ class Database:
             conn.close()
 
     def get_team_recent_matches(self, team_name: str, limit: int = 15, year: int = 2026) -> List[Dict]:
-        """Recent matches for a team ordered by newest first."""
+        """Recent matches for a team ordered by newest first.
+
+        Derives W/L and map score from player_map_stats (map_score field)
+        since moneyline_matches is not always populated.
+        """
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
         pat = self._normalize_team(team_name)
         tname_lower = team_name.lower()
         try:
+            # Get matches
             cursor.execute('''
-                SELECT m.id, m.match_url, m.team1, m.team2, ve.event_name,
-                       mn.winner, mn.team1_maps, mn.team2_maps
+                SELECT m.id, m.match_url, m.team1, m.team2, ve.event_name
                 FROM matches m
                 JOIN vct_events ve ON m.event_id = ve.id
-                LEFT JOIN moneyline_matches mn ON m.match_url = mn.match_url
                 WHERE (LOWER(m.team1) LIKE LOWER(?) OR LOWER(m.team2) LIKE LOWER(?))
                   AND ve.year = ?
                 ORDER BY m.id DESC
                 LIMIT ?
             ''', (pat, pat, year, limit))
-            rows = cursor.fetchall()
+            matches = cursor.fetchall()
+
+            # For each match, count map wins from player_map_stats
+            # map_score is stored as "team1_rounds-team2_rounds" per the match's team1/team2
+            cursor.execute('''
+                SELECT match_id, map_number, MIN(map_score) as score
+                FROM player_map_stats
+                WHERE match_id IN ({})
+                  AND map_score IS NOT NULL AND map_score LIKE '%-%'
+                  AND kills > 0
+                GROUP BY match_id, map_number
+            '''.format(','.join('?' * len(matches))),
+                [m[0] for m in matches]
+            )
+            map_rows = cursor.fetchall()
+
+            # Build map win counts per match
+            map_wins: dict = {}   # match_id -> (t1_wins, t2_wins)
+            for mid, _, score in map_rows:
+                parts = score.split('-')
+                if len(parts) != 2:
+                    continue
+                try:
+                    t1r, t2r = int(parts[0]), int(parts[1])
+                except ValueError:
+                    continue
+                t1w, t2w = map_wins.get(mid, (0, 0))
+                if t1r > t2r:
+                    map_wins[mid] = (t1w + 1, t2w)
+                elif t2r > t1r:
+                    map_wins[mid] = (t1w, t2w + 1)
+
             results = []
-            for (mid, url, t1, t2, event_name, winner, t1_maps, t2_maps) in rows:
+            for (mid, url, t1, t2, event_name) in matches:
                 is_team1 = tname_lower in (t1 or '').lower()
                 raw_opp = t2 if is_team1 else t1
                 opponent = self._clean_team_name(raw_opp or '')
-                team_maps = (t1_maps or 0) if is_team1 else (t2_maps or 0)
-                opp_maps = (t2_maps or 0) if is_team1 else (t1_maps or 0)
-                won = None
-                if winner:
-                    won = tname_lower in (winner or '').lower()
+
+                t1w, t2w = map_wins.get(mid, (None, None))
+                team_maps = (t1w if is_team1 else t2w)
+                opp_maps  = (t2w if is_team1 else t1w)
+
+                if team_maps is not None and opp_maps is not None and (team_maps + opp_maps) > 0:
+                    won = team_maps > opp_maps
+                    result_str = 'W' if won else 'L'
+                    score_str  = f'{team_maps}-{opp_maps}'
+                else:
+                    result_str = None
+                    score_str  = None
+
                 results.append({
-                    'match_id': mid,
-                    'match_url': url,
-                    'opponent': opponent,
+                    'match_id':   mid,
+                    'match_url':  url,
+                    'opponent':   opponent,
                     'event_name': event_name,
-                    'result': 'W' if won is True else ('L' if won is False else None),
-                    'score': f'{team_maps}-{opp_maps}' if (t1_maps is not None and t2_maps is not None) else None,
+                    'result':     result_str,
+                    'score':      score_str,
                 })
             return results
         except Exception as e:

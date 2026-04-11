@@ -247,9 +247,10 @@ def check_pickban_coverage() -> dict:
             effective[team1] += w
             effective[team2] += w
 
-    # α(n) = min(0.4, n/20) — reported for reference
+    import math
+    # α(n) = 0.4 * (1 - exp(-n/3)) — concave, near-capped at n=4+
     return {
-        t: {'n': round(n, 1), 'alpha': round(min(0.4, n / 20), 3)}
+        t: {'n': round(n, 1), 'alpha': round(0.4 * (1 - math.exp(-n / 3)), 3)}
         for t, n in sorted(effective.items(), key=lambda x: -x[1])
     }
 

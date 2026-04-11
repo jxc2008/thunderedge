@@ -206,45 +206,62 @@ def step_regenerate_rates(dry_run: bool, new_halves: int) -> bool:
 
 def check_pickban_threshold() -> dict:
     """
-    Report pick/ban data readiness per team.
-    Used to decide when to switch from manual to automated pre-match predictions.
+    Report pick/ban data readiness per team using recency-weighted appearances.
 
-    Thresholds (from PICKBAN_PREDICTION.md):
-      < 15 appearances: manual only
-      15-40:            semi-auto (requires human confirmation)
-      > 40:             fully automated
+    Each match is weighted by its stage recency (same scheme as half-win-rate model):
+      current stage = 1.0, previous stage = 0.5, older = excluded.
+
+    Tiers (from PICKBAN_PREDICTION.md):
+      effective < 8:   LOW  — use win-rate model only, no tendency prior
+      effective 8-15:  MED  — blend tendency prior with win-rate score
+      effective > 15:  HIGH — lean on team-specific patterns
     """
+    import re as _re
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Detect current and previous stage using event round keys
+    _STAGE_ORDER = {'Kickoff': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3}
+
+    def _round_key(event_name):
+        m = _re.match(r'VCT (\d{4}).*?(Kickoff|Stage\s+\d+)', event_name or '')
+        if m:
+            return (int(m.group(1)), _STAGE_ORDER.get(m.group(2).strip(), -1))
+        return (0, -1)
+
+    cur.execute('SELECT id, event_name FROM vct_events')
+    all_events = cur.fetchall()
+    event_rounds = {eid: _round_key(ename) for eid, ename in all_events}
+    ranked = sorted(set(event_rounds.values()), reverse=True)
+    round_weights = {}
+    for i, rk in enumerate(ranked):
+        round_weights[rk] = 1.0 if i == 0 else (0.5 if i == 1 else 0.0)
+
+    def _event_weight(event_id):
+        return round_weights.get(event_rounds.get(event_id, (0, -1)), 0.0)
+
+    # Fetch all pick/ban match event IDs
     cur.execute('''
-        SELECT m.team1 AS team, COUNT(*) AS appearances
+        SELECT m.team1, m.team2, m.event_id
         FROM match_pick_bans pb
         JOIN matches m ON m.id = pb.match_id
-        GROUP BY m.team1
-        UNION ALL
-        SELECT m.team2, COUNT(*)
-        FROM match_pick_bans pb
-        JOIN matches m ON m.id = pb.match_id
-        GROUP BY m.team2
     ''')
     rows = cur.fetchall()
     conn.close()
 
     from collections import defaultdict
-    counts = defaultdict(int)
-    for team, n in rows:
-        counts[team] += n
+    effective = defaultdict(float)
+    for team1, team2, event_id in rows:
+        w = _event_weight(event_id)
+        if w > 0:
+            effective[team1] += w
+            effective[team2] += w
 
-    manual    = {t: n for t, n in counts.items() if n < 15}
-    semi_auto = {t: n for t, n in counts.items() if 15 <= n <= 40}
-    full_auto = {t: n for t, n in counts.items() if n > 40}
+    low  = {t: round(n, 1) for t, n in effective.items() if n < 8}
+    med  = {t: round(n, 1) for t, n in effective.items() if 8 <= n <= 15}
+    high = {t: round(n, 1) for t, n in effective.items() if n > 15}
 
-    return {
-        'manual':    manual,
-        'semi_auto': semi_auto,
-        'full_auto': full_auto,
-    }
+    return {'low': low, 'med': med, 'high': high}
 
 
 # --------------------------------------------------------------------------- #
@@ -262,21 +279,21 @@ def run_once(dry_run: bool):
 
     # Summary
     threshold = check_pickban_threshold()
-    n_full   = len(threshold['full_auto'])
-    n_semi   = len(threshold['semi_auto'])
-    n_manual = len(threshold['manual'])
+    n_high = len(threshold['high'])
+    n_med  = len(threshold['med'])
+    n_low  = len(threshold['low'])
     total_pb = _row_count('match_pick_bans')
 
     logger.info(
         '=== Done. match_map_halves=%d | pick_bans=%d | '
-        'auto-ready teams: full=%d semi=%d manual=%d ===',
-        _row_count('match_map_halves'), total_pb, n_full, n_semi, n_manual,
+        'pick/ban tiers: high=%d med=%d low=%d ===',
+        _row_count('match_map_halves'), total_pb, n_high, n_med, n_low,
     )
 
-    if n_full > 0 and not dry_run:
+    if n_med + n_high > 0 and not dry_run:
         logger.info(
-            'Teams ready for fully automated pick/ban prediction: %s',
-            ', '.join(sorted(threshold['full_auto'].keys())),
+            'Teams with MED/HIGH pick/ban signal: %s',
+            ', '.join(sorted({**threshold['med'], **threshold['high']}.keys())),
         )
 
 

@@ -318,7 +318,12 @@ class MarketMaker:
     # ------------------------------------------------------------------
 
     def update_market(
-        self, ticker: str, team_a: str, team_b: str
+        self,
+        ticker: str,
+        team_a: str,
+        team_b: str,
+        map_pool: Optional[List[str]] = None,
+        team_a_sides: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Run one quoting cycle for a single market.
@@ -326,10 +331,17 @@ class MarketMaker:
         Steps:
           1. Fetch current market data.
           2. Guard: skip if near close or API error streak too high.
-          3. Compute theo from TheoEngine.
+          3. Compute theo from TheoEngine using map_pool + sides.
           4. Cancel stale quotes if needed.
           5. Place new quotes if edge exists.
           6. Log state.
+
+        Args:
+            ticker:       Kalshi market ticker.
+            team_a:       Team A name (YES side).
+            team_b:       Team B name (NO side).
+            map_pool:     Ordered list of maps to be played (from pick/ban).
+            team_a_sides: {map_name: 'atk'|'def'} for team_a's starting side.
         """
         # --- Fetch market ---
         try:
@@ -363,15 +375,22 @@ class MarketMaker:
         yes_ask: int = mkt.get("yes_ask", 100) or 100
 
         # --- Theo ---
-        theo_prob, tier = self.theo.series_win_prob_with_fallback(
-            team_a, team_b, kalshi_yes_ask=yes_ask
-        )
+        if map_pool:
+            theo_prob, data_w, conf = self.theo.series_theo(
+                team_a, team_b, map_pool, team_a_sides or {}, yes_ask
+            )
+            tier = 'markov'
+        else:
+            # No map data yet — fall back to side-agnostic estimate using
+            # the most common maps for these teams if available, else skip.
+            logger.info('%s: no map pool yet — skipping', ticker)
+            return
+
         theo_c = round(theo_prob * 100)
-        conf = self.theo.confidence(team_a, team_b)
 
         logger.info(
-            "%s | %s vs %s | theo=%dc (%s, %s) | bid=%dc ask=%dc",
-            ticker, team_a, team_b, theo_c, tier, conf, yes_bid, yes_ask,
+            "%s | %s vs %s | theo=%dc (data_w=%.2f, %s) | bid=%dc ask=%dc",
+            ticker, team_a, team_b, theo_c, data_w, conf, yes_bid, yes_ask,
         )
 
         # --- Cancel stale quotes ---

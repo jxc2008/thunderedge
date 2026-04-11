@@ -1,200 +1,293 @@
 """
 backend/theo_engine.py
 
-Two-tier theoretical probability engine for Valorant series-winner markets.
+Pre-match Markov series-winner theo engine.
 
-Tier 1 (primary):  historical win rates from moneyline_matches DB table.
-Tier 2 (fallback): Kalshi-implied probability (yes_ask) when DB is empty.
+Theo calculation:
+  1. For each map in the pool, compute per-round win probabilities from
+     half_win_rates.json (per team/map/side historical rates).
+  2. Run a Markov DP over (a_score, b_score) states to get P(team_a wins map).
+  3. Chain map probs into a BO3 series win probability.
+  4. Adjust using market odds as a prior:
+       final_theo = market_p + (model_series_p - 0.5)
+     The market captures overall skill gap; the model captures map-specific edge.
+  5. When data is thin, weight the map adjustment down toward 0 (trust market).
+
+Fallback chain for rate lookups:
+  team-specific rate → league map/side average → overall average
 """
 
-import sqlite3
-import logging
-from typing import Dict, Optional, Tuple
+import json
+import math
+import os
+from typing import Dict, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
+# --------------------------------------------------------------------------- #
+# Constants
+# --------------------------------------------------------------------------- #
 
+_DEFAULT_RATES_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    '..', 'data', 'half_win_rates.json'
+)
+
+REGULATION_HALF = 12
+WIN_THRESHOLD   = 13
+MIN_ROUNDS_FULL_WEIGHT = 15   # effective rounds for full data confidence
+
+
+# --------------------------------------------------------------------------- #
+# TheoEngine
+# --------------------------------------------------------------------------- #
 
 class TheoEngine:
     """
-    Compute theoretical series-win probabilities for Valorant BO3 matches.
+    Computes pre-match series win probabilities for Valorant BO3 markets.
 
-    Usage:
-        engine = TheoEngine(db_path='data/valorant_stats.db')
-        prob   = engine.series_win_prob('Team Liquid', 'NaVi')
-        conf   = engine.confidence('Team Liquid', 'NaVi')
+    Args:
+        rates_path: Path to half_win_rates.json produced by half_win_rate_model.py.
     """
 
-    # Minimum matches a team must have for Tier-1 data to be considered reliable.
-    _MED_THRESHOLD = 5
-    _HIGH_THRESHOLD = 20
-
-    def __init__(self, db_path: str = "data/valorant_stats.db"):
-        self.db_path = db_path
-        self._team_stats: Dict[str, Dict] = {}  # name → {wins, matches}
-        self._loaded = False
-
-    # ------------------------------------------------------------------
-    # Data loading
-    # ------------------------------------------------------------------
-
-    def _load_team_stats(self) -> None:
-        """
-        Load win/loss records from the moneyline_matches table.
-
-        Populates self._team_stats with:
-            { team_name: { 'wins': int, 'matches': int } }
-        """
-        self._team_stats = {}
-        try:
-            conn = sqlite3.connect(self.db_path, timeout=10)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT team1, team2, winner FROM moneyline_matches WHERE winner IS NOT NULL"
+    def __init__(self, rates_path: str = _DEFAULT_RATES_PATH):
+        rates_path = os.path.normpath(rates_path)
+        if not os.path.exists(rates_path):
+            raise FileNotFoundError(
+                f'half_win_rates.json not found at {rates_path}. '
+                'Run scripts/half_win_rate_model.py first.'
             )
-            rows = cursor.fetchall()
-            conn.close()
-        except Exception as exc:  # DB missing / table missing
-            logger.warning("TheoEngine: could not load team stats: %s", exc)
-            self._loaded = True
-            return
+        with open(rates_path) as f:
+            data = json.load(f)
 
-        for row in rows:
-            t1, t2, winner = row["team1"], row["team2"], row["winner"]
-            for team in (t1, t2):
-                if team not in self._team_stats:
-                    self._team_stats[team] = {"wins": 0, "matches": 0}
-                self._team_stats[team]["matches"] += 1
-            if winner in self._team_stats:
-                self._team_stats[winner]["wins"] += 1
+        self._team_rates: dict  = data.get('team_map_side', {})
+        self._league_rates: dict = data.get('league_map_side', {})
+        self._overall_avg: float = data.get('overall_avg', 0.5)
 
-        logger.info(
-            "TheoEngine: loaded stats for %d teams (%d match records)",
-            len(self._team_stats),
-            len(rows),
-        )
-        self._loaded = True
+    # ---------------------------------------------------------------------- #
+    # Rate lookups
+    # ---------------------------------------------------------------------- #
 
-    def _ensure_loaded(self) -> None:
-        if not self._loaded:
-            self._load_team_stats()
+    def _get_rate(self, team: str, map_name: str, side: str) -> float:
+        """P(team wins a single round) on this map/side. Three-tier fallback."""
+        entry = self._team_rates.get(f'{team}|{map_name}|{side}')
+        if entry:
+            return entry['rate']
+        lg = self._league_rates.get(f'{map_name}|{side}')
+        if lg:
+            return lg['rate']
+        return self._overall_avg
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def team_win_rate(self, team: str) -> float:
+    def _data_weight(self, team_a: str, team_b: str, map_name: str) -> float:
         """
-        Overall win rate for *team*.  Returns 0.5 if the team is unknown
-        or has no recorded matches.
+        Confidence weight [0, 1] for a (team_a, team_b, map) combination.
+
+        1.0 means both teams have at least MIN_ROUNDS_FULL_WEIGHT effective
+        rounds on this map across both sides.  Below that we linearly shrink
+        toward 0, which causes the market-odds adjustment to shrink toward 0
+        (i.e. just use the market price as-is).
         """
-        self._ensure_loaded()
-        stats = self._team_stats.get(team)
-        if not stats or stats["matches"] == 0:
-            return 0.5
-        return stats["wins"] / stats["matches"]
+        total = 0.0
+        count = 0
+        for team in (team_a, team_b):
+            for side in ('atk', 'def'):
+                entry = self._team_rates.get(f'{team}|{map_name}|{side}')
+                if entry:
+                    total += entry.get('total', 0)
+                    count += 1
+        if count == 0:
+            return 0.0
+        avg_rounds = total / count
+        return min(1.0, avg_rounds / MIN_ROUNDS_FULL_WEIGHT)
 
-    def series_win_prob(self, team_a: str, team_b: str) -> float:
-        """
-        P(team_a wins a best-of-3 series).
+    # ---------------------------------------------------------------------- #
+    # Single-round probability
+    # ---------------------------------------------------------------------- #
 
-        Method:
-          1. Compute each team's historical win rate.
-          2. Normalise to get per-map win probability p_map.
-          3. Apply Markov:
-               P(2-0) = p^2
-               P(2-1) = 2 * p^2 * (1-p)   [win map3 after split]
-          4. Return P(2-0) + P(2-1).
-
-        Falls back to 0.5 if both teams are unknown.
-
-        Args:
-            team_a: Name string for team A (same spelling as DB).
-            team_b: Name string for team B.
-
-        Returns:
-            Probability in [0, 1].
-        """
-        self._ensure_loaded()
-
-        wr_a = self.team_win_rate(team_a)
-        wr_b = self.team_win_rate(team_b)
-
-        # If both default to 0.5 we get exactly 0.5 — fine.
-        total = wr_a + wr_b
-        if total == 0:
-            return 0.5
-
-        p_map = wr_a / total  # normalised head-to-head map win prob
-
-        p_2_0 = p_map ** 2
-        p_2_1 = 2 * (p_map ** 2) * (1 - p_map)
-        return p_2_0 + p_2_1
-
-    def series_win_prob_with_fallback(
+    def _round_win_prob(
         self,
         team_a: str,
         team_b: str,
-        kalshi_yes_ask: Optional[int] = None,
-    ) -> Tuple[float, str]:
+        map_name: str,
+        team_a_side: str,
+    ) -> float:
         """
-        Series win probability with two-tier fallback logic.
+        P(team_a wins one round) given current sides.
 
-        Tier 1: DB-derived if either team has meaningful data.
-        Tier 2: Kalshi-implied (yes_ask / 100) with a tiny alpha nudge
-                toward DB win rate when partial data is available.
+        Blend: (team_a's rate on their side + team_b's weakness on opposite side) / 2
+        """
+        team_b_side = 'def' if team_a_side == 'atk' else 'atk'
+        a_rate = self._get_rate(team_a, map_name, team_a_side)
+        b_rate = self._get_rate(team_b, map_name, team_b_side)
+        p = (a_rate + (1.0 - b_rate)) / 2.0
+        return max(0.05, min(0.95, p))
 
-        Args:
-            team_a:          Team A name.
-            team_b:          Team B name.
-            kalshi_yes_ask:  Current ask price in cents (1–99), used for fallback.
+    # ---------------------------------------------------------------------- #
+    # Markov map win probability
+    # ---------------------------------------------------------------------- #
+
+    def _markov_map_win(self, p1: float, p2: float) -> float:
+        """
+        P(team_a wins map) via DP over (a_score, b_score) states.
+
+        p1: P(team_a wins round) in phase 1 (rounds 1-12)
+        p2: P(team_a wins round) in phase 2 (rounds 13-24)
+        OT (12-12) resolved at 0.5.
+        """
+        dp = {(0, 0): 1.0}
+        win_prob = 0.0
+
+        for total in range(WIN_THRESHOLD * 2):
+            for a in range(max(0, total - (WIN_THRESHOLD - 1)),
+                           min(total + 1, WIN_THRESHOLD)):
+                b = total - a
+                if b < 0 or b >= WIN_THRESHOLD:
+                    continue
+                prob = dp.get((a, b), 0.0)
+                if prob < 1e-14:
+                    continue
+
+                if total < REGULATION_HALF:
+                    p = p1
+                elif total < REGULATION_HALF * 2:
+                    p = p2
+                else:
+                    p = 0.5  # OT
+
+                new_a = a + 1
+                if new_a == WIN_THRESHOLD:
+                    win_prob += prob * p
+                else:
+                    dp[(new_a, b)] = dp.get((new_a, b), 0.0) + prob * p
+
+                new_b = b + 1
+                if new_b < WIN_THRESHOLD:
+                    dp[(a, new_b)] = dp.get((a, new_b), 0.0) + prob * (1.0 - p)
+
+        return win_prob
+
+    def map_win_prob(
+        self,
+        team_a: str,
+        team_b: str,
+        map_name: str,
+        team_a_starts: str = 'atk',
+    ) -> float:
+        """P(team_a wins this map) from score 0-0."""
+        p1 = self._round_win_prob(team_a, team_b, map_name, team_a_starts)
+        p2_side = 'def' if team_a_starts == 'atk' else 'atk'
+        p2 = self._round_win_prob(team_a, team_b, map_name, p2_side)
+        return self._markov_map_win(p1, p2)
+
+    # ---------------------------------------------------------------------- #
+    # Series win probability (model only, no market adjustment)
+    # ---------------------------------------------------------------------- #
+
+    def model_series_prob(
+        self,
+        team_a: str,
+        team_b: str,
+        map_pool: List[str],
+        team_a_sides: Dict[str, str],
+    ) -> float:
+        """
+        P(team_a wins BO3 series) using only the Markov map model.
+
+        map_pool:     list of map names in play order (2 or 3 maps)
+        team_a_sides: {map_name: 'atk'|'def'} — team_a's starting side.
+                      Maps not listed default to 'atk'.
+        """
+        if len(map_pool) < 2:
+            raise ValueError('map_pool must have at least 2 maps')
+
+        probs = []
+        for m in map_pool[:3]:
+            side = team_a_sides.get(m, 'atk')
+            probs.append(self.map_win_prob(team_a, team_b, m, side))
+
+        p1, p2 = probs[0], probs[1]
+        p3 = probs[2] if len(probs) >= 3 else 0.5
+
+        p_2_0 = p1 * p2
+        p_2_1 = p1 * (1 - p2) * p3 + (1 - p1) * p2 * p3
+        return p_2_0 + p_2_1
+
+    # ---------------------------------------------------------------------- #
+    # Final theo with market-odds adjustment
+    # ---------------------------------------------------------------------- #
+
+    def series_theo(
+        self,
+        team_a: str,
+        team_b: str,
+        map_pool: List[str],
+        team_a_sides: Dict[str, str],
+        kalshi_yes_ask: int,
+    ) -> Tuple[float, float, str]:
+        """
+        Compute final theo for team_a winning the series.
+
+        Formula:
+            market_p   = kalshi_yes_ask / 100
+            model_p    = Markov series win prob
+            map_delta  = model_p - 0.5   (model's edge vs coin flip)
+            data_w     = confidence weight in [0, 1] based on sample size
+            final_theo = market_p + data_w * map_delta
+
+        When data_w = 1.0: full model adjustment applied on top of market price.
+        When data_w = 0.0: no adjustment, final_theo = market_p (pure market).
 
         Returns:
-            (probability, tier_used)  where tier_used is 'tier1' or 'tier2'.
+            (final_theo, data_weight, confidence_label)
         """
-        self._ensure_loaded()
+        market_p   = kalshi_yes_ask / 100.0
+        model_p    = self.model_series_prob(team_a, team_b, map_pool, team_a_sides)
+        map_delta  = model_p - 0.5
 
-        stats_a = self._team_stats.get(team_a, {})
-        stats_b = self._team_stats.get(team_b, {})
-        matches_a = stats_a.get("matches", 0)
-        matches_b = stats_b.get("matches", 0)
+        # Average data weight across all maps in pool
+        weights = [self._data_weight(team_a, team_b, m) for m in map_pool[:3]]
+        data_w = sum(weights) / len(weights)
 
-        if matches_a >= self._MED_THRESHOLD or matches_b >= self._MED_THRESHOLD:
-            return self.series_win_prob(team_a, team_b), "tier1"
+        final_theo = market_p + data_w * map_delta
+        final_theo = max(0.03, min(0.97, final_theo))
 
-        # --- Tier 2 fallback ---
-        if kalshi_yes_ask is None:
-            return 0.5, "tier2"
+        if data_w >= 0.8:
+            conf = 'HIGH'
+        elif data_w >= 0.4:
+            conf = 'MED'
+        else:
+            conf = 'LOW'
 
-        market_prob = kalshi_yes_ask / 100.0
+        return final_theo, data_w, conf
 
-        # Small alpha: if we have *any* data, nudge toward our estimate.
-        if matches_a > 0 or matches_b > 0:
-            our_est = self.series_win_prob(team_a, team_b)
-            alpha = min((matches_a + matches_b) / (2 * self._MED_THRESHOLD), 0.2)
-            blended = (1 - alpha) * market_prob + alpha * our_est
-            return blended, "tier2"
+    # ---------------------------------------------------------------------- #
+    # Side-agnostic variant (when sides are unknown)
+    # ---------------------------------------------------------------------- #
 
-        return market_prob, "tier2"
-
-    def confidence(self, team_a: str, team_b: str) -> str:
+    def series_theo_no_sides(
+        self,
+        team_a: str,
+        team_b: str,
+        map_pool: List[str],
+        kalshi_yes_ask: int,
+    ) -> Tuple[float, float, str]:
         """
-        Qualitative confidence label based on sample sizes.
-
-        Returns:
-            'HIGH'  – both teams have >= _HIGH_THRESHOLD matches
-            'MED'   – both teams have >= _MED_THRESHOLD matches
-            'LOW'   – otherwise
+        Same as series_theo but averages over both possible starting sides
+        for each map.  Use when pick/ban sides haven't been announced yet.
         """
-        self._ensure_loaded()
+        averaged_sides: Dict[str, str] = {}
+        # We'll pass 'avg' as a sentinel — map_win_prob handles it by averaging
+        # atk-first and def-first results.
+        atk_sides = {m: 'atk' for m in map_pool}
+        def_sides = {m: 'def' for m in map_pool}
 
-        stats_a = self._team_stats.get(team_a, {"matches": 0})
-        stats_b = self._team_stats.get(team_b, {"matches": 0})
-        m_a = stats_a["matches"]
-        m_b = stats_b["matches"]
+        p_atk = self.model_series_prob(team_a, team_b, map_pool, atk_sides)
+        p_def = self.model_series_prob(team_a, team_b, map_pool, def_sides)
+        model_p = (p_atk + p_def) / 2.0
 
-        if m_a >= self._HIGH_THRESHOLD and m_b >= self._HIGH_THRESHOLD:
-            return "HIGH"
-        if m_a >= self._MED_THRESHOLD and m_b >= self._MED_THRESHOLD:
-            return "MED"
-        return "LOW"
+        market_p  = kalshi_yes_ask / 100.0
+        map_delta = model_p - 0.5
+        weights   = [self._data_weight(team_a, team_b, m) for m in map_pool[:3]]
+        data_w    = sum(weights) / len(weights)
+
+        final_theo = max(0.03, min(0.97, market_p + data_w * map_delta))
+        conf = 'HIGH' if data_w >= 0.8 else ('MED' if data_w >= 0.4 else 'LOW')
+        return final_theo, data_w, conf

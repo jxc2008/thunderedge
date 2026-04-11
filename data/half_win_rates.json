@@ -1,1130 +1,1453 @@
 {
   "team_map_side": {
-    "NRG|Abyss|atk": {
-      "wins": 7.0,
-      "total": 10.0,
-      "rate": 0.607102,
-      "used_fallback": true
-    },
-    "NRG|Abyss|def": {
-      "wins": 1.0,
-      "total": 11.0,
-      "rate": 0.396913,
-      "used_fallback": true
-    },
-    "KR\u00dc|Abyss|atk": {
-      "wins": 12.0,
-      "total": 20.0,
-      "rate": 0.588082,
+    "DFM|Lotus|atk": {
+      "wins": 19.5,
+      "total": 54.5,
+      "rate": 0.364525,
       "used_fallback": false
     },
-    "KR\u00dc|Abyss|def": {
+    "DFM|Lotus|def": {
+      "wins": 17.0,
+      "total": 57.0,
+      "rate": 0.30739,
+      "used_fallback": false
+    },
+    "GE|Lotus|atk": {
+      "wins": 23.5,
+      "total": 37.0,
+      "rate": 0.625925,
+      "used_fallback": false
+    },
+    "GE|Lotus|def": {
       "wins": 9.0,
-      "total": 22.0,
-      "rate": 0.419048,
+      "total": 38.0,
+      "rate": 0.254336,
       "used_fallback": false
     },
-    "NRG|Haven|atk": {
-      "wins": 5.5,
-      "total": 21.5,
-      "rate": 0.283112,
-      "used_fallback": false
-    },
-    "NRG|Haven|def": {
-      "wins": 16.0,
-      "total": 23.0,
-      "rate": 0.675056,
-      "used_fallback": false
-    },
-    "KR\u00dc|Haven|atk": {
-      "wins": 7.5,
-      "total": 26.5,
-      "rate": 0.303123,
-      "used_fallback": false
-    },
-    "KR\u00dc|Haven|def": {
-      "wins": 22.0,
-      "total": 28.0,
-      "rate": 0.760535,
-      "used_fallback": false
-    },
-    "NRG|Bind|atk": {
-      "wins": 4.0,
-      "total": 10.0,
-      "rate": 0.417636,
+    "DFM|Pearl|atk": {
+      "wins": 5.0,
+      "total": 13.0,
+      "rate": 0.45917,
       "used_fallback": true
     },
-    "NRG|Bind|def": {
-      "wins": 3.0,
-      "total": 10.0,
-      "rate": 0.579737,
+    "DFM|Pearl|def": {
+      "wins": 7.0,
+      "total": 13.0,
+      "rate": 0.539652,
       "used_fallback": true
     },
-    "KR\u00dc|Bind|atk": {
-      "wins": 15.0,
-      "total": 29.0,
-      "rate": 0.51577,
-      "used_fallback": false
+    "GE|Pearl|atk": {
+      "wins": 5.0,
+      "total": 11.0,
+      "rate": 0.45917,
+      "used_fallback": true
     },
-    "KR\u00dc|Bind|def": {
-      "wins": 24.0,
-      "total": 30.0,
-      "rate": 0.775179,
-      "used_fallback": false
+    "GE|Pearl|def": {
+      "wins": 5.0,
+      "total": 11.0,
+      "rate": 0.539652,
+      "used_fallback": true
     },
-    "LEV|Lotus|atk": {
-      "wins": 10.0,
-      "total": 15.5,
-      "rate": 0.623585,
-      "used_fallback": false
-    },
-    "LEV|Lotus|def": {
-      "wins": 8.0,
-      "total": 16.0,
-      "rate": 0.5,
-      "used_fallback": false
-    },
-    "MIBR|Lotus|atk": {
-      "wins": 20.5,
-      "total": 44.0,
-      "rate": 0.467884,
-      "used_fallback": false
-    },
-    "MIBR|Lotus|def": {
-      "wins": 17.5,
-      "total": 44.5,
-      "rate": 0.399377,
-      "used_fallback": false
-    },
-    "LEV|Pearl|atk": {
+    "T1|Fracture|atk": {
       "wins": 8.5,
       "total": 15.5,
       "rate": 0.541195,
       "used_fallback": false
     },
-    "LEV|Pearl|def": {
-      "wins": 7.0,
-      "total": 15.5,
-      "rate": 0.458805,
-      "used_fallback": false
-    },
-    "MIBR|Pearl|atk": {
-      "wins": 25.0,
-      "total": 43.0,
-      "rate": 0.576576,
-      "used_fallback": false
-    },
-    "MIBR|Pearl|def": {
-      "wins": 20.5,
-      "total": 43.0,
-      "rate": 0.478121,
-      "used_fallback": false
-    },
-    "LEV|Split|atk": {
-      "wins": 9.5,
-      "total": 23.0,
-      "rate": 0.422197,
-      "used_fallback": false
-    },
-    "LEV|Split|def": {
-      "wins": 10.0,
-      "total": 23.5,
-      "rate": 0.433221,
-      "used_fallback": false
-    },
-    "MIBR|Split|atk": {
-      "wins": 35.5,
-      "total": 62.0,
-      "rate": 0.569545,
-      "used_fallback": false
-    },
-    "MIBR|Split|def": {
-      "wins": 28.5,
-      "total": 63.5,
-      "rate": 0.450911,
-      "used_fallback": false
-    },
-    "LOUD|Bind|atk": {
-      "wins": 3.0,
-      "total": 9.0,
-      "rate": 0.417636,
-      "used_fallback": true
-    },
-    "LOUD|Bind|def": {
-      "wins": 2.0,
-      "total": 9.0,
-      "rate": 0.579737,
-      "used_fallback": true
-    },
-    "LOUD|Haven|atk": {
-      "wins": 9.0,
-      "total": 24.5,
-      "rate": 0.380541,
-      "used_fallback": false
-    },
-    "LOUD|Haven|def": {
-      "wins": 12.0,
-      "total": 25.5,
-      "rate": 0.47341,
-      "used_fallback": false
-    },
-    "SEN|Abyss|atk": {
-      "wins": 21.0,
-      "total": 30.0,
-      "rate": 0.683452,
-      "used_fallback": false
-    },
-    "SEN|Abyss|def": {
-      "wins": 12.0,
-      "total": 30.0,
-      "rate": 0.408274,
-      "used_fallback": false
-    },
-    "G2|Abyss|atk": {
-      "wins": 14.0,
-      "total": 21.0,
-      "rate": 0.647642,
-      "used_fallback": false
-    },
-    "G2|Abyss|def": {
-      "wins": 8.0,
-      "total": 21.0,
-      "rate": 0.394542,
-      "used_fallback": false
-    },
-    "SEN|Pearl|atk": {
-      "wins": 40.0,
-      "total": 64.5,
-      "rate": 0.615317,
-      "used_fallback": false
-    },
-    "SEN|Pearl|def": {
-      "wins": 26.5,
-      "total": 66.5,
-      "rate": 0.402465,
-      "used_fallback": false
-    },
-    "G2|Pearl|atk": {
-      "wins": 32.0,
-      "total": 51.5,
-      "rate": 0.615301,
-      "used_fallback": false
-    },
-    "G2|Pearl|def": {
-      "wins": 26.0,
-      "total": 53.0,
-      "rate": 0.491024,
-      "used_fallback": false
-    },
-    "MIBR|Bind|atk": {
-      "wins": 2.0,
-      "total": 10.0,
-      "rate": 0.417636,
-      "used_fallback": true
-    },
-    "MIBR|Bind|def": {
-      "wins": 6.0,
-      "total": 11.0,
-      "rate": 0.579737,
-      "used_fallback": true
-    },
-    "MIBR|Abyss|atk": {
-      "wins": 7.0,
-      "total": 19.0,
-      "rate": 0.384825,
-      "used_fallback": false
-    },
-    "MIBR|Abyss|def": {
-      "wins": 11.0,
-      "total": 20.0,
-      "rate": 0.544041,
-      "used_fallback": false
-    },
-    "KR\u00dc|Split|atk": {
-      "wins": 11.5,
-      "total": 17.5,
-      "rate": 0.636098,
-      "used_fallback": false
-    },
-    "KR\u00dc|Split|def": {
-      "wins": 6.0,
-      "total": 18.0,
-      "rate": 0.355115,
-      "used_fallback": false
-    },
-    "SEN|Lotus|atk": {
-      "wins": 12.0,
-      "total": 26.0,
-      "rate": 0.465164,
-      "used_fallback": false
-    },
-    "SEN|Lotus|def": {
-      "wins": 16.5,
-      "total": 26.0,
-      "rate": 0.621926,
-      "used_fallback": false
-    },
-    "SEN|Split|atk": {
-      "wins": 22.0,
-      "total": 43.0,
-      "rate": 0.510939,
-      "used_fallback": false
-    },
-    "SEN|Split|def": {
-      "wins": 30.5,
-      "total": 44.5,
-      "rate": 0.674766,
-      "used_fallback": false
-    },
-    "G2|Split|atk": {
-      "wins": 21.0,
-      "total": 35.0,
-      "rate": 0.592823,
-      "used_fallback": false
-    },
-    "G2|Split|def": {
-      "wins": 15.0,
-      "total": 36.5,
-      "rate": 0.417105,
-      "used_fallback": false
-    },
-    "G2|Fracture|atk": {
-      "wins": 10.0,
-      "total": 15.0,
-      "rate": 0.641195,
-      "used_fallback": false
-    },
-    "G2|Fracture|def": {
-      "wins": 8.5,
-      "total": 15.0,
-      "rate": 0.556478,
-      "used_fallback": false
-    },
-    "SEN|Fracture|atk": {
-      "wins": 1.0,
-      "total": 9.0,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "SEN|Fracture|def": {
-      "wins": 4.0,
-      "total": 9.0,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "G2|Haven|atk": {
-      "wins": 20.0,
-      "total": 41.0,
-      "rate": 0.48856,
-      "used_fallback": false
-    },
-    "G2|Haven|def": {
-      "wins": 26.0,
-      "total": 43.5,
-      "rate": 0.591979,
-      "used_fallback": false
-    },
-    "SEN|Haven|atk": {
-      "wins": 23.5,
-      "total": 34.5,
-      "rate": 0.667984,
-      "used_fallback": false
-    },
-    "SEN|Haven|def": {
-      "wins": 15.0,
-      "total": 36.5,
-      "rate": 0.417105,
-      "used_fallback": false
-    },
-    "C9|Lotus|atk": {
-      "wins": 10.0,
-      "total": 19.0,
-      "rate": 0.523035,
-      "used_fallback": false
-    },
-    "C9|Lotus|def": {
-      "wins": 7.5,
-      "total": 19.5,
-      "rate": 0.398676,
-      "used_fallback": false
-    },
-    "NRG|Lotus|atk": {
-      "wins": 5.5,
-      "total": 13.5,
-      "rate": 0.520517,
-      "used_fallback": true
-    },
-    "NRG|Lotus|def": {
-      "wins": 6.5,
-      "total": 14.5,
-      "rate": 0.480056,
-      "used_fallback": true
-    },
-    "C9|Fracture|atk": {
-      "wins": 4.5,
-      "total": 10.0,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "C9|Fracture|def": {
-      "wins": 6.5,
-      "total": 10.0,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "NRG|Fracture|atk": {
-      "wins": 12.0,
-      "total": 20.0,
-      "rate": 0.588082,
-      "used_fallback": false
-    },
-    "NRG|Fracture|def": {
-      "wins": 7.0,
-      "total": 20.5,
-      "rate": 0.35995,
-      "used_fallback": false
-    },
-    "C9|Pearl|atk": {
-      "wins": 13.0,
-      "total": 26.0,
-      "rate": 0.5,
-      "used_fallback": false
-    },
-    "C9|Pearl|def": {
-      "wins": 16.5,
-      "total": 26.0,
-      "rate": 0.621926,
-      "used_fallback": false
-    },
-    "NRG|Pearl|atk": {
-      "wins": 6.5,
-      "total": 9.0,
-      "rate": 0.550898,
-      "used_fallback": true
-    },
-    "NRG|Pearl|def": {
-      "wins": 4.5,
-      "total": 9.5,
-      "rate": 0.450117,
-      "used_fallback": true
-    },
-    "KR\u00dc|Fracture|atk": {
-      "wins": 4.0,
-      "total": 9.5,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "KR\u00dc|Fracture|def": {
-      "wins": 4.0,
-      "total": 10.0,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "LOUD|Fracture|atk": {
-      "wins": 5.5,
-      "total": 4.0,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "LOUD|Fracture|def": {
-      "wins": 1.0,
-      "total": 4.0,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "LOUD|Split|atk": {
+    "T1|Fracture|def": {
       "wins": 10.5,
-      "total": 22.0,
-      "rate": 0.479762,
+      "total": 15.5,
+      "rate": 0.651049,
       "used_fallback": false
     },
-    "LOUD|Split|def": {
-      "wins": 9.0,
-      "total": 23.5,
-      "rate": 0.395062,
-      "used_fallback": false
-    },
-    "G2|Lotus|atk": {
-      "wins": 13.5,
-      "total": 27.0,
-      "rate": 0.5,
-      "used_fallback": false
-    },
-    "G2|Lotus|def": {
-      "wins": 18.0,
-      "total": 28.0,
-      "rate": 0.630268,
-      "used_fallback": false
-    },
-    "FUR|Lotus|atk": {
-      "wins": 12.5,
-      "total": 18.5,
-      "rate": 0.653258,
-      "used_fallback": false
-    },
-    "FUR|Lotus|def": {
-      "wins": 6.0,
-      "total": 19.5,
-      "rate": 0.331127,
-      "used_fallback": false
-    },
-    "G2|Ascent|atk": {
-      "wins": 19.5,
-      "total": 31.0,
-      "rate": 0.618673,
-      "used_fallback": false
-    },
-    "G2|Ascent|def": {
-      "wins": 18.5,
-      "total": 33.0,
-      "rate": 0.556013,
-      "used_fallback": false
-    },
-    "FUR|Ascent|atk": {
-      "wins": 8.5,
-      "total": 14.5,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "FUR|Ascent|def": {
-      "wins": 3.5,
-      "total": 15.0,
-      "rate": 0.274088,
-      "used_fallback": false
-    },
-    "MIBR|Icebox|atk": {
-      "wins": 15.0,
-      "total": 22.0,
-      "rate": 0.661904,
-      "used_fallback": false
-    },
-    "MIBR|Icebox|def": {
-      "wins": 17.5,
-      "total": 23.0,
-      "rate": 0.733408,
-      "used_fallback": false
-    },
-    "LEV|Icebox|atk": {
-      "wins": 5.0,
-      "total": 10.0,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "LEV|Icebox|def": {
+    "ZETA|Fracture|atk": {
       "wins": 3.0,
-      "total": 11.0,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "2G|Haven|atk": {
-      "wins": 4.0,
-      "total": 10.0,
-      "rate": 0.470552,
-      "used_fallback": true
-    },
-    "2G|Haven|def": {
-      "wins": 3.5,
-      "total": 10.5,
-      "rate": 0.528033,
-      "used_fallback": true
-    },
-    "EG|Haven|atk": {
-      "wins": 8.0,
-      "total": 15.0,
-      "rate": 0.528239,
-      "used_fallback": false
-    },
-    "EG|Haven|def": {
-      "wins": 4.0,
-      "total": 15.5,
-      "rate": 0.294024,
-      "used_fallback": false
-    },
-    "2G|Lotus|atk": {
-      "wins": 5.5,
-      "total": 11.5,
-      "rate": 0.520517,
-      "used_fallback": true
-    },
-    "2G|Lotus|def": {
-      "wins": 5.5,
-      "total": 12.0,
-      "rate": 0.480056,
-      "used_fallback": true
-    },
-    "EG|Lotus|atk": {
-      "wins": 17.0,
-      "total": 27.0,
-      "rate": 0.617821,
-      "used_fallback": false
-    },
-    "EG|Lotus|def": {
-      "wins": 15.0,
-      "total": 28.0,
-      "rate": 0.532567,
-      "used_fallback": false
-    },
-    "100T|Pearl|atk": {
-      "wins": 4.5,
-      "total": 12.0,
-      "rate": 0.550898,
-      "used_fallback": true
-    },
-    "100T|Pearl|def": {
-      "wins": 5.0,
-      "total": 12.0,
-      "rate": 0.450117,
-      "used_fallback": true
-    },
-    "100T|Haven|atk": {
-      "wins": 10.0,
-      "total": 25.0,
-      "rate": 0.409767,
-      "used_fallback": false
-    },
-    "100T|Haven|def": {
-      "wins": 14.5,
-      "total": 26.0,
-      "rate": 0.552254,
-      "used_fallback": false
-    },
-    "100T|Split|atk": {
-      "wins": 9.5,
-      "total": 20.5,
-      "rate": 0.467681,
-      "used_fallback": false
-    },
-    "100T|Split|def": {
-      "wins": 9.5,
-      "total": 21.5,
-      "rate": 0.44836,
-      "used_fallback": false
-    },
-    "FUR|Pearl|atk": {
-      "wins": 2.5,
-      "total": 11.5,
-      "rate": 0.550898,
-      "used_fallback": true
-    },
-    "FUR|Pearl|def": {
-      "wins": 1.5,
-      "total": 12.0,
-      "rate": 0.450117,
-      "used_fallback": true
-    },
-    "FUR|Fracture|atk": {
-      "wins": 1.0,
-      "total": 4.0,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "FUR|Fracture|def": {
-      "wins": 1.0,
-      "total": 4.5,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "KR\u00dc|Lotus|atk": {
-      "wins": 9.5,
-      "total": 20.5,
-      "rate": 0.467681,
-      "used_fallback": false
-    },
-    "KR\u00dc|Lotus|def": {
-      "wins": 9.0,
-      "total": 21.5,
-      "rate": 0.427704,
-      "used_fallback": false
-    },
-    "SEN|Icebox|atk": {
-      "wins": 6.5,
-      "total": 11.0,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "SEN|Icebox|def": {
-      "wins": 4.0,
-      "total": 11.5,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "KR\u00dc|Icebox|atk": {
-      "wins": 14.5,
-      "total": 25.5,
-      "rate": 0.562043,
-      "used_fallback": false
-    },
-    "KR\u00dc|Icebox|def": {
-      "wins": 13.0,
-      "total": 26.5,
-      "rate": 0.49144,
-      "used_fallback": false
-    },
-    "100T|Fracture|atk": {
-      "wins": 8.0,
-      "total": 15.5,
-      "rate": 0.513732,
-      "used_fallback": false
-    },
-    "100T|Fracture|def": {
-      "wins": 10.0,
-      "total": 16.5,
-      "rate": 0.591117,
-      "used_fallback": false
-    },
-    "EG|Fracture|atk": {
-      "wins": 5.5,
-      "total": 11.0,
-      "rate": 0.508795,
-      "used_fallback": true
-    },
-    "EG|Fracture|def": {
-      "wins": 6.0,
-      "total": 11.5,
-      "rate": 0.491431,
-      "used_fallback": true
-    },
-    "MIBR|Haven|atk": {
-      "wins": 13.5,
-      "total": 22.0,
-      "rate": 0.60119,
-      "used_fallback": false
-    },
-    "MIBR|Haven|def": {
-      "wins": 11.5,
-      "total": 23.0,
-      "rate": 0.5,
-      "used_fallback": false
-    },
-    "MIBR|Ascent|atk": {
-      "wins": 6.5,
-      "total": 15.5,
-      "rate": 0.431341,
-      "used_fallback": false
-    },
-    "MIBR|Ascent|def": {
-      "wins": 6.0,
-      "total": 16.5,
-      "rate": 0.382849,
-      "used_fallback": false
-    },
-    "LOUD|Lotus|atk": {
-      "wins": 9.5,
-      "total": 18.5,
-      "rate": 0.511789,
-      "used_fallback": false
-    },
-    "LOUD|Lotus|def": {
-      "wins": 9.5,
-      "total": 18.5,
-      "rate": 0.511789,
-      "used_fallback": false
-    },
-    "LOUD|Pearl|atk": {
-      "wins": 6.0,
-      "total": 12.5,
-      "rate": 0.550898,
-      "used_fallback": true
-    },
-    "LOUD|Pearl|def": {
-      "wins": 5.5,
-      "total": 12.5,
-      "rate": 0.450117,
-      "used_fallback": true
-    },
-    "2G|Pearl|atk": {
-      "wins": 5.5,
-      "total": 15.0,
-      "rate": 0.387044,
-      "used_fallback": false
-    },
-    "2G|Pearl|def": {
-      "wins": 6.5,
-      "total": 15.5,
-      "rate": 0.431341,
-      "used_fallback": false
-    },
-    "C9|Split|atk": {
-      "wins": 4.0,
       "total": 5.0,
-      "rate": 0.526347,
+      "rate": 0.523129,
       "used_fallback": true
     },
-    "C9|Split|def": {
-      "wins": 2.5,
-      "total": 5.5,
-      "rate": 0.47458,
+    "ZETA|Fracture|def": {
+      "wins": 0.5,
+      "total": 5.0,
+      "rate": 0.478055,
       "used_fallback": true
     },
-    "LEV|Ascent|atk": {
-      "wins": 3.0,
-      "total": 8.0,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "LEV|Ascent|def": {
-      "wins": 5.0,
-      "total": 8.5,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "C9|Ascent|atk": {
-      "wins": 2.5,
-      "total": 9.5,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "C9|Ascent|def": {
-      "wins": 8.5,
-      "total": 9.5,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "EG|Pearl|atk": {
-      "wins": 14.5,
-      "total": 22.0,
-      "rate": 0.641666,
-      "used_fallback": false
-    },
-    "EG|Pearl|def": {
+    "T1|Split|atk": {
       "wins": 7.5,
-      "total": 22.5,
-      "rate": 0.351226,
-      "used_fallback": false
-    },
-    "100T|Icebox|atk": {
-      "wins": 11.0,
-      "total": 20.0,
-      "rate": 0.544041,
-      "used_fallback": false
-    },
-    "100T|Icebox|def": {
-      "wins": 8.5,
-      "total": 21.0,
-      "rate": 0.415633,
-      "used_fallback": false
-    },
-    "LOUD|Icebox|atk": {
-      "wins": 4.5,
-      "total": 6.0,
-      "rate": 0.558175,
+      "total": 12.5,
+      "rate": 0.503855,
       "used_fallback": true
     },
-    "LOUD|Icebox|def": {
-      "wins": 1.0,
-      "total": 6.0,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "2G|Icebox|atk": {
-      "wins": 4.5,
-      "total": 9.0,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "2G|Icebox|def": {
-      "wins": 1.5,
-      "total": 10.0,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "2G|Ascent|atk": {
-      "wins": 6.0,
-      "total": 11.5,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "2G|Ascent|def": {
-      "wins": 7.0,
-      "total": 12.0,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "KR\u00dc|Ascent|atk": {
-      "wins": 0.0,
-      "total": 4.5,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "KR\u00dc|Ascent|def": {
-      "wins": 3.0,
-      "total": 5.0,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "KR\u00dc|Pearl|atk": {
-      "wins": 3.0,
-      "total": 9.5,
-      "rate": 0.550898,
-      "used_fallback": true
-    },
-    "KR\u00dc|Pearl|def": {
-      "wins": 7.0,
-      "total": 10.0,
-      "rate": 0.450117,
-      "used_fallback": true
-    },
-    "NRG|Ascent|atk": {
-      "wins": 2.0,
-      "total": 4.5,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "NRG|Ascent|def": {
-      "wins": 1.0,
-      "total": 5.0,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "C9|Haven|atk": {
-      "wins": 8.5,
-      "total": 10.0,
-      "rate": 0.470552,
-      "used_fallback": true
-    },
-    "C9|Haven|def": {
-      "wins": 3.5,
-      "total": 10.5,
-      "rate": 0.528033,
-      "used_fallback": true
-    },
-    "100T|Ascent|atk": {
-      "wins": 3.5,
-      "total": 7.0,
-      "rate": 0.460225,
-      "used_fallback": true
-    },
-    "100T|Ascent|def": {
-      "wins": 4.0,
-      "total": 7.0,
-      "rate": 0.537963,
-      "used_fallback": true
-    },
-    "LEV|Fracture|atk": {
+    "T1|Split|def": {
       "wins": 5.0,
-      "total": 13.0,
-      "rate": 0.508795,
+      "total": 12.5,
+      "rate": 0.496316,
       "used_fallback": true
     },
-    "LEV|Fracture|def": {
-      "wins": 8.0,
-      "total": 13.0,
-      "rate": 0.491431,
-      "used_fallback": true
+    "ZETA|Split|atk": {
+      "wins": 8.5,
+      "total": 21.5,
+      "rate": 0.407048,
+      "used_fallback": false
     },
-    "LEV|Haven|atk": {
-      "wins": 1.0,
-      "total": 5.0,
-      "rate": 0.470552,
-      "used_fallback": true
+    "ZETA|Split|def": {
+      "wins": 11.5,
+      "total": 22.5,
+      "rate": 0.509918,
+      "used_fallback": false
     },
-    "LEV|Haven|def": {
-      "wins": 2.5,
-      "total": 5.0,
-      "rate": 0.528033,
-      "used_fallback": true
+    "T1|Haven|atk": {
+      "wins": 31.5,
+      "total": 65.0,
+      "rate": 0.48523,
+      "used_fallback": false
     },
-    "NRG|Icebox|atk": {
-      "wins": 4.5,
-      "total": 9.5,
-      "rate": 0.558175,
-      "used_fallback": true
+    "T1|Haven|def": {
+      "wins": 33.0,
+      "total": 65.5,
+      "rate": 0.503665,
+      "used_fallback": false
     },
-    "NRG|Icebox|def": {
-      "wins": 4.5,
-      "total": 10.0,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "G2|Icebox|atk": {
-      "wins": 6.5,
-      "total": 10.5,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "G2|Icebox|def": {
-      "wins": 5.5,
-      "total": 10.5,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "C9|Icebox|atk": {
-      "wins": 3.5,
-      "total": 11.5,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "C9|Icebox|def": {
-      "wins": 5.5,
-      "total": 11.5,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "FUR|Icebox|atk": {
-      "wins": 1.5,
-      "total": 4.0,
-      "rate": 0.558175,
-      "used_fallback": true
-    },
-    "FUR|Icebox|def": {
-      "wins": 0.0,
-      "total": 4.0,
-      "rate": 0.443997,
-      "used_fallback": true
-    },
-    "FUR|Split|atk": {
-      "wins": 1.5,
-      "total": 5.0,
-      "rate": 0.526347,
-      "used_fallback": true
-    },
-    "FUR|Split|def": {
-      "wins": 2.5,
-      "total": 5.5,
-      "rate": 0.47458,
-      "used_fallback": true
-    },
-    "EG|Split|atk": {
-      "wins": 3.5,
-      "total": 11.0,
-      "rate": 0.526347,
-      "used_fallback": true
-    },
-    "EG|Split|def": {
-      "wins": 6.5,
-      "total": 11.0,
-      "rate": 0.47458,
-      "used_fallback": true
-    },
-    "SEN|Ascent|atk": {
+    "ZETA|Haven|atk": {
       "wins": 5.0,
       "total": 17.0,
       "rate": 0.322389,
       "used_fallback": false
     },
-    "SEN|Ascent|def": {
-      "wins": 13.0,
-      "total": 17.5,
-      "rate": 0.710333,
+    "ZETA|Haven|def": {
+      "wins": 3.0,
+      "total": 17.0,
+      "rate": 0.220898,
       "used_fallback": false
     },
-    "EG|Icebox|atk": {
-      "wins": 8.0,
-      "total": 13.0,
-      "rate": 0.558175,
+    "DRX|Haven|atk": {
+      "wins": 18.5,
+      "total": 33.0,
+      "rate": 0.556013,
+      "used_fallback": false
+    },
+    "DRX|Haven|def": {
+      "wins": 12.0,
+      "total": 34.0,
+      "rate": 0.363783,
+      "used_fallback": false
+    },
+    "PRX|Haven|atk": {
+      "wins": 25.0,
+      "total": 57.5,
+      "rate": 0.437714,
+      "used_fallback": false
+    },
+    "PRX|Haven|def": {
+      "wins": 37.5,
+      "total": 58.0,
+      "rate": 0.640019,
+      "used_fallback": false
+    },
+    "DRX|Icebox|atk": {
+      "wins": 41.5,
+      "total": 61.5,
+      "rate": 0.66743,
+      "used_fallback": false
+    },
+    "DRX|Icebox|def": {
+      "wins": 26.0,
+      "total": 66.0,
+      "rate": 0.398117,
+      "used_fallback": false
+    },
+    "PRX|Icebox|atk": {
+      "wins": 20.0,
+      "total": 29.5,
+      "rate": 0.663013,
+      "used_fallback": false
+    },
+    "PRX|Icebox|def": {
+      "wins": 15.5,
+      "total": 30.5,
+      "rate": 0.507529,
+      "used_fallback": false
+    },
+    "DRX|Lotus|atk": {
+      "wins": 38.5,
+      "total": 67.5,
+      "rate": 0.567658,
+      "used_fallback": false
+    },
+    "DRX|Lotus|def": {
+      "wins": 31.5,
+      "total": 69.0,
+      "rate": 0.458163,
+      "used_fallback": false
+    },
+    "PRX|Lotus|atk": {
+      "wins": 43.0,
+      "total": 89.0,
+      "rate": 0.483643,
+      "used_fallback": false
+    },
+    "PRX|Lotus|def": {
+      "wins": 53.0,
+      "total": 92.0,
+      "rate": 0.573913,
+      "used_fallback": false
+    },
+    "TLN|Pearl|atk": {
+      "wins": 2.5,
+      "total": 13.5,
+      "rate": 0.45917,
       "used_fallback": true
     },
-    "EG|Icebox|def": {
+    "TLN|Pearl|def": {
+      "wins": 5.0,
+      "total": 13.5,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "TS|Pearl|atk": {
+      "wins": 5.0,
+      "total": 10.0,
+      "rate": 0.45917,
+      "used_fallback": true
+    },
+    "TS|Pearl|def": {
+      "wins": 6.5,
+      "total": 10.5,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "TLN|Fracture|atk": {
+      "wins": 10.0,
+      "total": 14.5,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "TLN|Fracture|def": {
+      "wins": 9.0,
+      "total": 15.5,
+      "rate": 0.568659,
+      "used_fallback": false
+    },
+    "TS|Fracture|atk": {
+      "wins": 0.0,
+      "total": 3.5,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "TS|Fracture|def": {
+      "wins": 1.0,
+      "total": 4.0,
+      "rate": 0.478055,
+      "used_fallback": true
+    },
+    "TLN|Haven|atk": {
+      "wins": 36.0,
+      "total": 58.0,
+      "rate": 0.61531,
+      "used_fallback": false
+    },
+    "TLN|Haven|def": {
+      "wins": 29.5,
+      "total": 58.5,
+      "rate": 0.504085,
+      "used_fallback": false
+    },
+    "TS|Haven|atk": {
+      "wins": 7.0,
+      "total": 17.0,
+      "rate": 0.423881,
+      "used_fallback": false
+    },
+    "TS|Haven|def": {
+      "wins": 7.0,
+      "total": 17.5,
+      "rate": 0.413392,
+      "used_fallback": false
+    },
+    "GEN|Ascent|atk": {
+      "wins": 22.0,
+      "total": 53.0,
+      "rate": 0.419219,
+      "used_fallback": false
+    },
+    "GEN|Ascent|def": {
+      "wins": 36.5,
+      "total": 56.0,
+      "rate": 0.644789,
+      "used_fallback": false
+    },
+    "BME|Ascent|atk": {
+      "wins": 19.0,
+      "total": 45.0,
+      "rate": 0.426634,
+      "used_fallback": false
+    },
+    "BME|Ascent|def": {
+      "wins": 24.5,
+      "total": 48.5,
+      "rate": 0.504882,
+      "used_fallback": false
+    },
+    "GEN|Haven|atk": {
+      "wins": 47.0,
+      "total": 67.0,
+      "rate": 0.69367,
+      "used_fallback": false
+    },
+    "GEN|Haven|def": {
+      "wins": 33.0,
+      "total": 70.5,
+      "rate": 0.469265,
+      "used_fallback": false
+    },
+    "BME|Haven|atk": {
+      "wins": 10.0,
+      "total": 20.5,
+      "rate": 0.489227,
+      "used_fallback": false
+    },
+    "BME|Haven|def": {
+      "wins": 11.0,
+      "total": 20.5,
+      "rate": 0.532319,
+      "used_fallback": false
+    },
+    "NS|Ascent|atk": {
+      "wins": 30.0,
+      "total": 56.0,
+      "rate": 0.534068,
+      "used_fallback": false
+    },
+    "NS|Ascent|def": {
+      "wins": 26.0,
+      "total": 58.0,
+      "rate": 0.450582,
+      "used_fallback": false
+    },
+    "RRQ|Ascent|atk": {
+      "wins": 28.0,
+      "total": 77.0,
+      "rate": 0.368266,
+      "used_fallback": false
+    },
+    "RRQ|Ascent|def": {
+      "wins": 46.5,
+      "total": 78.5,
+      "rate": 0.589279,
+      "used_fallback": false
+    },
+    "NS|Split|atk": {
+      "wins": 10.5,
+      "total": 20.0,
+      "rate": 0.522021,
+      "used_fallback": false
+    },
+    "NS|Split|def": {
+      "wins": 14.5,
+      "total": 20.5,
+      "rate": 0.683142,
+      "used_fallback": false
+    },
+    "RRQ|Split|atk": {
+      "wins": 7.5,
+      "total": 16.0,
+      "rate": 0.473271,
+      "used_fallback": false
+    },
+    "RRQ|Split|def": {
+      "wins": 10.0,
+      "total": 17.0,
+      "rate": 0.576119,
+      "used_fallback": false
+    },
+    "NS|Pearl|atk": {
+      "wins": 13.0,
+      "total": 22.0,
+      "rate": 0.580952,
+      "used_fallback": false
+    },
+    "NS|Pearl|def": {
+      "wins": 12.0,
+      "total": 23.0,
+      "rate": 0.519451,
+      "used_fallback": false
+    },
+    "RRQ|Pearl|atk": {
+      "wins": 10.0,
+      "total": 17.5,
+      "rate": 0.561863,
+      "used_fallback": false
+    },
+    "RRQ|Pearl|def": {
+      "wins": 7.0,
+      "total": 18.5,
+      "rate": 0.393898,
+      "used_fallback": false
+    },
+    "TS|Lotus|atk": {
+      "wins": 23.5,
+      "total": 44.5,
+      "rate": 0.52648,
+      "used_fallback": false
+    },
+    "TS|Lotus|def": {
+      "wins": 11.5,
+      "total": 45.0,
+      "rate": 0.269421,
+      "used_fallback": false
+    },
+    "ZETA|Lotus|atk": {
+      "wins": 29.5,
+      "total": 46.5,
+      "rate": 0.627017,
+      "used_fallback": false
+    },
+    "ZETA|Lotus|def": {
+      "wins": 25.5,
+      "total": 47.5,
+      "rate": 0.534856,
+      "used_fallback": false
+    },
+    "TS|Icebox|atk": {
+      "wins": 5.5,
+      "total": 27.0,
+      "rate": 0.230694,
+      "used_fallback": false
+    },
+    "TS|Icebox|def": {
+      "wins": 14.0,
+      "total": 29.5,
+      "rate": 0.476712,
+      "used_fallback": false
+    },
+    "ZETA|Icebox|atk": {
+      "wins": 7.5,
+      "total": 24.5,
+      "rate": 0.325406,
+      "used_fallback": false
+    },
+    "ZETA|Icebox|def": {
+      "wins": 11.0,
+      "total": 25.0,
+      "rate": 0.44586,
+      "used_fallback": false
+    },
+    "T1|Icebox|atk": {
+      "wins": 8.5,
+      "total": 21.0,
+      "rate": 0.415633,
+      "used_fallback": false
+    },
+    "T1|Icebox|def": {
+      "wins": 10.5,
+      "total": 22.5,
+      "rate": 0.470245,
+      "used_fallback": false
+    },
+    "NS|Icebox|atk": {
+      "wins": 8.5,
+      "total": 22.5,
+      "rate": 0.390899,
+      "used_fallback": false
+    },
+    "NS|Icebox|def": {
+      "wins": 4.5,
+      "total": 23.0,
+      "rate": 0.22769,
+      "used_fallback": false
+    },
+    "GEN|Lotus|atk": {
+      "wins": 27.0,
+      "total": 43.0,
+      "rate": 0.620334,
+      "used_fallback": false
+    },
+    "GEN|Lotus|def": {
+      "wins": 25.5,
+      "total": 44.5,
+      "rate": 0.568847,
+      "used_fallback": false
+    },
+    "GEN|Fracture|atk": {
+      "wins": 4.5,
+      "total": 8.5,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "GEN|Fracture|def": {
+      "wins": 5.0,
+      "total": 9.5,
+      "rate": 0.478055,
+      "used_fallback": true
+    },
+    "PRX|Fracture|atk": {
+      "wins": 14.5,
+      "total": 22.5,
+      "rate": 0.628937,
+      "used_fallback": false
+    },
+    "PRX|Fracture|def": {
+      "wins": 11.0,
+      "total": 24.0,
+      "rate": 0.462555,
+      "used_fallback": false
+    },
+    "DRX|Ascent|atk": {
+      "wins": 20.0,
+      "total": 29.5,
+      "rate": 0.663013,
+      "used_fallback": false
+    },
+    "DRX|Ascent|def": {
+      "wins": 16.5,
+      "total": 30.5,
+      "rate": 0.537644,
+      "used_fallback": false
+    },
+    "DFM|Ascent|atk": {
+      "wins": 14.0,
+      "total": 26.5,
+      "rate": 0.52568,
+      "used_fallback": false
+    },
+    "DFM|Ascent|def": {
+      "wins": 9.5,
+      "total": 28.5,
+      "rate": 0.347786,
+      "used_fallback": false
+    },
+    "TLN|Lotus|atk": {
+      "wins": 33.5,
+      "total": 43.0,
+      "rate": 0.762547,
+      "used_fallback": false
+    },
+    "TLN|Lotus|def": {
+      "wins": 19.0,
+      "total": 45.5,
+      "rate": 0.422209,
+      "used_fallback": false
+    },
+    "RRQ|Lotus|atk": {
+      "wins": 23.0,
+      "total": 40.5,
+      "rate": 0.563649,
+      "used_fallback": false
+    },
+    "RRQ|Lotus|def": {
+      "wins": 23.5,
+      "total": 42.0,
+      "rate": 0.555921,
+      "used_fallback": false
+    },
+    "TLN|Ascent|atk": {
+      "wins": 3.0,
+      "total": 10.0,
+      "rate": 0.448651,
+      "used_fallback": true
+    },
+    "TLN|Ascent|def": {
+      "wins": 6.0,
+      "total": 10.0,
+      "rate": 0.549232,
+      "used_fallback": true
+    },
+    "BME|Lotus|atk": {
+      "wins": 20.5,
+      "total": 44.0,
+      "rate": 0.467884,
+      "used_fallback": false
+    },
+    "BME|Lotus|def": {
+      "wins": 23.5,
+      "total": 46.0,
+      "rate": 0.510266,
+      "used_fallback": false
+    },
+    "GE|Haven|atk": {
+      "wins": 10.0,
+      "total": 27.5,
+      "rate": 0.375853,
+      "used_fallback": false
+    },
+    "GE|Haven|def": {
+      "wins": 14.0,
+      "total": 27.5,
+      "rate": 0.508276,
+      "used_fallback": false
+    },
+    "DFM|Fracture|atk": {
+      "wins": 3.0,
+      "total": 9.0,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "DFM|Fracture|def": {
+      "wins": 3.0,
+      "total": 10.0,
+      "rate": 0.478055,
+      "used_fallback": true
+    },
+    "RRQ|Haven|atk": {
+      "wins": 50.5,
+      "total": 103.5,
+      "rate": 0.48823,
+      "used_fallback": false
+    },
+    "RRQ|Haven|def": {
+      "wins": 50.5,
+      "total": 106.0,
+      "rate": 0.477002,
+      "used_fallback": false
+    },
+    "PRX|Pearl|atk": {
+      "wins": 8.0,
+      "total": 19.0,
+      "rate": 0.430895,
+      "used_fallback": false
+    },
+    "PRX|Pearl|def": {
+      "wins": 10.5,
+      "total": 19.5,
+      "rate": 0.533775,
+      "used_fallback": false
+    },
+    "BME|Pearl|atk": {
+      "wins": 2.5,
+      "total": 5.5,
+      "rate": 0.45917,
+      "used_fallback": true
+    },
+    "BME|Pearl|def": {
+      "wins": 4.0,
+      "total": 6.0,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "PRX|Ascent|atk": {
+      "wins": 9.0,
+      "total": 29.5,
+      "rate": 0.321462,
+      "used_fallback": false
+    },
+    "PRX|Ascent|def": {
+      "wins": 25.5,
+      "total": 31.0,
+      "rate": 0.796683,
+      "used_fallback": false
+    },
+    "BME|Fracture|atk": {
+      "wins": 8.5,
+      "total": 15.5,
+      "rate": 0.541195,
+      "used_fallback": false
+    },
+    "BME|Fracture|def": {
+      "wins": 8.5,
+      "total": 16.5,
+      "rate": 0.513017,
+      "used_fallback": false
+    },
+    "NS|Haven|atk": {
+      "wins": 10.5,
+      "total": 20.0,
+      "rate": 0.522021,
+      "used_fallback": false
+    },
+    "NS|Haven|def": {
+      "wins": 8.5,
+      "total": 21.0,
+      "rate": 0.415633,
+      "used_fallback": false
+    },
+    "NS|Lotus|atk": {
+      "wins": 36.5,
+      "total": 67.5,
+      "rate": 0.53917,
+      "used_fallback": false
+    },
+    "NS|Lotus|def": {
+      "wins": 35.0,
+      "total": 70.5,
+      "rate": 0.496585,
+      "used_fallback": false
+    },
+    "NS|Fracture|atk": {
+      "wins": 1.0,
+      "total": 4.5,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "NS|Fracture|def": {
+      "wins": 2.0,
+      "total": 5.0,
+      "rate": 0.478055,
+      "used_fallback": true
+    },
+    "GE|Ascent|atk": {
+      "wins": 0.0,
+      "total": 4.0,
+      "rate": 0.448651,
+      "used_fallback": true
+    },
+    "GE|Ascent|def": {
+      "wins": 1.5,
+      "total": 4.0,
+      "rate": 0.549232,
+      "used_fallback": true
+    },
+    "DRX|Split|atk": {
+      "wins": 5.5,
+      "total": 11.0,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "DRX|Split|def": {
+      "wins": 7.5,
+      "total": 12.0,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "GE|Split|atk": {
+      "wins": 4.5,
+      "total": 10.0,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "GE|Split|def": {
+      "wins": 3.0,
+      "total": 10.5,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "T1|Lotus|atk": {
+      "wins": 28.0,
+      "total": 51.0,
+      "rate": 0.54655,
+      "used_fallback": false
+    },
+    "T1|Lotus|def": {
+      "wins": 19.5,
+      "total": 54.0,
+      "rate": 0.367739,
+      "used_fallback": false
+    },
+    "TS|Split|atk": {
+      "wins": 1.5,
+      "total": 4.0,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "TS|Split|def": {
+      "wins": 0.0,
+      "total": 4.0,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "BME|Icebox|atk": {
       "wins": 6.0,
       "total": 13.0,
-      "rate": 0.443997,
+      "rate": 0.549006,
       "used_fallback": true
+    },
+    "BME|Icebox|def": {
+      "wins": 3.5,
+      "total": 13.5,
+      "rate": 0.453512,
+      "used_fallback": true
+    },
+    "T1|Pearl|atk": {
+      "wins": 3.5,
+      "total": 5.5,
+      "rate": 0.45917,
+      "used_fallback": true
+    },
+    "T1|Pearl|def": {
+      "wins": 3.0,
+      "total": 6.0,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "RRQ|Icebox|atk": {
+      "wins": 34.0,
+      "total": 59.5,
+      "rate": 0.568321,
+      "used_fallback": false
+    },
+    "RRQ|Icebox|def": {
+      "wins": 43.0,
+      "total": 63.0,
+      "rate": 0.675022,
+      "used_fallback": false
+    },
+    "GEN|Pearl|atk": {
+      "wins": 3.5,
+      "total": 9.0,
+      "rate": 0.45917,
+      "used_fallback": true
+    },
+    "GEN|Pearl|def": {
+      "wins": 9.5,
+      "total": 9.0,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "TLN|Split|atk": {
+      "wins": 1.5,
+      "total": 5.5,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "TLN|Split|def": {
+      "wins": 3.5,
+      "total": 6.0,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "PRX|Split|atk": {
+      "wins": 7.0,
+      "total": 11.0,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "PRX|Split|def": {
+      "wins": 5.5,
+      "total": 11.0,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "TLN|Icebox|atk": {
+      "wins": 36.5,
+      "total": 64.0,
+      "rate": 0.56746,
+      "used_fallback": false
+    },
+    "TLN|Icebox|def": {
+      "wins": 29.0,
+      "total": 67.5,
+      "rate": 0.432342,
+      "used_fallback": false
+    },
+    "GEN|Split|atk": {
+      "wins": 7.0,
+      "total": 10.5,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "GEN|Split|def": {
+      "wins": 4.5,
+      "total": 11.5,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "ZETA|Pearl|atk": {
+      "wins": 2.5,
+      "total": 6.0,
+      "rate": 0.45917,
+      "used_fallback": true
+    },
+    "ZETA|Pearl|def": {
+      "wins": 4.0,
+      "total": 6.0,
+      "rate": 0.539652,
+      "used_fallback": true
+    },
+    "TS|Ascent|atk": {
+      "wins": 17.5,
+      "total": 39.5,
+      "rate": 0.44669,
+      "used_fallback": false
+    },
+    "TS|Ascent|def": {
+      "wins": 22.0,
+      "total": 41.5,
+      "rate": 0.528277,
+      "used_fallback": false
+    },
+    "GEN|Icebox|atk": {
+      "wins": 11.5,
+      "total": 23.5,
+      "rate": 0.49046,
+      "used_fallback": false
+    },
+    "GEN|Icebox|def": {
+      "wins": 10.0,
+      "total": 24.5,
+      "rate": 0.417298,
+      "used_fallback": false
+    },
+    "DRX|Fracture|atk": {
+      "wins": 11.0,
+      "total": 19.0,
+      "rate": 0.569105,
+      "used_fallback": false
+    },
+    "DRX|Fracture|def": {
+      "wins": 9.5,
+      "total": 19.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "BME|Split|atk": {
+      "wins": 3.0,
+      "total": 5.0,
+      "rate": 0.503855,
+      "used_fallback": true
+    },
+    "BME|Split|def": {
+      "wins": 1.0,
+      "total": 5.5,
+      "rate": 0.496316,
+      "used_fallback": true
+    },
+    "RRQ|Fracture|atk": {
+      "wins": 2.5,
+      "total": 9.5,
+      "rate": 0.523129,
+      "used_fallback": true
+    },
+    "RRQ|Fracture|def": {
+      "wins": 4.0,
+      "total": 10.0,
+      "rate": 0.478055,
+      "used_fallback": true
+    },
+    "T1|Ascent|atk": {
+      "wins": 18.0,
+      "total": 36.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "T1|Ascent|def": {
+      "wins": 17.0,
+      "total": 36.5,
+      "rate": 0.468117,
+      "used_fallback": false
+    },
+    "BME|Bind|atk": {
+      "wins": 8.0,
+      "total": 20.0,
+      "rate": 0.411918,
+      "used_fallback": false
+    },
+    "BME|Bind|def": {
+      "wins": 8.0,
+      "total": 22.0,
+      "rate": 0.378572,
+      "used_fallback": false
+    },
+    "TLN|Bind|atk": {
+      "wins": 35.0,
+      "total": 61.0,
+      "rate": 0.570637,
+      "used_fallback": false
+    },
+    "TLN|Bind|def": {
+      "wins": 33.0,
+      "total": 64.0,
+      "rate": 0.514991,
+      "used_fallback": false
+    },
+    "NS|Sunset|atk": {
+      "wins": 5.0,
+      "total": 10.0,
+      "rate": 0.584437,
+      "used_fallback": true
+    },
+    "NS|Sunset|def": {
+      "wins": 3.0,
+      "total": 11.0,
+      "rate": 0.41945,
+      "used_fallback": true
+    },
+    "TS|Sunset|atk": {
+      "wins": 9.0,
+      "total": 18.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "TS|Sunset|def": {
+      "wins": 7.0,
+      "total": 19.0,
+      "rate": 0.384825,
+      "used_fallback": false
+    },
+    "DRX|Corrode|atk": {
+      "wins": 11.0,
+      "total": 28.0,
+      "rate": 0.402299,
+      "used_fallback": false
+    },
+    "DRX|Corrode|def": {
+      "wins": 17.0,
+      "total": 30.0,
+      "rate": 0.561151,
+      "used_fallback": false
+    },
+    "GEN|Corrode|atk": {
+      "wins": 17.0,
+      "total": 28.0,
+      "rate": 0.597701,
+      "used_fallback": false
+    },
+    "GEN|Corrode|def": {
+      "wins": 15.0,
+      "total": 30.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "RRQ|Corrode|atk": {
+      "wins": 29.0,
+      "total": 53.0,
+      "rate": 0.544878,
+      "used_fallback": false
+    },
+    "RRQ|Corrode|def": {
+      "wins": 28.0,
+      "total": 55.0,
+      "rate": 0.508665,
+      "used_fallback": false
+    },
+    "GE|Corrode|atk": {
+      "wins": 16.0,
+      "total": 41.0,
+      "rate": 0.397039,
+      "used_fallback": false
+    },
+    "GE|Corrode|def": {
+      "wins": 24.0,
+      "total": 41.0,
+      "rate": 0.58008,
+      "used_fallback": false
+    },
+    "DFM|Haven|atk": {
+      "wins": 19.0,
+      "total": 28.0,
+      "rate": 0.662834,
+      "used_fallback": false
+    },
+    "DFM|Haven|def": {
+      "wins": 10.0,
+      "total": 28.0,
+      "rate": 0.369732,
+      "used_fallback": false
+    },
+    "DFM|Icebox|atk": {
+      "wins": 16.0,
+      "total": 20.0,
+      "rate": 0.764247,
+      "used_fallback": false
+    },
+    "DFM|Icebox|def": {
+      "wins": 10.0,
+      "total": 21.0,
+      "rate": 0.478908,
+      "used_fallback": false
+    },
+    "DRX|Bind|atk": {
+      "wins": 16.0,
+      "total": 33.0,
+      "rate": 0.485997,
+      "used_fallback": false
+    },
+    "DRX|Bind|def": {
+      "wins": 15.0,
+      "total": 34.0,
+      "rate": 0.445513,
+      "used_fallback": false
+    },
+    "NS|Bind|atk": {
+      "wins": 13.0,
+      "total": 18.0,
+      "rate": 0.69318,
+      "used_fallback": false
+    },
+    "NS|Bind|def": {
+      "wins": 13.0,
+      "total": 20.0,
+      "rate": 0.632124,
+      "used_fallback": false
+    },
+    "BME|Corrode|atk": {
+      "wins": 11.0,
+      "total": 29.0,
+      "rate": 0.389611,
+      "used_fallback": false
+    },
+    "BME|Corrode|def": {
+      "wins": 10.0,
+      "total": 31.0,
+      "rate": 0.336824,
+      "used_fallback": false
+    },
+    "T1|Corrode|atk": {
+      "wins": 17.0,
+      "total": 32.0,
+      "rate": 0.528813,
+      "used_fallback": false
+    },
+    "T1|Corrode|def": {
+      "wins": 19.0,
+      "total": 35.0,
+      "rate": 0.539781,
+      "used_fallback": false
+    },
+    "GE|Bind|atk": {
+      "wins": 8.0,
+      "total": 19.0,
+      "rate": 0.430895,
+      "used_fallback": false
+    },
+    "GE|Bind|def": {
+      "wins": 5.0,
+      "total": 20.0,
+      "rate": 0.279794,
+      "used_fallback": false
+    },
+    "TS|Bind|atk": {
+      "wins": 5.0,
+      "total": 9.0,
+      "rate": 0.517562,
+      "used_fallback": true
+    },
+    "TS|Bind|def": {
+      "wins": 8.0,
+      "total": 9.0,
+      "rate": 0.483372,
+      "used_fallback": true
+    },
+    "TS|Corrode|atk": {
+      "wins": 5.0,
+      "total": 19.0,
+      "rate": 0.292684,
+      "used_fallback": false
+    },
+    "TS|Corrode|def": {
+      "wins": 8.0,
+      "total": 20.0,
+      "rate": 0.411918,
+      "used_fallback": false
+    },
+    "ZETA|Bind|atk": {
+      "wins": 2.0,
+      "total": 9.0,
+      "rate": 0.517562,
+      "used_fallback": true
+    },
+    "ZETA|Bind|def": {
+      "wins": 4.0,
+      "total": 10.0,
+      "rate": 0.483372,
+      "used_fallback": true
+    },
+    "RRQ|Sunset|atk": {
+      "wins": 40.0,
+      "total": 64.0,
+      "rate": 0.619929,
+      "used_fallback": false
+    },
+    "RRQ|Sunset|def": {
+      "wins": 32.0,
+      "total": 66.0,
+      "rate": 0.485445,
+      "used_fallback": false
+    },
+    "GEN|Sunset|atk": {
+      "wins": 15.0,
+      "total": 21.0,
+      "rate": 0.689825,
+      "used_fallback": false
+    },
+    "GEN|Sunset|def": {
+      "wins": 2.0,
+      "total": 22.0,
+      "rate": 0.135716,
+      "used_fallback": false
+    },
+    "GE|Icebox|atk": {
+      "wins": 16.0,
+      "total": 19.0,
+      "rate": 0.799456,
+      "used_fallback": false
+    },
+    "GE|Icebox|def": {
+      "wins": 7.0,
+      "total": 20.0,
+      "rate": 0.367876,
+      "used_fallback": false
+    },
+    "TLN|Sunset|atk": {
+      "wins": 11.0,
+      "total": 24.0,
+      "rate": 0.462555,
+      "used_fallback": false
+    },
+    "TLN|Sunset|def": {
+      "wins": 10.0,
+      "total": 24.0,
+      "rate": 0.425111,
+      "used_fallback": false
+    },
+    "DFM|Sunset|atk": {
+      "wins": 9.0,
+      "total": 20.0,
+      "rate": 0.455959,
+      "used_fallback": false
+    },
+    "DFM|Sunset|def": {
+      "wins": 10.0,
+      "total": 21.0,
+      "rate": 0.478908,
+      "used_fallback": false
+    },
+    "TLN|Corrode|atk": {
+      "wins": 22.0,
+      "total": 48.0,
+      "rate": 0.460557,
+      "used_fallback": false
+    },
+    "TLN|Corrode|def": {
+      "wins": 30.0,
+      "total": 50.0,
+      "rate": 0.594866,
+      "used_fallback": false
+    },
+    "DFM|Corrode|atk": {
+      "wins": 13.0,
+      "total": 18.0,
+      "rate": 0.69318,
+      "used_fallback": false
+    },
+    "DFM|Corrode|def": {
+      "wins": 9.0,
+      "total": 19.0,
+      "rate": 0.476965,
+      "used_fallback": false
+    },
+    "ZETA|Corrode|atk": {
+      "wins": 13.0,
+      "total": 21.0,
+      "rate": 0.605458,
+      "used_fallback": false
+    },
+    "ZETA|Corrode|def": {
+      "wins": 8.0,
+      "total": 22.0,
+      "rate": 0.378572,
+      "used_fallback": false
+    },
+    "T1|Sunset|atk": {
+      "wins": 33.0,
+      "total": 50.0,
+      "rate": 0.651785,
+      "used_fallback": false
+    },
+    "T1|Sunset|def": {
+      "wins": 27.0,
+      "total": 54.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "ZETA|Sunset|atk": {
+      "wins": 12.0,
+      "total": 19.0,
+      "rate": 0.615175,
+      "used_fallback": false
+    },
+    "ZETA|Sunset|def": {
+      "wins": 7.0,
+      "total": 20.0,
+      "rate": 0.367876,
+      "used_fallback": false
+    },
+    "NS|Corrode|atk": {
+      "wins": 20.0,
+      "total": 37.0,
+      "rate": 0.537778,
+      "used_fallback": false
+    },
+    "NS|Corrode|def": {
+      "wins": 20.0,
+      "total": 37.0,
+      "rate": 0.537778,
+      "used_fallback": false
+    },
+    "PRX|Bind|atk": {
+      "wins": 30.0,
+      "total": 51.0,
+      "rate": 0.583789,
+      "used_fallback": false
+    },
+    "PRX|Bind|def": {
+      "wins": 35.0,
+      "total": 54.0,
+      "rate": 0.641078,
+      "used_fallback": false
+    },
+    "RRQ|Bind|atk": {
+      "wins": 18.0,
+      "total": 42.0,
+      "rate": 0.432895,
+      "used_fallback": false
+    },
+    "RRQ|Bind|def": {
+      "wins": 15.0,
+      "total": 44.0,
+      "rate": 0.350126,
+      "used_fallback": false
+    },
+    "PRX|Sunset|atk": {
+      "wins": 10.0,
+      "total": 20.0,
+      "rate": 0.5,
+      "used_fallback": false
+    },
+    "PRX|Sunset|def": {
+      "wins": 10.0,
+      "total": 21.0,
+      "rate": 0.478908,
+      "used_fallback": false
+    },
+    "ZETA|Ascent|atk": {
+      "wins": 6.0,
+      "total": 10.0,
+      "rate": 0.448651,
+      "used_fallback": true
+    },
+    "ZETA|Ascent|def": {
+      "wins": 7.0,
+      "total": 11.0,
+      "rate": 0.549232,
+      "used_fallback": true
+    },
+    "T1|Bind|atk": {
+      "wins": 11.0,
+      "total": 20.0,
+      "rate": 0.544041,
+      "used_fallback": false
+    },
+    "T1|Bind|def": {
+      "wins": 8.0,
+      "total": 21.0,
+      "rate": 0.394542,
+      "used_fallback": false
     }
   },
   "league_map_side": {
-    "Abyss|atk": {
-      "wins": 61.0,
-      "total": 100.0,
-      "rate": 0.607102
-    },
-    "Abyss|def": {
-      "wins": 41.0,
-      "total": 104.0,
-      "rate": 0.396913
-    },
-    "Haven|atk": {
-      "wins": 110.5,
-      "total": 235.0,
-      "rate": 0.470552
-    },
-    "Haven|def": {
-      "wins": 130.5,
-      "total": 247.0,
-      "rate": 0.528033
-    },
-    "Bind|atk": {
-      "wins": 24.0,
-      "total": 58.0,
-      "rate": 0.417636
-    },
-    "Bind|def": {
-      "wins": 35.0,
-      "total": 60.0,
-      "rate": 0.579737
-    },
     "Lotus|atk": {
-      "wins": 125.5,
-      "total": 241.0,
-      "rate": 0.520517
+      "wins": 346.0,
+      "total": 628.0,
+      "rate": 0.550737
     },
     "Lotus|def": {
-      "wins": 119.0,
-      "total": 248.0,
-      "rate": 0.480056
+      "wins": 293.5,
+      "total": 651.0,
+      "rate": 0.451048
     },
     "Pearl|atk": {
-      "wins": 161.0,
-      "total": 292.0,
-      "rate": 0.550898
+      "wins": 60.5,
+      "total": 132.0,
+      "rate": 0.45917
     },
     "Pearl|def": {
-      "wins": 134.0,
-      "total": 298.0,
-      "rate": 0.450117
-    },
-    "Split|atk": {
-      "wins": 128.5,
-      "total": 244.0,
-      "rate": 0.526347
-    },
-    "Split|def": {
-      "wins": 120.0,
-      "total": 253.0,
-      "rate": 0.47458
+      "wins": 73.5,
+      "total": 136.0,
+      "rate": 0.539652
     },
     "Fracture|atk": {
-      "wins": 56.5,
-      "total": 111.0,
-      "rate": 0.508795
+      "wins": 66.5,
+      "total": 127.0,
+      "rate": 0.523129
     },
     "Fracture|def": {
-      "wins": 56.0,
-      "total": 114.0,
-      "rate": 0.491431
+      "wins": 64.0,
+      "total": 134.0,
+      "rate": 0.478055
     },
-    "Ascent|atk": {
-      "wins": 56.5,
-      "total": 123.0,
-      "rate": 0.460225
+    "Split|atk": {
+      "wins": 64.0,
+      "total": 127.0,
+      "rate": 0.503855
     },
-    "Ascent|def": {
-      "wins": 69.5,
-      "total": 129.0,
-      "rate": 0.537963
+    "Split|def": {
+      "wins": 66.0,
+      "total": 133.0,
+      "rate": 0.496316
+    },
+    "Haven|atk": {
+      "wins": 270.0,
+      "total": 514.0,
+      "rate": 0.525159
+    },
+    "Haven|def": {
+      "wins": 249.0,
+      "total": 524.0,
+      "rate": 0.475318
     },
     "Icebox|atk": {
-      "wins": 85.0,
-      "total": 152.0,
-      "rate": 0.558175
+      "wins": 211.5,
+      "total": 385.0,
+      "rate": 0.549006
     },
     "Icebox|def": {
-      "wins": 70.0,
-      "total": 158.0,
-      "rate": 0.443997
+      "wins": 184.0,
+      "total": 406.0,
+      "rate": 0.453512
+    },
+    "Ascent|atk": {
+      "wins": 186.5,
+      "total": 416.0,
+      "rate": 0.448651
+    },
+    "Ascent|def": {
+      "wins": 238.5,
+      "total": 434.0,
+      "rate": 0.549232
+    },
+    "Bind|atk": {
+      "wins": 146.0,
+      "total": 282.0,
+      "rate": 0.517562
+    },
+    "Bind|def": {
+      "wins": 144.0,
+      "total": 298.0,
+      "rate": 0.483372
+    },
+    "Sunset|atk": {
+      "wins": 144.0,
+      "total": 246.0,
+      "rate": 0.584437
+    },
+    "Sunset|def": {
+      "wins": 108.0,
+      "total": 258.0,
+      "rate": 0.41945
+    },
+    "Corrode|atk": {
+      "wins": 174.0,
+      "total": 354.0,
+      "rate": 0.49159
+    },
+    "Corrode|def": {
+      "wins": 188.0,
+      "total": 370.0,
+      "rate": 0.508049
     }
   },
   "overall_avg": 0.5,
   "min_rounds_threshold": 15,
   "maps_in_data": [
-    "Abyss",
     "Ascent",
     "Bind",
+    "Corrode",
     "Fracture",
     "Haven",
     "Icebox",
     "Lotus",
     "Pearl",
-    "Split"
+    "Split",
+    "Sunset"
   ],
   "event_weights": {
     "current": 1.0,

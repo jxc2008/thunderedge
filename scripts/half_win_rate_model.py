@@ -69,56 +69,86 @@ def wilson_point(wins: int, n: int, z: float = WILSON_Z) -> float:
 # Data loading
 # --------------------------------------------------------------------------- #
 
+def _extract_round_key(event_name: str) -> str:
+    """
+    Extract a 'round key' from an event name for grouping concurrent regional events.
+
+    VCT runs 4 regions (Americas/EMEA/Pacific/China) per stage simultaneously.
+    We want all regions of the same stage to share a weight tier.
+
+    Examples:
+      'VCT 2026: Americas Kickoff'  → '2026|Kickoff'
+      'VCT 2025: EMEA Stage 2'      → '2025|Stage 2'
+      'VCT 2025: Pacific Stage 1'   → '2025|Stage 1'
+    """
+    import re as _re
+    m = _re.match(r'VCT (\d{4}).*?(Kickoff|Stage\s+\d+)', event_name)
+    if m:
+        return f"{m.group(1)}|{m.group(2).strip()}"
+    return event_name  # fallback: treat as its own round
+
+
 def detect_event_weights(conn: sqlite3.Connection) -> Dict[int, float]:
     """
-    Auto-detect the two most recent events and assign weights.
+    Auto-detect the two most recent event rounds and assign weights.
 
-    Strategy: rank events by their most recent match date. The event with
-    the latest matches is "current" (weight 1.0); the second most recent
-    is "previous" (weight 0.5). All older events get weight 0.0.
+    VCT runs 4 concurrent regional events per stage (Americas/EMEA/Pacific/China).
+    We group these into 'rounds' (e.g. '2026|Kickoff', '2025|Stage 2') so all
+    regions of the same stage share the same weight tier.
 
-    If match_date is unavailable, falls back to ranking by event id
-    (higher id = more recent).
+    Round ranking: by MAX(e.id) within the round (higher id = newer), using
+    e.id as a proxy for recency when match_date is NULL.
+
+    Weights: current round = 1.0, previous round = 0.5, older = excluded.
+    Only rounds that have at least one event with scraped halves data are included.
 
     Returns: {event_id: weight}
     """
     cur = conn.cursor()
 
-    # Rank by latest match date per event, falling back to event id when
-    # match_date is NULL (COALESCE maps NULL → '' which sorts before any date,
-    # so events with NULL dates naturally rank lower than events with real dates).
-    # Only consider events that actually have scraped halves data.
+    # Fetch events that have scraped halves data
     cur.execute('''
-        SELECT e.id, MAX(m.match_date) AS latest_date
+        SELECT DISTINCT e.id, e.event_name
         FROM vct_events e
         JOIN matches m ON m.event_id = e.id
         JOIN match_map_halves h ON h.match_id = m.id
-        GROUP BY e.id
-        ORDER BY COALESCE(latest_date, '') DESC, e.id DESC
     ''')
-    rows = cur.fetchall()
+    events = cur.fetchall()
 
-    if not rows:
-        # No matches at all — return empty
+    if not events:
         return {}
 
-    weights: Dict[int, float] = {}
-    for rank, (event_id, _) in enumerate(rows):
-        if rank == 0:
-            weights[event_id] = CURRENT_EVENT_WEIGHT
-        elif rank == 1:
-            weights[event_id] = PREV_EVENT_WEIGHT
-        else:
-            weights[event_id] = 0.0   # excluded
+    # Group by round key; track max event id per round for ordering
+    from collections import defaultdict as _dd
+    round_to_ids: Dict[str, list] = _dd(list)
+    round_max_id: Dict[str, int] = {}
+    for eid, ename in events:
+        rk = _extract_round_key(ename)
+        round_to_ids[rk].append(eid)
+        round_max_id[rk] = max(round_max_id.get(rk, 0), eid)
 
-    # Log which events were selected
+    # Rank rounds by their max event id (descending)
+    ranked_rounds = sorted(round_max_id.keys(), key=lambda rk: round_max_id[rk], reverse=True)
+
+    weights: Dict[int, float] = {}
+    for rank, rk in enumerate(ranked_rounds):
+        if rank == 0:
+            w = CURRENT_EVENT_WEIGHT
+        elif rank == 1:
+            w = PREV_EVENT_WEIGHT
+        else:
+            w = 0.0
+        for eid in round_to_ids[rk]:
+            weights[eid] = w
+
+    # Log which rounds were selected
     cur.execute(
         'SELECT id, event_name FROM vct_events WHERE id IN ({})'.format(
             ','.join('?' * len(weights))
         ),
         list(weights.keys()),
     )
-    for eid, ename in cur.fetchall():
+    for eid, ename in sorted(cur.fetchall(), key=lambda r: weights[r[0]], reverse=True):
         w = weights[eid]
         if w > 0:
             label = 'CURRENT' if w == CURRENT_EVENT_WEIGHT else 'PREVIOUS'

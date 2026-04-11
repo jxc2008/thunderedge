@@ -19,6 +19,7 @@ If a team has fewer than MIN_ROUNDS *effective* rounds on a given
 import json
 import math
 import os
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -69,23 +70,34 @@ def wilson_point(wins: int, n: int, z: float = WILSON_Z) -> float:
 # Data loading
 # --------------------------------------------------------------------------- #
 
-def _extract_round_key(event_name: str) -> str:
-    """
-    Extract a 'round key' from an event name for grouping concurrent regional events.
+_STAGE_ORDER = {'Kickoff': 0, 'Stage 1': 1, 'Stage 2': 2, 'Stage 3': 3}
 
-    VCT runs 4 regions (Americas/EMEA/Pacific/China) per stage simultaneously.
-    We want all regions of the same stage to share a weight tier.
+
+def _extract_round_key(event_name: str) -> tuple:
+    """
+    Extract a (year, stage_order) sort key from an event name.
+
+    VCT season order within a year: Kickoff(0) → Stage 1(1) → Stage 2(2)
+    Higher stage_order = later in the season = more recent data.
 
     Examples:
-      'VCT 2026: Americas Kickoff'  → '2026|Kickoff'
-      'VCT 2025: EMEA Stage 2'      → '2025|Stage 2'
-      'VCT 2025: Pacific Stage 1'   → '2025|Stage 1'
+      'VCT 2026: Americas Stage 1'  → (2026, 1)
+      'VCT 2026: EMEA Kickoff'      → (2026, 0)
+      'VCT 2025: Pacific Stage 2'   → (2025, 2)
     """
-    import re as _re
-    m = _re.match(r'VCT (\d{4}).*?(Kickoff|Stage\s+\d+)', event_name)
+    m = re.match(r'VCT (\d{4}).*?(Kickoff|Stage\s+\d+)', event_name)
     if m:
-        return f"{m.group(1)}|{m.group(2).strip()}"
-    return event_name  # fallback: treat as its own round
+        year = int(m.group(1))
+        stage = m.group(2).strip()
+        order = _STAGE_ORDER.get(stage, -1)
+        return (year, order)
+    return (0, -1)  # fallback: sorts last
+
+
+def _round_label(key: tuple) -> str:
+    year, order = key
+    stage = {v: k for k, v in _STAGE_ORDER.items()}.get(order, str(order))
+    return f'{year}|{stage}'
 
 
 def detect_event_weights(conn: sqlite3.Connection) -> Dict[int, float]:
@@ -118,24 +130,24 @@ def detect_event_weights(conn: sqlite3.Connection) -> Dict[int, float]:
     if not events:
         return {}
 
-    # Group by round key; track max event id per round for ordering
+    # Group by (year, stage_order) round key
     from collections import defaultdict as _dd
-    round_to_ids: Dict[str, list] = _dd(list)
-    round_max_id: Dict[str, int] = {}
+    round_to_ids: Dict[tuple, list] = _dd(list)
     for eid, ename in events:
         rk = _extract_round_key(ename)
         round_to_ids[rk].append(eid)
-        round_max_id[rk] = max(round_max_id.get(rk, 0), eid)
 
-    # Rank rounds by their max event id (descending)
-    ranked_rounds = sorted(round_max_id.keys(), key=lambda rk: round_max_id[rk], reverse=True)
+    # Rank rounds by (year DESC, stage_order DESC) — most recent season stage first
+    ranked_rounds = sorted(round_to_ids.keys(), reverse=True)
 
     weights: Dict[int, float] = {}
     for rank, rk in enumerate(ranked_rounds):
         if rank == 0:
             w = CURRENT_EVENT_WEIGHT
+            print(f'  Round detected as CURRENT ({_round_label(rk)}):')
         elif rank == 1:
             w = PREV_EVENT_WEIGHT
+            print(f'  Round detected as PREVIOUS ({_round_label(rk)}):')
         else:
             w = 0.0
         for eid in round_to_ids[rk]:

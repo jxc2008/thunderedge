@@ -47,3 +47,12 @@ def test_prematch_fixture_parses_two_sided():
     _, rows = parse_match_odds(html)
     tp = {r["team"]: r["odds"] for r in rows if r["book"] == "thunderpick" and r["status"] == "pre"}
     assert tp == {"Team Vitality": 2.40, "100 Thieves": 1.53}
+
+
+def test_old_layout_prematch_and_post():
+    fx = Path(__file__).parent / "fixtures"
+    _, rows = parse_match_odds((fx / "prematch_old_427991.html").read_text(encoding="utf-8"))
+    gg = {r["team"]: r["odds"] for r in rows if r["book"] == "ggbet" and r["status"] == "pre"}
+    assert gg == {"Evil Geniuses": 1.76, "LOUD": 1.99}
+    _, rows = parse_match_odds((fx / "post_old_312767.html").read_text(encoding="utf-8"))
+    assert [(r["team"], r["odds"], r["status"]) for r in rows] == [("EDward Gaming", 2.00, "post")]

@@ -46,6 +46,7 @@ MAX_LIST_PAGES = 3
 MIN_INTERVAL = 2.5
 UA = "Mozilla/5.0 (compatible; odds-snapshot-logger; 15-min cadence)"
 TIER1 = re.compile(r"\bVCT\b|Champions Tour|Masters|VALORANT Champions|Esports World Cup", re.I)
+OLD_POST = re.compile(r"\$100 on (.+?) returned \$[\d.,]+ at ([\d.]+) pre-match odds")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS odds_snapshots(
@@ -135,6 +136,26 @@ def parse_match_odds(html: str) -> tuple[str | None, list[dict]]:
             rows.append({"team": team, "book": book, "odds": val, "status": "pre", "raw": raw})
             found = True
         if not found:
+            # older layout (archived 2023-25 pages): plain halves, odds spans carry mod-1 / mod-2
+            for idx, mod in ((0, "mod-1"), (1, "mod-2")):
+                o = b.select_one(f".match-bet-item-odds.{mod}")
+                val = _num(o.get_text(strip=True)) if o else None
+                if val is None:
+                    continue
+                t = o.find_parent(class_="match-bet-item-half")
+                team_el = t.select_one(".match-bet-item-team") if t else None
+                team = team_el.get_text(" ", strip=True) if team_el else (names[idx] if idx < len(names) else None)
+                rows.append({"team": team, "book": book, "odds": val, "status": "pre", "raw": raw})
+                found = True
+        if not found:
+            txt = " ".join(b.get_text(" ", strip=True).split())
+            m = OLD_POST.search(txt)
+            if m:
+                rows.append({"team": m[1], "book": book, "odds": _num(m[2]), "status": "post", "raw": raw})
+                continue
+            if txt.endswith("Pending"):
+                rows.append({"team": None, "book": book, "odds": None, "status": "pending", "raw": raw})
+                continue
             short = b.select_one(".match-bet-item-return-short .match-bet-item-odds")
             tm = b.select_one(".match-bet-item-return-msg .match-bet-item-teamzzz")
             rows.append({"team": tm.get_text(" ", strip=True) if tm else None, "book": book,

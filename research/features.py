@@ -38,6 +38,14 @@ def overround_table(db=DB) -> pd.DataFrame:
     return pd.read_sql(q, _con(db))
 
 
+def season_overround(db=DB) -> dict:
+    """Median measured two-sided Thunderpick overround per season (odds only, no outcomes)."""
+    q = """SELECT m.season, SUM(1.0/p.odds) v FROM prematch_odds p JOIN research_matches m USING(match_id)
+           WHERE p.book='thunderpick' GROUP BY p.match_id HAVING COUNT(*)=2"""
+    t = pd.read_sql(q, _con(db))
+    return {int(k): float(g.v.median()) for k, g in t.groupby("season") if len(g) >= 20}
+
+
 def lineups(db=DB) -> pd.DataFrame:
     """One modal starting five per (match, team)."""
     lu = pd.read_sql("""SELECT l.match_id, l.team_id, l.p1,l.p2,l.p3,l.p4,l.p5, m.date_utc,
@@ -106,13 +114,18 @@ def add_market(m: pd.DataFrame, overround: float) -> pd.DataFrame:
     two = m.ts_o1.notna() & m.ts_o2.notna()
     i1, i2 = 1 / m.ts_o1, 1 / m.ts_o2
     p_two = i1 / (i1 + i2)
-    pw = (1 / m.winner_odds) / overround
+    if isinstance(overround, dict):  # per-season measured V; seasons without snapshots -> pooled median
+        V = m.season.map(overround).fillna(float(np.median(list(overround.values())))).astype(float)
+    else:
+        V = overround
+    pw = (1 / m.winner_odds) / V
     p_wo = np.where(m.wo_team == m.team1_id, pw, 1 - pw)
     m["p1"] = np.where(two, p_two, np.where(m.winner_odds.notna(), p_wo, np.nan))
     m["mkt_src"] = np.where(two, "two_sided", np.where(m.winner_odds.notna(), "winner_only", "none"))
     # favourite: two-sided -> lower price; winner-only -> winner was fav iff o_w < 2/V.
-    # Ambiguous band: o_w in (2/1.08, 2/1.04) flips with any plausible V -> excluded from fav/dog tests.
-    amb = (~two) & m.winner_odds.between(2 / 1.08, 2 / 1.04)
+    # Ambiguous band: o_w in (2/1.09, 2/1.04) flips with plausible V (measured p95 1.0875; agreed
+    # sensitivity floor 1.04) -> excluded from fav/dog tests.
+    amb = (~two) & m.winner_odds.between(2 / 1.09, 2 / 1.04)
     m["fav_ambiguous"] = amb
     m["fav_is_1"] = m.p1 > 0.5
     m["p_fav"] = np.where(m.fav_is_1, m.p1, 1 - m.p1)

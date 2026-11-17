@@ -10,6 +10,7 @@ Usage: python -m research.analysis
 from __future__ import annotations
 
 import json
+import os
 import warnings
 from pathlib import Path
 
@@ -28,7 +29,7 @@ warnings.filterwarnings("ignore")
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "out"
 FIG = ROOT / "figs"
-NB = 2000
+NB = int(os.environ.get("RESEARCH_NB", 2000))
 
 # chart tokens (dataviz reference palette, light mode)
 C1, C2, C3 = "#2a78d6", "#eb6834", "#1baf7a"
@@ -79,14 +80,31 @@ def calib_fit(d: pd.DataFrame, interact: bool = False):
     return r.params.values
 
 
-def step1(m: pd.DataFrame, V_hat: float) -> dict:
+
+def plot_reliability(rel: dict) -> None:
+    """Reliability per weeks bucket; per-bin n is tabulated in REPORT.md rather than labelled here."""
+    fig, axs = plt.subplots(1, 3, figsize=(10, 3.4), sharey=True)
+    for ax, b in zip(axs, ["0-6", "7-16", "17+"]):
+        for (lab, g), col, mk in zip(rel[b].items(), (C1, C2), ("o", "s")):
+            ax.plot(g["p"], g["y"], marker=mk, ms=6, color=col, lw=2,
+                    label=f"{lab} (n={sum(g['n'])})", markeredgecolor=SURF, markeredgewidth=1.5)
+        ax.plot([.5, 1], [.5, 1], color=INK2, lw=1, ls="--")
+        ax.set_title(f"weeks {b}")
+        ax.set_xlabel("de-vigged P(fav)")
+        ax.legend(loc="upper left", fontsize=7)
+    axs[0].set_ylabel("observed fav win rate")
+    fig.suptitle("Reliability by weeks since season start (bins of 0.1, ≥5 matches)", fontsize=10, color=INK)
+    fig.savefig(FIG / "s1_reliability_by_bucket.png")
+    plt.close(fig)
+
+def step1(m: pd.DataFrame, V_hat: dict) -> dict:
     res: dict = {"V_hat": V_hat}
     base = m[m.season.isin(F.TEST_SEASONS) & m.p1.notna() & ~m.fav_ambiguous].copy()
     sets = {"two_sided": base[base.mkt_src == "two_sided"]}
-    for V in (1.04, V_hat, 1.08):
+    for V in (V_hat, 1.04, 1.06, 1.08):
         mv = F.add_market(m, V)
         mv = mv[mv.season.isin(F.TEST_SEASONS) & mv.p1.notna() & ~mv.fav_ambiguous]
-        sets[f"all_V{V:.3f}"] = mv
+        sets["all_Vseason" if isinstance(V, dict) else f"all_V{V:.3f}"] = mv
     res["calibration"] = {}
     for name, d in sets.items():
         block = {"n": int(len(d)), "n_events": int(d.event_id.nunique())}
@@ -110,30 +128,17 @@ def step1(m: pd.DataFrame, V_hat: float) -> dict:
         res["calibration"][name] = block
 
     # reliability per bucket (V_hat full + two-sided overlay)
-    full = sets[f"all_V{V_hat:.3f}"]
+    full = sets["all_Vseason"]
     bins = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-    rel = {}
-    fig, axs = plt.subplots(1, 3, figsize=(10, 3.4), sharey=True)
-    for ax, b in zip(axs, ["0-6", "7-16", "17+"]):
+    rel: dict = {}
+    for b in ["0-6", "7-16", "17+"]:
         rel[b] = {}
-        for lab, d, col, mk in (("all (V̂)", full, C1, "o"), ("two-sided", sets["two_sided"], C2, "s")):
+        for lab, d in (("all (V̂ by season)", full), ("two-sided", sets["two_sided"])):
             db = d[d.wk_bucket == b]
-            cut = pd.cut(db.p_fav, bins)
-            g = db.groupby(cut).agg(p=("p_fav", "mean"), y=("y_fav", "mean"), n=("y_fav", "size"))
-            g = g[g.n >= 5]
-            rel[b][lab] = g.reset_index(drop=True).to_dict("list")
-            ax.plot(g.p, g.y, marker=mk, ms=6, color=col, label=f"{lab} (n={len(db)})")
-            for _, r in g.iterrows():
-                ax.annotate(f"{int(r.n)}", (r.p, r.y), textcoords="offset points", xytext=(4, -10),
-                            fontsize=7, color=INK2)
-        ax.plot([.5, 1], [.5, 1], color=INK2, lw=1, ls="--")
-        ax.set_title(f"weeks {b}")
-        ax.set_xlabel("de-vigged P(fav)")
-        ax.legend(loc="upper left", fontsize=7)
-    axs[0].set_ylabel("observed fav win rate")
-    fig.suptitle("Reliability by weeks since season start (bin labels = n)", fontsize=10, color=INK)
-    fig.savefig(FIG / "s1_reliability_by_bucket.png")
-    plt.close(fig)
+            g = db.groupby(pd.cut(db.p_fav, bins)).agg(p=("p_fav", "mean"), y=("y_fav", "mean"),
+                                                        n=("y_fav", "size"))
+            rel[b][lab] = g[g.n >= 5].reset_index(drop=True).to_dict("list")
+    plot_reliability(rel)
     res["reliability"] = rel
 
     # dog ROI by bucket, exact at actual (closing) odds
@@ -175,7 +180,7 @@ def step1(m: pd.DataFrame, V_hat: float) -> dict:
 
     # b by bucket chart (two-sided primary + V band)
     fig, ax = plt.subplots(figsize=(6, 3.2))
-    for j, (name, col, lab) in enumerate((("two_sided", C2, "two-sided"), (f"all_V{V_hat:.3f}", C1, "all, V̂"),
+    for j, (name, col, lab) in enumerate((("two_sided", C2, "two-sided"), ("all_Vseason", C1, "all, V̂ by season"),
                                           ("all_V1.040", C3, "all, V=1.04"))):
         bb = res["calibration"][name]["by_bucket"]
         xs = [i + (j - 1) * 0.18 for i, b in enumerate(["0-6", "7-16", "17+"]) if b in bb]
@@ -194,7 +199,7 @@ def step1(m: pd.DataFrame, V_hat: float) -> dict:
     return res
 
 
-def step1_round_var(V_hat: float) -> dict:
+def step1_round_var(V_hat: dict) -> dict:
     mp = F.maps_frame(overround=V_hat)
     mp = mp[mp.season.isin(F.TEST_SEASONS) & mp.p1.notna() & mp.churn_max.notna() & ~mp.fav_ambiguous]
     mp["L1"] = F.logit(mp.p1.values)
@@ -215,7 +220,7 @@ def step1_round_var(V_hat: float) -> dict:
 
 
 # --------------------------------------------------------------------------- step 2
-def step2(m: pd.DataFrame, V_hat: float) -> dict:
+def step2(m: pd.DataFrame, V_hat: dict) -> dict:
     d = m[(m.is_international == 1) & m.season.isin(F.TEST_SEASONS) & (m.home1 != m.home2)
           & m.p1.notna()].sort_values("date_utc").copy()
     rows = []
@@ -300,7 +305,7 @@ def _het_fit(e: np.ndarray, A: np.ndarray, B: np.ndarray, T: int):
     return -r.fun - 0.5 * len(e) * np.log(2 * np.pi), r.x[0], th
 
 
-def step3(V_hat: float) -> dict:
+def step3(V_hat: dict) -> dict:
     mp = F.maps_frame(overround=V_hat)
     mp = mp[mp.season.isin(F.TEST_SEASONS) & mp.p1.notna() & ~mp.fav_ambiguous].copy()
     mp["L1"] = F.logit(mp.p1.values)
@@ -402,14 +407,16 @@ def main() -> None:
     OUT.mkdir(exist_ok=True)
     FIG.mkdir(exist_ok=True)
     ov = F.overround_table()
-    V_hat = float(ov.overround.median()) if len(ov) >= 20 else 1.06
+    V_med = float(ov.overround.median()) if len(ov) >= 20 else 1.06
+    V_hat = F.season_overround() or {s: V_med for s in (2023, 2024, 2025, 2026)}
+    print("V by season", V_hat, flush=True)
     m = F.matches(overround=V_hat)
     res = {"data": data_summary(m, ov)}
     if len(ov):
         fig, ax = plt.subplots(figsize=(5.5, 3))
         ax.hist(ov.overround, bins=30, color=C1, edgecolor=SURF, lw=1)
         ax.axvline(1.05, color=C2, lw=2, label="assumed in populate_moneyline (1.05)")
-        ax.axvline(V_hat, color=INK, lw=1.5, ls="--", label=f"median measured ({V_hat:.3f})")
+        ax.axvline(V_med, color=INK, lw=1.5, ls="--", label=f"median measured ({V_med:.3f})")
         ax.set_xlabel("Thunderpick overround (1/o1 + 1/o2)")
         ax.set_ylabel("matches")
         ax.set_title(f"Measured Thunderpick overround, Wayback pre-match snapshots (n={len(ov)})")

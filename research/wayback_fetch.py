@@ -139,7 +139,11 @@ def phase_snapshots(urls: list[str], caps: dict[str, list[str]]) -> dict:
     for n, (u, mid, ts, start) in enumerate(todo):
         fp = WB / f"snap_{mid}_{ts}.html"
         if not fp.exists():
-            r = _get(f"https://web.archive.org/web/{ts}id_/https://www.vlr.gg{u}")
+            try:
+                r = _get(f"https://web.archive.org/web/{ts}id_/https://www.vlr.gg{u}", attempts=4)
+            except RuntimeError as e:  # persistent 503: skip, a rerun retries it
+                print(f"  skip {mid}: {e}", flush=True)
+                continue
             fp.write_text(r.text, encoding="utf-8")
         _, rows = parse_match_odds(fp.read_text(encoding="utf-8"))
         hrs = (start - datetime.strptime(ts, "%Y%m%d%H%M%S")).total_seconds() / 3600
@@ -152,10 +156,30 @@ def phase_snapshots(urls: list[str], caps: dict[str, list[str]]) -> dict:
     return out
 
 
+def reparse() -> dict:
+    """Re-run the (fixed) widget parser over cached snapshots; no network."""
+    out_fp = WB / "prematch_odds.json"
+    out = json.loads(out_fp.read_text())
+    for mid, o in out.items():
+        fp = WB / f"snap_{mid}_{o['snapshot_ts']}.html"
+        if fp.exists():
+            _, rows = parse_match_odds(fp.read_text(encoding="utf-8"))
+            o["rows"] = [{k: r[k] for k in ("team", "book", "odds", "status")} for r in rows]
+    out_fp.write_text(json.dumps(out))
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--index-only", action="store_true")
+    ap.add_argument("--reparse", action="store_true", help="re-parse cached snapshots only")
     a = ap.parse_args()
+    if a.reparse:
+        out = reparse()
+        two = sum(1 for o in out.values()
+                  if sum(1 for r in o["rows"] if r["book"] == "thunderpick" and r["status"] == "pre") == 2)
+        print(f"snapshots parsed: {len(out)}; two-sided thunderpick: {two}")
+        return
     urls = match_lists()
     ids = [u.strip("/").split("/")[0] for u in urls]
     caps = phase_index(ids)

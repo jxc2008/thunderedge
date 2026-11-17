@@ -1,0 +1,19 @@
+{
+ "before": {
+  "file": "data/half_win_rates.json",
+  "cells": 504,
+  "fallback_share": 0.5615079365079365,
+  "median_rounds": 13.0
+ },
+ "after": {
+  "file": "data/half_win_rates_v2.json",
+  "cells": 1498,
+  "fallback_share": 0.28437917222963954,
+  "median_rounds": 64.0,
+  "median_effective_rounds": 29.819499999999998,
+  "params": {
+   "half_life_days": 240.0,
+   "k_map": 810.0
+  }
+ }
+}

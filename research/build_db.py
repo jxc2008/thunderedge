@@ -110,6 +110,19 @@ MONEYLINE_COLS = {
 }
 
 
+def _contains_tid(d: dict, name: str | None) -> int | None:
+    """Fallback: unique substring match of normalised names (e.g. 'DRX' in 'KIWOOM DRX')."""
+    if not name:
+        return None
+    n = re.sub(r"[^a-z0-9]", "", name.lower().replace("esports", "").replace("gaming", ""))
+    hits = []
+    for k in ("team1", "team2"):
+        c = re.sub(r"[^a-z0-9]", "", (d[k]["name"] or "").lower().replace("esports", "").replace("gaming", ""))
+        if n and c and (n in c or c in n):
+            hits.append(d[k]["id"])
+    return hits[0] if len(set(hits)) == 1 else None
+
+
 def ensure_app_schema(con: sqlite3.Connection) -> None:
     """Create app tables via backend.database, then add moneyline columns additively."""
     import sys
@@ -309,14 +322,24 @@ def main() -> None:
             d = by_id.get(int(mid))
             if d is None:
                 continue
+            ids = (d["team1"]["id"], d["team2"]["id"])
+            by_book: dict = defaultdict(list)
             for r in o["rows"]:
-                if r["status"] != "pre" or not r["odds"] or r["odds"] <= 1.01:
+                if r["status"] == "pre" and r["odds"] and r["odds"] > 1.01:
+                    by_book[r["book"]].append(r)
+            for book, rs in by_book.items():
+                tids = [tid_for_name(d, r["team"]) or _contains_tid(d, r["team"]) for r in rs]
+                if len(rs) == 2 and tids.count(None) == 1:
+                    # two-team match: an unrecognised (older/sponsor) name is the other side
+                    known = next(t for t in tids if t is not None)
+                    if known in ids:
+                        tids = [t if t is not None else ids[1 - ids.index(known)] for t in tids]
+                if len(rs) == 2 and (None in tids or tids[0] == tids[1]):
                     continue
-                tid = tid_for_name(d, r["team"])
-                if tid is not None:
-                    con.execute("INSERT OR REPLACE INTO prematch_odds VALUES (?,?,?,?,?,?)",
-                                (int(mid), r["book"], tid, r["odds"], o["snapshot_ts"],
-                                 o["hours_before"]))
+                for r, tid in zip(rs, tids):
+                    if tid is not None:
+                        con.execute("INSERT OR REPLACE INTO prematch_odds VALUES (?,?,?,?,?,?)",
+                                    (int(mid), book, tid, r["odds"], o["snapshot_ts"], o["hours_before"]))
     con.commit()
     q = lambda s: con.execute(s).fetchone()[0]  # noqa: E731
     print(f"matches {q('select count(*) from research_matches')} | skipped {dict(skipped)}")

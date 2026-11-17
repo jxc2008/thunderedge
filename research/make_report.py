@@ -7,6 +7,7 @@ Usage: python -m research.make_report
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,6 +39,104 @@ def verdict(c: dict | None, null: float = 0.0) -> str:
     return f"CI includes {null:g}"
 
 
+
+def _excl(c: dict | None, null: float) -> bool:
+    return bool(c and c.get("lo") is not None and (c["lo"] > null or c["hi"] < null))
+
+
+def _fmt3(x: list | None) -> str:
+    return f"{x[0]:+.4f} [{x[1]:+.4f}, {x[2]:+.4f}]" if x else "n/a"
+
+
+def findings(r: dict, wf: dict) -> dict[str, str]:
+    """One Findings paragraph per section, phrased from the CIs (nothing hand-entered)."""
+    out: dict[str, str] = {}
+    s1 = r.get("step1", {})
+    c = s1.get("calibration", {})
+    ts, vs = c.get("two_sided", {}), c.get("all_Vseason", {})
+    band = {k: c[k]["overall"]["est"] for k in ("all_V1.040", "all_V1.060", "all_V1.080")
+            if k in c and c[k].get("overall")}
+    ds = [blk["interaction"]["d_Lxchurn"] for blk in c.values() if blk.get("interaction")]
+    dog = s1.get("dog_roi", {})
+    dog_any = [k for k, v in dog.items() if _excl(v.get("roi"), 0)]
+    hyp = dog.get("0-6 & churn_max>=0.6", {})
+    rv = s1.get("round_variance_vs_churn", {})
+    d_txt = (f"CI includes 0 in all {len(ds)} samples" if not any(_excl(d, 0) for d in ds)
+             else "CI excludes 0 in at least one sample")
+    allr = dog.get("all", {})
+    out["1"] = (
+        f"Calibration slope on the clean two-sided rows: b = {ci(ts.get('overall'), d=2)} "
+        f"(n = {ts.get('n')}, {ts.get('n_events')} events) — {verdict(ts.get('overall'), 1)}. "
+        f"Full sample at measured V: b = {ci(vs.get('overall'), d=2)} (n = {vs.get('n')}) — "
+        f"{verdict(vs.get('overall'), 1)}; across the V = 1.04/1.06/1.08 bands the point estimate moves "
+        f"{min(band.values()):.2f}–{max(band.values()):.2f}, i.e. the assumption about the unseen price "
+        "moves b more than its sampling error does. "
+        f"Churn × price interaction d: {d_txt}. "
+        f"Flat-stake dog ROI at actual odds: {ci(allr.get('roi'), pct=True)} "
+        f"(n = {allr.get('n_bets')} bets) — {verdict(allr.get('roi'))}; "
+        + ("no bucket or churn slice excludes 0. " if not dog_any
+           else f"slices excluding 0: {', '.join(dog_any)}. ")
+        + "The brief's motivating slice (weeks 0–6 with churn_max ≥ 0.6) has the largest point estimate, "
+        f"{ci(hyp.get('roi'), pct=True)} on n = {hyp.get('n_bets')} bets / {hyp.get('n_events')} events, "
+        f"but its CI {'excludes' if _excl(hyp.get('roi'), 0) else 'includes'} 0 and it is one of "
+        f"{len(dog)} slices — a hypothesis to watch on Kickoff 2027 with the live logger, not an edge. "
+        f"Round-differential variance does not rise with churn ({verdict(rv.get('slope_e2_on_churn_max'))}). "
+        + ("**Verdict: no evidence that the market misprices roster churn early in the season.**"
+           if not (dog_any or any(_excl(d, 0) for d in ds))
+           else "**Verdict: some churn/price evidence — see the slices whose CI excludes 0 above.**"))
+    s2 = r.get("step2", {})
+    a = s2.get("lagging_vs_leading", {})
+    out["2"] = (
+        "Teams from the region that is running behind within an international event perform in line "
+        f"with the price: win − p_fair = {ci(a.get('mean_resid_lag'), pct=True)} (n = {a.get('n')}, "
+        f"{a.get('n_events')} events) — {verdict(a.get('mean_resid_lag'))}; betting against them returns "
+        f"{ci(a.get('fade_roi'), pct=True)} on {a.get('n_fade_bets')} bets — {verdict(a.get('fade_roi'))}. "
+        + ("**Verdict: no region-lag effect; the market updates on in-event regional results.** "
+           if not (_excl(a.get("mean_resid_lag"), 0) or _excl(a.get("fade_roi"), 0))
+           else "**Verdict: region-lag effect detected — see the CIs above.** ")
+        + 
+        f"Power is limited ({a.get('n_events')} events): the CI on win − p_fair still allows effects of a "
+        "few percentage points per match either way.")
+    s3 = r.get("step3", {})
+    sig = [t["team"] for k in ("most_volatile", "least_volatile") for t in s3.get(k, [])
+           if t.get("lo") is not None and (t["lo"] > 0 or t["hi"] < 0)]
+    pers = s3.get("persistence", {})
+    out["3"] = (
+        "No evidence that teams differ in round-differential variance beyond chance: permutation "
+        f"p = {s3.get('p_perm_200') or float('nan'):.2f} ({s3.get('n_teams')} teams, {s3.get('n_maps')} maps). "
+        f"Among the 10 listed extremes, {len(sig)} ({', '.join(sig) or 'none'}) have a θ CI excluding 0; "
+        f"with {s3.get('n_teams')} teams each given a 95% interval, ≈{0.05 * (s3.get('n_teams') or 0):.1f} "
+        "would do so by chance alone. Year-to-year ρ: "
+        + ", ".join(f"{k} {v['spearman']:+.2f}" for k, v in pers.items())
+        + (" — no positive persistence"
+           + ("; the CI that excludes 0 is *negative* (teams volatile one year were calmer the next), "
+              "the opposite of a stable team style. " if any(v["hi"] < 0 for v in pers.values()) else ". "))
+        + ("**Verdict: model one league-wide round dispersion; per-team variance parameters would fit noise.**"
+           if (s3.get("p_perm_200") or 0) >= 0.05 and not any(v["lo"] > 0 for v in pers.values())
+           else "**Verdict: some team-level variance signal — see the LR/permutation test and persistence.**"))
+    parts, beats = [], False
+    for Y, f in wf.get("folds", {}).items():
+        ml = f.get("map_level", {})
+        o = next((k for k in f if k.startswith("overround_")), None)
+        tsb = f[o].get("two_sided", {}) if o else {}
+        t = tsb.get("metrics", {})
+        beats |= any((t.get(k) or [0, 0, 0])[2] < 0 for k in ("ll_diff_v2_log5_minus_market",
+                                                              "ll_diff_benter_minus_market"))
+        parts.append(
+            f"test {Y}: map LL legacy {ml.get('legacy_bt', {}).get('log_loss', float('nan')):.3f} → v2 "
+            f"{ml.get('v2_log5', {}).get('log_loss', float('nan')):.3f}; two-sided series "
+            f"ΔLL v2 − market {_fmt3(t.get('ll_diff_v2_log5_minus_market'))}, "
+            f"Benter − market {_fmt3(t.get('ll_diff_benter_minus_market'))} (n = {tsb.get('n_series')})")
+    out["4"] = (
+        "Map level: the legacy half-win-rate model is worse than a coin flip (0.693); the log5 baseline "
+        "fix plus decayed, shrunk rates make it better than one. " + "; ".join(parts) + ". "
+        + ("**Verdict: v2 is a large improvement over legacy but does not beat the Thunderpick close, and "
+           "the Benter blend is not distinguishable from the market alone — the model is not yet a source "
+           "of edge against the close.**" if not beats
+           else "**Verdict: on at least one fold the model or blend beats the close — see the ΔLL CIs.**"))
+    return out
+
+
 def main() -> None:
     r, wf, hwr = j("results.json"), j("walkforward.json"), j("hwr_summary.json")
     con = sqlite3.connect(DB)
@@ -45,6 +144,11 @@ def main() -> None:
     d = r.get("data", {})
     ov = d.get("overround", {})
     V = r.get("step1", {}).get("V_hat")
+    import csv
+    with (ROOT / "cache" / "request_ledger.csv").open() as f:
+        live_vlr = sum(1 for _ in csv.reader(f)) - 1  # header row
+    with (ROOT / "cache" / "wayback_ledger.csv").open() as f:
+        live_wb = sum(1 for _ in csv.reader(f))
     L: list[str] = []
     w = L.append
 
@@ -57,10 +161,15 @@ def main() -> None:
     w("")
     w("## TL;DR")
     w("")
-    w("See the per-section **Findings** lines; the headline caveat is §0.2 — historical vlr pages "
-      "only publish the winner's price, so analyses that need the loser's price either use the "
-      f"{ov.get('n', 0)} matches with archived two-sided pre-match snapshots or are shown as "
-      "overround-sensitivity bands.")
+    FD = findings(r, wf)
+    w("Headline caveat (§0.2): historical vlr pages publish only the winner's price, so analyses that "
+      f"need both prices use the {ov.get('n', 0)} matches with archived two-sided pre-match snapshots, "
+      "or are shown across overround bands. ROI at actual odds is exact on every row.")
+    w("")
+    for sec, title in (("1", "Roster churn"), ("2", "Region lag"), ("3", "Round variance"),
+                       ("4", "Pricing model")):
+        v = FD.get(sec, "")
+        w(f"- **{title}** — " + (v.split("**Verdict: ")[1].split("**")[0] if "**Verdict: " in v else v))
     w("")
 
     # ------------------------------------------------------------------ 0
@@ -84,7 +193,7 @@ def main() -> None:
     w("")
     w("Season split: " + ", ".join(f"{k}: {v}" for k, v in d.get("by_season", {}).items())
       + ". Market source: " + ", ".join(f"{k}: {v}" for k, v in d.get("mkt_src_counts", {}).items())
-      + f". Favourite ambiguous (winner price within 2/1.08–2/1.04, excluded from fav/dog tests): {d.get('fav_ambiguous')}."
+      + f". Favourite ambiguous (winner price within 2/1.09–2/1.04, excluded from fav/dog tests): {d.get('fav_ambiguous')}."
       f" Matches with churn defined for both teams: {d.get('churn_available')}.")
     w("")
     w("Fixes landed in the production scraping path (commit on `research/market-structure`):")
@@ -99,9 +208,14 @@ def main() -> None:
     w("- **Imputed odds flagged**: `moneyline_matches.team{1,2}_odds_imputed`, `imputed_overround`.")
     w("- Per-match `region`, `tier`, `season`, `weeks_since_season_start` (from the season's first "
       "tier-1 match), `is_international`; `lineups` table (match, team, map, 5 vlr player ids).")
-    w("- Scrape: tier-1 VCT 2024–26 + VCT 2023 (churn baseline) + EWC, "
-      f"{q('select count(*) from research_matches')} match pages, every request ≥2.5 s apart and cached "
-      "(`research/cache/request_ledger.csv`). Challengers was **not** scraped (not approved: 3,000+ pages).")
+    w("- Scrape: tier-1 VCT 2024–26 + VCT 2023 (churn baseline) + EWC 2025/2026 main events (EWC 2024 had "
+      f"no VALORANT; EWC event pages also list tier-2 qualifiers, which were filtered out by date). "
+      f"{q('select count(*) from research_matches')} match pages; **{live_vlr:,} live vlr requests in total** "
+      "(match pages + event/hub/search pages) against the ~2,000-page ceiling — 2023 came to 333 pages vs "
+      "the ~250 estimated, and the run was hard-capped at 2,020. Every request ≥2.5 s apart and cached "
+      "(`research/cache/request_ledger.csv`). Challengers was **not** scraped (not approved: 3,000+ pages). "
+      f"Wayback Machine: {live_wb:,} logged archive.org requests plus the initial 40-match probe (CDX index + snapshots, ≥4 s apart; "
+      "`research/cache/wayback_ledger.csv`).")
     w("")
     w("### 0.2 The odds-observability problem")
     w("")
@@ -115,10 +229,25 @@ def main() -> None:
     w(f"2. **Two-sided prices** were recovered from Wayback Machine pre-match snapshots of the same vlr "
       f"pages for n = {ov.get('n', 0)} matches (median {ov.get('median_hours_before') or float('nan'):.1f} h before start). "
       "Calibration/Benter results are reported on this subset first.")
+    xc = con.execute("""select p.odds, o.odds, (select p2.odds from prematch_odds p2 where p2.match_id=p.match_id
+                        and p2.book='thunderpick' and p2.team_id<>p.team_id)
+                        from prematch_odds p join match_odds o on o.match_id=p.match_id and o.team_id=p.team_id
+                        and o.book='thunderpick' where p.book='thunderpick'""").fetchall()
+    xc = [(a, b, c) for a, b, c in xc if c]
+    lr = sorted(abs(math.log(b / a)) for a, b, c in xc)
+    big = sum(1 for a, b, c in xc if abs(math.log(b / c)) < abs(math.log(b / a)) and abs(math.log(b / a)) > 0.5)
+    w(f"   *Check:* where a snapshot and the published winner price both exist (n = {len(xc)}), the "
+      f"snapshot price of the eventual winner is within a median {100 * lr[len(lr) // 2]:.1f}% of its "
+      f"published price; {big} matches disagree by >50% *and* sit nearer the other side's price "
+      "(likely a late line flip or a vlr data error). They are kept — dropping them would filter on "
+      "the outcome.")
     w(f"3. On the full sample, de-vigged probabilities need an assumed overround V. Measured Thunderpick "
       f"overround: median {ov.get('median') or float('nan'):.4f} (p10 {ov.get('p10') or float('nan'):.4f}, "
       f"p90 {ov.get('p90') or float('nan'):.4f}), vs the 1.05 the old code assumed. Full-sample "
-      f"regressions use V̂ = {V:.4f} and are bracketed with V = 1.04 / 1.08. Because the observed side "
+      f"regressions reconstruct winner-only rows with the **per-season measured median** "
+      f"({', '.join(f'{k}: {float(x):.4f}' for k, x in (V or {}).items())}; Thunderpick cut its margin in 2026) "
+      "and are bracketed with the agreed V = 1.04 / 1.06 / 1.08 bands — measured V never falls below 1.067, "
+      "so the 1.04/1.06 rows are deliberately pessimistic about the assumption. Because the observed side "
       "is always the winner, an error in V shifts p_fair *toward or away from the realised outcome*, "
       "so slope estimates on winner-only rows are biased in a V-dependent way — read them as a band.")
     w("")
@@ -158,6 +287,13 @@ def main() -> None:
     w("")
     w("![reliability](figs/s1_reliability_by_bucket.png)")
     w("")
+    w("| Weeks | Sample | mean P(fav) → observed fav win rate (n) per 0.1 bin |")
+    w("|---|---|---|")
+    for b, sets_ in s1.get("reliability", {}).items():
+        for lab, g in sets_.items():
+            w(f"| {b} | {lab} | " + "; ".join(f"{p_:.2f} → {y_:.2f} ({n_})"
+                                             for p_, y_, n_ in zip(g["p"], g["y"], g["n"])) + " |")
+    w("")
     w("### 1.2 Flat-stake underdog ROI at actual (closing) Thunderpick odds — exact")
     w("")
     w("| Slice | bets | events | dog hit rate | ROI per bet [95% CI] | verdict |")
@@ -184,6 +320,9 @@ def main() -> None:
         w(f"| {k} | {v['n']} | {v['var'] or float('nan'):.1f} |")
     w("")
     w("**Challengers repeat:** not run — Challengers pages were not in the approved scrape budget.")
+    w("")
+
+    w("**Findings.** " + FD.get("1", ""))
     w("")
 
     # ------------------------------------------------------------------ 2
@@ -219,6 +358,9 @@ def main() -> None:
         w("![region lag](figs/s2_region_lag_by_gap.png)")
         w("")
 
+    w("**Findings.** " + FD.get("2", ""))
+    w("")
+
     # ------------------------------------------------------------------ 3
     s3 = r.get("step3", {})
     w("## 3. Round-variance heterogeneity")
@@ -252,6 +394,9 @@ def main() -> None:
     w("![persistence](figs/s3_persistence.png)")
     w("")
 
+    w("**Findings.** " + FD.get("3", ""))
+    w("")
+
     # ------------------------------------------------------------------ 4
     w("## 4. Pricing-model fixes (valorant-pricing-model, branch `fix/side-baseline-blend`)")
     w("")
@@ -273,6 +418,21 @@ def main() -> None:
         for k, v in hwr.items():
             w(f"| {k} | `{v['file']}` | {v['cells']} | {100 * v['fallback_share']:.1f}% | {v['median_rounds']} |")
         w("")
+    gr = wf.get("grid", {})
+    if gr:
+        edge = []
+        for Y, f in wf.get("folds", {}).items():
+            ch, gl = f["chosen"], f["grid_train_map_ll"]
+            top = sorted(gl.values())[:5]
+            interior = (str(ch["half_life_days"]) not in (gr["half_lives"][0],)
+                        and ch["k_map"] not in (gr["k_maps"][0], gr["k_maps"][-1]))
+            edge.append(f"{Y}: {'interior' if interior else 'ON A GRID EDGE'}, top-5 train LL within "
+                        f"{top[-1] - top[0]:.4f}")
+        w(f"Tuning grid (train map log loss only): half-life ∈ {{{', '.join(gr['half_lives'])}}} days, "
+          f"k_map ∈ {{{', '.join(f'{k:g}' for k in gr['k_maps'])}}} rounds, k_team = {gr.get('k_team')}. "
+          "The k grid was widened twice after the chosen value sat on its upper edge (≤90, then ≤810); "
+          "selection always used train seasons only. Chosen point — " + "; ".join(edge) + ".")
+        w("")
     for Y, f in wf.get("folds", {}).items():
         w(f"**Walk-forward fold: test season {Y}** (train = earlier seasons, n = {f['train_n_matches']} "
           f"matches; test n = {f['test_n_matches']}). Chosen on train map log loss: half-life "
@@ -291,26 +451,34 @@ def main() -> None:
             w(f"| {k} | {v['n_maps']} | {v['log_loss']:.4f} | {v['brier']:.4f} |")
         w("| coin flip | | 0.6931 | 0.2500 |")
         w("")
-        for orr in [k for k in f if k.startswith("overround_")]:
-            blk = f[orr]
-            bf = blk.get("benter_fit")
-            w(f"Series level, {orr.replace('_', ' = ')} for winner-only rows"
-              + (f"; Benter (train two-sided n={bf['n_train']}): a_model = {bf['a_model']:.2f}, b_market = {bf['b_market']:.2f}" if bf else "; Benter: <30 two-sided train rows")
-              + ":")
+        ors = [k for k in f if k.startswith("overround_")]
+        if ors:
+            bf = f[ors[0]].get("benter_fit")
+            w("Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the "
+              "winner's price is observed, so their *market* score is outcome-biased: it flatters the "
+              "market more the lower V is) — the two-sided row is the clean comparison and does not depend on V. "
+              + (f"Benter blend fit on train-season two-sided rows only (n = {bf['n_train']}): "
+                 f"logit p = {bf['a_model']:.2f}·logit(model) + {bf['b_market']:.2f}·logit(market)."
+                 if bf else "Benter: fewer than 30 two-sided train rows."))
             w("")
-            w("| Subset | series (events) | market LL | v2 model LL | legacy BT LL | Benter LL | v2 − market LL |")
-            w("|---|---|---|---|---|---|---|")
-            for sub in ("two_sided", "winner_only", "all"):
-                b = blk.get(sub)
+            w("| Subset | V | series (events) | market LL / Brier | v2 model LL / Brier | legacy BT LL | Benter LL | v2 − market ΔLL | Benter − market ΔLL |")
+            w("|---|---|---|---|---|---|---|---|---|")
+            rowsets = [("two_sided", ors[0], "—")] + [(sub, o, o.split("_")[1]) for o in ors
+                                                      for sub in ("winner_only", "all")]
+            for sub, o, vlab in rowsets:
+                b = f[o].get(sub)
                 if not b:
                     continue
                 mt = b["metrics"]
                 g = lambda k: f"{mt[k][0]:.4f}" if k in mt else "—"  # noqa: E731
-                dd = mt.get("ll_diff_v2_log5_minus_market")
-                w(f"| {sub} | {b['n_series']} ({b['n_events']}) | {g('ll_market')} | {g('ll_v2_log5')} | "
-                  f"{g('ll_legacy_bt')} | {g('ll_benter')} | "
-                  + (f"{dd[0]:+.4f} [{dd[1]:+.4f}, {dd[2]:+.4f}]" if dd else "—") + " |")
+                dci = lambda k: (f"{mt[k][0]:+.4f} [{mt[k][1]:+.4f}, {mt[k][2]:+.4f}]" if k in mt else "—")  # noqa: E731
+                w(f"| {sub} | {vlab} | {b['n_series']} ({b['n_events']}) | {g('ll_market')} / {g('brier_market')} | "
+                  f"{g('ll_v2_log5')} / {g('brier_v2_log5')} | {g('ll_legacy_bt')} | {g('ll_benter')} | "
+                  f"{dci('ll_diff_v2_log5_minus_market')} | {dci('ll_diff_benter_minus_market')} |")
             w("")
+    w("")
+
+    w("**Findings.** " + FD.get("4", ""))
     w("")
 
     # ------------------------------------------------------------------ 5

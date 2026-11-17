@@ -78,9 +78,20 @@ def phase_index(ids: list[str]) -> dict[str, list[str]]:
     def fetch(pref: str, attempts: int) -> Path:
         fp = WB / f"cdx_{pref}.json"
         if not fp.exists():
-            r = _get(CDX, {"url": f"vlr.gg/{pref}", "matchType": "prefix", "output": "json",
-                           "fl": "timestamp,original", "filter": "statuscode:200"}, attempts)
-            rows = r.json() if r.text.strip() else []
+            rows = None
+            for _ in range(attempts):
+                r = _get(CDX, {"url": f"vlr.gg/{pref}", "matchType": "prefix", "output": "json",
+                               "fl": "timestamp,original", "filter": "statuscode:200"}, attempts)
+                if r.status_code == 200:
+                    try:
+                        rows = r.json() if r.text.strip() else []
+                        break
+                    except ValueError:
+                        pass
+                print(f"  bad response for {pref}: HTTP {r.status_code} {r.text[:80]!r}", flush=True)
+                time.sleep(30)
+            if rows is None:
+                raise RuntimeError(f"no valid CDX response for {pref}")
             fp.write_text(json.dumps(rows[1:] if rows else []))
             print(f"  cdx {pref}: {max(0, len(rows) - 1)} captures", flush=True)
         return fp

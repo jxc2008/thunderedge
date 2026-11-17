@@ -30,6 +30,8 @@ from pathlib import Path
 
 import requests
 
+from research.timeutil import vlr_to_utc
+
 ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "cache" / "hist"
 LEDGER = CACHE / "ledger.csv"
@@ -103,7 +105,7 @@ def vlr_matches(season: int = 2026) -> list[dict]:
             """SELECT m.match_id, m.date_utc, m.team1_id, m.team2_id, m.winner_id, e.slug, m.match_url
                FROM research_matches m JOIN events e USING(event_id) WHERE m.season=? ORDER BY m.date_utc""",
             (season,)):
-        out.append({"match_id": mid, "start": datetime.fromisoformat(date).replace(tzinfo=timezone.utc),
+        out.append({"match_id": mid, "start": vlr_to_utc(date),  # vlr times are ET, not UTC
                     "a": t1, "b": t2, "winner": win, "event": ev, "url": url,
                     "names": {t1: {n for n in names.get(t1, set()) if n}, t2: {n for n in names.get(t2, set()) if n}}})
     return out

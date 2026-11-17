@@ -65,6 +65,12 @@ def _pricing():
     return R, series_p, MapTable, Engine, EngineParams, Team
 
 
+def _vlr(s: str) -> datetime:
+    """research_matches.date_utc is vlr wall-clock ET (see research/timeutil.py) -> aware UTC."""
+    from research.timeutil import vlr_to_utc  # noqa: PLC0415
+    return vlr_to_utc(s)
+
+
 def _dt(s: str) -> datetime:
     s = s.replace("Z", "+00:00").replace(" ", "T")
     d = datetime.fromisoformat(s)
@@ -142,7 +148,7 @@ def churn_bets(season: int, odds: Odds, matches, five, rosters) -> tuple[list[di
     prev_in_season: dict = {}
     bets = []
     for (mid, date, s, t1, t2, win, wk, ev, tier, intl, bo, pool) in matches:
-        T = _dt(date)
+        T = _vlr(date)
         if s == season - 1:
             for t in (t1, t2):
                 if (mid, t) in five:
@@ -246,7 +252,7 @@ def stale_line(season: int, odds: Odds, matches, frozen: dict, pin: dict | None 
         _, date, _, t1, t2, win, _, _, tier, intl, bo, pool = info[mid]
         t0 = _dt(ts0)
         stale = odds.two_sided(mid, t0 - timedelta(minutes=1), t0 + timedelta(minutes=30), trigger="post_result")
-        close = odds.two_sided(mid, None, _dt(date))
+        close = odds.two_sided(mid, None, _vlr(date))
         if stale is None or close is None or win is None:
             continue
         pin_now = pin[mid].at(t0) if mid in pin else None
@@ -256,11 +262,11 @@ def stale_line(season: int, odds: Odds, matches, frozen: dict, pin: dict | None 
             p_ref = _model_prob(R, series_p, table, Engine, Team, pa, D, t1, t2, t0, bo or 3, beta, intl)
             ref_type = "model_a"
         ref_m = info[rid]
-        pin_ref = pin[rid].at(_dt(ref_m[1])) if rid in pin else None
+        pin_ref = pin[rid].at(_vlr(ref_m[1])) if rid in pin else None
         if pin_ref is not None and pin_ref[1]:
             p_pre_ref, surprise_src = pin_ref[0], "pinnacle"
         else:
-            p_pre_ref = _model_prob(R, series_p, table, Engine, Team, pb, D, ref_m[3], ref_m[4], _dt(ref_m[1]),
+            p_pre_ref = _model_prob(R, series_p, table, Engine, Team, pb, D, ref_m[3], ref_m[4], _vlr(ref_m[1]),
                                     ref_m[10] or 3, None, ref_m[9], pool_json=ref_m[11])
             surprise_src = "model_b"
         y_ref = 1.0 if ref_m[5] == ref_m[3] else 0.0
@@ -281,7 +287,8 @@ def _model_prob(R, series_p, table, Engine, Team, params, D, a, b, t_cut: dateti
                 pool_json: str | None = None) -> float:
     """Engine state from every map of matches strictly before t_cut; predict a vs b."""
     from scripts.rebuild_half_win_rates import _days  # noqa: PLC0415  (pricing repo, already on path)
-    cut = _days(t_cut.strftime("%Y-%m-%d %H:%M:%S"))
+    from research.timeutil import utc_to_vlr  # noqa: PLC0415
+    cut = _days(utc_to_vlr(t_cut).strftime("%Y-%m-%d %H:%M:%S"))  # engine runs on vlr's ET clock
     eng = Engine(params)
     last_five: dict = {}
     pools: dict = defaultdict(int)

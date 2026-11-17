@@ -40,6 +40,8 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+from research.timeutil import vlr_to_utc
+
 REPO = Path(__file__).resolve().parent.parent
 DB = REPO / "data" / "odds_snapshots.db"
 VLR = "https://www.vlr.gg"
@@ -228,7 +230,7 @@ def poll(all_tiers: bool = False) -> dict:
         start_known = prev[1]
         if start_known and prev[0] and not forced:
             try:
-                st = datetime.fromisoformat(start_known.replace(" ", "T")).replace(tzinfo=timezone.utc)
+                st = vlr_to_utc(start_known)  # vlr data-utc-ts is ET wall-clock
                 last = datetime.fromisoformat(prev[0])
                 if st - now > timedelta(days=HORIZON_DAYS):
                     continue

@@ -133,7 +133,7 @@ The frozen evaluation is the code at the commits below, committed before any 202
 - `research/prereg_kickoff2027.py` (§3–§6 churn rule, §10 stale-line study, both tiers).
 - `research/fetch_rosters.py` (roster snapshots, §3).
 - `research/odds_logger.py` (post-result trigger, §10).
-- `research/pinnacle.py` and `research/hist_fetch.py` (Pinnacle reference and fixture mapping, §10).
+- `research/pinnacle.py`, `research/hist_fetch.py` and `research/timeutil.py` (Pinnacle reference, fixture mapping, vlr ET→UTC, §10).
 - The rating model used for §10's model (a): `valorant-pricing-model/src/rating/` plus the frozen
   parameters and head-(a) coefficients in `research/out/rating_eval.json`.
 - **Inputs:** `valorant_stats.db` (with the 2027 pages), `odds_snapshots.db`, `roster_snapshots`.
@@ -143,7 +143,7 @@ Results are produced only by these commits. A bug fix is allowed but logged in �
 `fetch_rosters.py` parses a vlr page layout that has not been checked on a 2027 page; the
 one-page validation in its docstring comes first, and any parser fix is logged in §9.
 
-- thunderedge evaluation commit: `f848e079c3afc4e9352694407bb54fb376f2feee`
+- thunderedge evaluation commit: `18381241ff996cef7d12d1e1141a0f71191ae46f`
 - valorant-pricing-model rating-engine commit: `5370dafe19433f787fd1fb0ca37529d9078d4930`
 
 ## 8. What would change the plan
@@ -159,6 +159,7 @@ one-page validation in its docstring comes first, and any parser fix is logged i
 |---|---|---|
 | 2026-11-17 | Added §10 stale-line study and the tier-2 stratum (§2) | User request, before any 2027 match and before any 2027 data exists |
 | 2026-11-17 | §10 redesigned: the reference is Pinnacle's de-vigged price at the snapshot time; model (a) only as a separately reported fallback; surprise from Pinnacle's pre-match price. Code re-frozen (§7) | User request, before any 2027 match and before any 2027 data exists |
+| 2026-11-17 | Bug fix: vlr match times (`research_matches.date_utc`) are US Eastern wall-clock, not UTC. The frozen code now converts them (`research/timeutil.py`) before comparing with logger, roster and OddsPapi times. Without it, the T − 60 min bet, the roster window and the close would all be 4–5 h early. Code re-frozen (§7) | Found in the historical study before any 2027 match; no 2027 data exists |
 
 ## 10. Stale-line study (reference = Pinnacle; amended 2026-11-17)
 

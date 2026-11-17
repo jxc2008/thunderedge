@@ -51,7 +51,11 @@ def parse(html: str, match_url: str) -> dict:
     for a in s.select(".match-header-vs a.match-header-link")[:2]:
         tm = _TEAM_RE.match(a.get("href", ""))
         name = _txt(a.select_one(".wf-title-med")) or _txt(a)
-        teams.append({"id": int(tm[1]) if tm else None, "name": name})
+        # Sponsored names carry the base name in parentheses:
+        # "VISA KRÜ (KRÜ Esports)", "JD Mall JDG Esports (JD Gaming)".
+        pm = re.match(r"^(.*?)\s*\(([^()]+)\)\s*$", name or "")
+        teams.append({"id": int(tm[1]) if tm else None, "name": name,
+                      "alt": pm[2].strip() if pm else None})
     while len(teams) < 2:
         teams.append({"id": None, "name": None})
     out["team1"], out["team2"] = teams
@@ -59,6 +63,12 @@ def parse(html: str, match_url: str) -> dict:
     sc = re.search(r"(\d+)\s*:\s*(\d+)", _txt(s.select_one(".match-header-vs-score .js-spoiler"))
                    or _txt(s.select_one(".match-header-vs-score")))
     out["team1_maps"], out["team2_maps"] = (int(sc[1]), int(sc[2])) if sc else (None, None)
+    # Veto: "NRG ban Split; LOUD ban Ascent; NRG pick Abyss; ...; Lotus remains".
+    # Pre-match map pool (play order) = picks in order, then the remaining decider.
+    veto = " ".join(_txt(n) for n in s.select(".match-header-note"))
+    out["veto_text"] = veto or None
+    pool = re.findall(r"\bpick ([A-Za-z]+)", veto) + re.findall(r"([A-Za-z]+) remains", veto)
+    out["map_pool"] = pool or None
     notes = [_txt(n) for n in s.select(".match-header-vs-note")]
     out["status"] = notes[0].lower() if notes else None
     bo = next((n for n in notes if re.match(r"Bo\d", n)), None)

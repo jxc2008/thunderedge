@@ -36,10 +36,10 @@ _s = requests.Session()
 _s.headers["User-Agent"] = UA
 
 
-def _get(endpoint: str, params: dict | None = None) -> requests.Response:
+def _get(endpoint: str, params: dict | None = None, attempts: int = 6) -> requests.Response:
     global _last
     delay = 60
-    for attempt in range(6):
+    for attempt in range(attempts):
         wait = MIN_INTERVAL - (time.monotonic() - _last)
         if wait > 0:
             time.sleep(wait)
@@ -74,19 +74,37 @@ def phase_index(ids: list[str]) -> dict[str, list[str]]:
     prefixes = sorted({i[:4] for i in ids})
     want = set(ids)
     caps: dict[str, list[str]] = {}
-    for n, p in enumerate(prefixes):
-        fp = WB / f"cdx_{p}.json"
+
+    def fetch(pref: str, attempts: int) -> Path:
+        fp = WB / f"cdx_{pref}.json"
         if not fp.exists():
-            r = _get(CDX, {"url": f"vlr.gg/{p}", "matchType": "prefix", "output": "json",
-                          "fl": "timestamp,original", "filter": "statuscode:200"})
+            r = _get(CDX, {"url": f"vlr.gg/{pref}", "matchType": "prefix", "output": "json",
+                           "fl": "timestamp,original", "filter": "statuscode:200"}, attempts)
             rows = r.json() if r.text.strip() else []
             fp.write_text(json.dumps(rows[1:] if rows else []))
-            print(f"[{n + 1}/{len(prefixes)}] cdx {p}: {max(0, len(rows) - 1)} captures", flush=True)
-        for ts, orig in json.loads(fp.read_text()):
-            path = orig.split("vlr.gg", 1)[-1]
-            mid = path.strip("/").split("/")[0]
-            if mid in want and "?" not in path and "/tab" not in path:
-                caps.setdefault(mid, []).append(ts)
+            print(f"  cdx {pref}: {max(0, len(rows) - 1)} captures", flush=True)
+        return fp
+
+    for n, p in enumerate(prefixes):
+        print(f"[{n + 1}/{len(prefixes)}] prefix {p}", flush=True)
+        files: list[Path] = []
+        try:
+            files = [fetch(p, attempts=2)]
+        except RuntimeError:
+            # very large prefixes 503 on archive.org; split into only the 5-digit sub-prefixes needed
+            subs = sorted({i[:5] for i in ids if i.startswith(p)})
+            print(f"  splitting {p} into {len(subs)} sub-prefixes", flush=True)
+            for sp in subs:
+                try:
+                    files.append(fetch(sp, attempts=4))
+                except RuntimeError:
+                    print(f"  giving up on {sp}", flush=True)
+        for fp in files:
+            for ts, orig in json.loads(fp.read_text()):
+                path = orig.split("vlr.gg", 1)[-1]
+                mid = path.strip("/").split("/")[0]
+                if mid in want and "?" not in path and "/tab" not in path:
+                    caps.setdefault(mid, []).append(ts)
     return {k: sorted(set(vs)) for k, vs in caps.items()}
 
 

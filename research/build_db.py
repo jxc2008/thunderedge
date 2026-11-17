@@ -75,7 +75,7 @@ SCHEMA = """
 DROP TABLE IF EXISTS teams; DROP TABLE IF EXISTS team_aliases; DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS research_matches; DROP TABLE IF EXISTS match_odds;
 DROP TABLE IF EXISTS map_results; DROP TABLE IF EXISTS map_rounds; DROP TABLE IF EXISTS lineups;
-DROP TABLE IF EXISTS player_map_stats_v2;
+DROP TABLE IF EXISTS player_map_stats_v2; DROP TABLE IF EXISTS prematch_odds;
 CREATE TABLE teams(team_id INTEGER PRIMARY KEY, name TEXT, tag TEXT, home_region TEXT);
 CREATE TABLE team_aliases(alias TEXT PRIMARY KEY, team_id INTEGER, source TEXT);
 CREATE TABLE events(event_id INTEGER PRIMARY KEY, slug TEXT, name TEXT, season INTEGER,
@@ -83,7 +83,7 @@ CREATE TABLE events(event_id INTEGER PRIMARY KEY, slug TEXT, name TEXT, season I
 CREATE TABLE research_matches(match_id INTEGER PRIMARY KEY, match_url TEXT UNIQUE, event_id INTEGER,
   date_utc TEXT, best_of INTEGER, team1_id INTEGER, team2_id INTEGER, team1_maps INTEGER,
   team2_maps INTEGER, winner_id INTEGER, season INTEGER, region TEXT, is_international INTEGER,
-  weeks_since_season_start REAL, series_text TEXT);
+  weeks_since_season_start REAL, series_text TEXT, map_pool TEXT, veto_text TEXT);
 CREATE TABLE match_odds(match_id INTEGER, book TEXT, team_id INTEGER, odds REAL,
   observed_side TEXT, PRIMARY KEY(match_id, book, team_id));
 CREATE TABLE map_results(game_id INTEGER PRIMARY KEY, match_id INTEGER, map_num INTEGER,
@@ -95,6 +95,8 @@ CREATE TABLE map_rounds(game_id INTEGER, round_num INTEGER, winner_id INTEGER, w
 CREATE TABLE lineups(match_url TEXT, match_id INTEGER, game_id INTEGER, map_name TEXT,
   team_id INTEGER, p1 INTEGER, p2 INTEGER, p3 INTEGER, p4 INTEGER, p5 INTEGER,
   PRIMARY KEY(game_id, team_id));
+CREATE TABLE prematch_odds(match_id INTEGER, book TEXT, team_id INTEGER, odds REAL,
+  snapshot_ts TEXT, hours_before REAL, PRIMARY KEY(match_id, book, team_id));
 CREATE TABLE player_map_stats_v2(game_id INTEGER, match_id INTEGER, player_id INTEGER,
   player_name TEXT, team_id INTEGER, agent TEXT, rating2 REAL, acs REAL, kills REAL, deaths REAL,
   assists REAL, kast REAL, adr REAL, fb REAL, fd REAL, PRIMARY KEY(game_id, player_id));
@@ -159,8 +161,10 @@ def main() -> None:
         rows.append((eid, d))
         for k in ("team1", "team2"):
             t = d[k]
-            names[t["id"]][t["name"]] += 1
+            names[t["id"]][t.get("alt") or t["name"]] += 1
             aliases.setdefault(t["name"].lower(), (t["id"], "header"))
+            if t.get("alt"):
+                aliases.setdefault(t["alt"].lower(), (t["id"], "header_base_name"))
         # legacy slug-derived names (what populate_database.get_event_matches produced)
         sm = re.match(r"/\d+/([\w-]+)-vs-([\w-]+)", url)
         if sm:
@@ -210,8 +214,9 @@ def main() -> None:
             return None
         n = name.strip().lower()
         for k in ("team1", "team2"):
-            if d[k]["name"] and d[k]["name"].strip().lower() == n:
-                return d[k]["id"]
+            for nm in (d[k]["name"], d[k].get("alt")):
+                if nm and nm.strip().lower() == n:
+                    return d[k]["id"]
         for k in ("team1", "team2"):  # tag fallback (odds widget sometimes shows tag)
             tid = d[k]["id"]
             if tags[tid] and n in {t.lower() for t in tags[tid]}:
@@ -228,10 +233,12 @@ def main() -> None:
             fmt = "%Y-%m-%d %H:%M:%S"
             wk = (datetime.strptime(d["date_utc"], fmt)
                   - datetime.strptime(season_start[e["season"]], fmt)).days / 7.0
-        con.execute("INSERT INTO research_matches VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        con.execute("INSERT INTO research_matches VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (d["match_id"], d["match_url"], eid, d["date_utc"], d["best_of"], t1, t2,
                      d["team1_maps"], d["team2_maps"], win, e["season"], e["region"],
-                     e["is_international"], wk, d["series_text"]))
+                     e["is_international"], wk, d["series_text"],
+                     json.dumps(d.get("map_pool")) if d.get("map_pool") else None,
+                     d.get("veto_text")))
         tp: dict[int, float] = {}
         for o in d["odds"]:
             tid = tid_for_name(d, o["team_name"])
@@ -294,6 +301,22 @@ def main() -> None:
                   t1 if p["team_idx"] == 1 else t2, p["agent"], p["rating2"], p["acs"],
                   p["kills"], p["deaths"], p["assists"], p["kast"], p["adr"], p["fb"], p["fd"])
                  for p in mp["players"] if p["player_id"]])
+    # Wayback pre-match snapshots: two-sided odds (research/wayback_fetch.py)
+    wb = ROOT / "cache" / "wayback" / "prematch_odds.json"
+    by_id = {d["match_id"]: d for _, d in rows}
+    if wb.exists():
+        for mid, o in json.loads(wb.read_text()).items():
+            d = by_id.get(int(mid))
+            if d is None:
+                continue
+            for r in o["rows"]:
+                if r["status"] != "pre" or not r["odds"] or r["odds"] <= 1.01:
+                    continue
+                tid = tid_for_name(d, r["team"])
+                if tid is not None:
+                    con.execute("INSERT OR REPLACE INTO prematch_odds VALUES (?,?,?,?,?,?)",
+                                (int(mid), r["book"], tid, r["odds"], o["snapshot_ts"],
+                                 o["hours_before"]))
     con.commit()
     q = lambda s: con.execute(s).fetchone()[0]  # noqa: E731
     print(f"matches {q('select count(*) from research_matches')} | skipped {dict(skipped)}")
@@ -302,6 +325,8 @@ def main() -> None:
     print(f"odds lines {q('select count(*) from match_odds')} (unmatched {n_odds_unmatched}) | "
           f"moneyline w/ thunderpick {q('select count(*) from moneyline_matches where odds_book is not null')}"
           f" | both sides observed {q('select count(*) from moneyline_matches where odds_book is not null and team1_odds_imputed=0 and team2_odds_imputed=0')}")
+    print("prematch two-sided thunderpick: "
+          f"{q("select count(*) from (select match_id from prematch_odds where book='thunderpick' group by match_id having count(*)=2)")}")
     con.close()
 
 

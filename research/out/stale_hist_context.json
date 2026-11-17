@@ -1,0 +1,11 @@
+{
+ "pairs": 911,
+ "hours_to_next_median": 71.10388888888889,
+ "hours_to_next_p25": 45.06791666666666,
+ "hours_to_next_p75": 139.75180555555556,
+ "share_next_within_24h": 0.13721185510428102,
+ "kalshi_open_at_end": 37,
+ "pinnacle_open_hours_before_start_median": 23.259480555555555,
+ "pinnacle_open_p10": 8.81643388888889,
+ "pinnacle_open_p90": 65.08856600000001
+}

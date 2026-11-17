@@ -57,3 +57,6 @@ __pycache__/
 
 # Setup scripts (optional - remove if you want to keep it)
 # setup-git.ps1
+
+# research odds logger outputs
+data/odds_logger.err

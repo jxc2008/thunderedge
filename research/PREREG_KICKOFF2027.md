@@ -66,6 +66,11 @@ confirm or kill it on data that did not exist when it was chosen.
 - **Stale-line study (§10):** the logger's post-result trigger adds ≈ 1–2 match-page fetches per
   completed match (≈ 100–250 over the window). These count toward the logger's request
   volume, which is a separate decision (`LOGGER_HOSTING.md`).
+- **Pinnacle reference (§10):** OddsPapi, run once after the window with
+  `prereg_kickoff2027.py --fetch-pinnacle`. It needs ≤ 6 billable fixture-window calls plus one
+  non-billable `/historical-odds` call per match involved in a trigger. That is ≈ 100–250
+  calls, hard-capped at 320 under the ledger label `oddspapi_prereg`. Raw OddsPapi data stays in
+  `research/cache/` (gitignored; the terms forbid redistribution).
 - **Tier-2 stratum:** needs the 2026 tier-2 lineups and the 2027 Challengers window pages from
   the tier-2 scrape. Its budget is requested separately (`REPORT_v2.md` §B).
 - The 2026 baseline lineups are already in `data/valorant_stats.db`.
@@ -128,6 +133,7 @@ The frozen evaluation is the code at the commits below, committed before any 202
 - `research/prereg_kickoff2027.py` (§3–§6 churn rule, §10 stale-line study, both tiers).
 - `research/fetch_rosters.py` (roster snapshots, §3).
 - `research/odds_logger.py` (post-result trigger, §10).
+- `research/pinnacle.py` and `research/hist_fetch.py` (Pinnacle reference and fixture mapping, §10).
 - The rating model used for §10's model (a): `valorant-pricing-model/src/rating/` plus the frozen
   parameters and head-(a) coefficients in `research/out/rating_eval.json`.
 - **Inputs:** `valorant_stats.db` (with the 2027 pages), `odds_snapshots.db`, `roster_snapshots`.
@@ -137,7 +143,7 @@ Results are produced only by these commits. A bug fix is allowed but logged in �
 `fetch_rosters.py` parses a vlr page layout that has not been checked on a 2027 page; the
 one-page validation in its docstring comes first, and any parser fix is logged in §9.
 
-- thunderedge evaluation commit: `da4e5357c89cf8d83d3a907f6362fa95c917685b`
+- thunderedge evaluation commit: `f848e079c3afc4e9352694407bb54fb376f2feee`
 - valorant-pricing-model rating-engine commit: `5370dafe19433f787fd1fb0ca37529d9078d4930`
 
 ## 8. What would change the plan
@@ -152,40 +158,48 @@ one-page validation in its docstring comes first, and any parser fix is logged i
 | Date | Change | Reason |
 |---|---|---|
 | 2026-11-17 | Added §10 stale-line study and the tier-2 stratum (§2) | User request, before any 2027 match and before any 2027 data exists |
+| 2026-11-17 | §10 redesigned: the reference is Pinnacle's de-vigged price at the snapshot time; model (a) only as a separately reported fallback; surprise from Pinnacle's pre-match price. Code re-frozen (§7) | User request, before any 2027 match and before any 2027 data exists |
 
-## 10. Stale-line study
+## 10. Stale-line study (reference = Pinnacle; amended 2026-11-17)
 
-**Question:** after a result, are the same teams' *next* lines slow to update? If so, a
-model that updates instantly can bet the stale price and beat the close.
+**Question:** after a result, are the same teams' *next* Thunderpick lines slow to update? The
+reference for the fair price is **Pinnacle**, not our model: Pinnacle is sharp and reprices quickly,
+so it defines fair value at the moment of the snapshot.
 
 1. **Trigger.** The odds logger marks a match completed when it leaves vlr's live list. In the
    same poll it fetches every upcoming match involving either team, and stores those rows with
    `trigger = 'post_result'` and `ref_match` set to the finished match. Detection latency is at
    most one poll (15 min); if Thunderpick moves faster than that, this study cannot see it.
-2. **Stale price.** The first two-sided Thunderpick quote stored by that trigger.
-3. **Signal.** Signal = model (a) − de-vigged stale price for the upcoming match's team 1.
-   Model (a) is the frozen rating engine updated with every completed map up to the trigger
-   time (so it includes the result just in). It uses the frozen head (a) and the current 7-map
-   pool, because the veto is not known yet.
-4. **Paper bet.** If |signal| ≥ 2 percentage points, back the side the signal favours at the
-   stale price, 1 unit flat.
-5. **Close.** The last two-sided Thunderpick quote before the match starts.
+2. **Stale price.** The first two-sided Thunderpick quote stored by that trigger, at time t.
+3. **Reference.** Pinnacle's de-vigged match-winner price standing at t. It comes from OddsPapi
+   `/historical-odds`, fetched after the matches are played (see §4), using the latest Pinnacle
+   record at or before t.
+   - If Pinnacle has no record before t, or its line is suspended at t, the frozen model (a)
+     is the reference instead (rating engine updated through t, head (a), 7-map pool).
+   - **Those fallback rows are reported separately and carry no decision.**
+4. **Signal.** Signal = reference − de-vigged stale Thunderpick price, for the upcoming match's
+   team 1.
+5. **Paper bet.** If |signal| ≥ 2 percentage points, back the side the signal favours at the
+   stale Thunderpick price, 1 unit flat.
+6. **Close.** The last two-sided Thunderpick quote before the match starts.
    CLV = log(stale price / closing price) for the backed side.
-6. **Surprise size.** The size of the surprise in the finished match: |result − model (b)'s
-   pre-match probability| for that match.
-7. **Metrics, per tier.** All use a match-level bootstrap (10,000 resamples):
+7. **Surprise size.** |result − pre-match probability| of the finished match. The pre-match
+   probability is Pinnacle's price standing at that match's start, or model (b)'s if Pinnacle
+   is missing.
+8. **Metrics, per tier and per reference type.** All use a match-level bootstrap (10,000
+   resamples):
    - mean CLV;
    - CLV by surprise bucket (0–0.3, 0.3–0.6, 0.6–1);
    - the OLS slope of CLV on surprise size;
-   - the slope of (close − stale price) on the signal, i.e. whether the market moves where the
-     model says;
+   - the slope of (Thunderpick close − stale price) on the signal;
    - ROI at the stale price (descriptive).
-8. **Success (tier 1)**, at look 1 only, with no interim looks:
+9. **Success (tier 1, Pinnacle-referenced rows only)**, at look 1 only, with no interim looks:
    - **success:** the one-sided 95% lower bound on mean CLV is > 0, and the slope of CLV on
      surprise size is > 0 with its one-sided 95% lower bound > 0;
    - **partial:** CLV > 0 by that bound, and the slope is positive but not established;
    - **not supported:** otherwise.
 
-   Tier 2 is descriptive.
-9. **What "success" licenses:** a follow-up live paper-trading test of a stale-line quoting rule
-   in the pricing repo. Nothing more.
+   Tier 2 and model-(a)-referenced rows are descriptive.
+10. **Kalshi** is studied historically (exploratory, `REPORT_v3.md`), not in this pre-registration.
+11. **What "success" licenses:** a follow-up live paper-trading test of a stale-line rule in the
+   pricing repo. Nothing more.

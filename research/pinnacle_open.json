@@ -1,0 +1,6 @@
+{
+ "enabled": false,
+ "interval_min": 60,
+ "weekly_cap": 180,
+ "note": "Disabled pending user decision on OddsPapi plan (REPORT_v4). Weekly billable cost ~ 10080/interval_min + 7."
+}

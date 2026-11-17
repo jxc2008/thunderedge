@@ -2,12 +2,13 @@
 for logged bug fixes (prereg §9).
 
 Part 1 (§3-§5): early-season churn underdog rule — paper bets, ROI, decision at look 1 / look 2.
-Part 2 (§10):   stale-line study — after each result, the logger snapshots the same teams'
-                upcoming matches (trigger='post_result'). Reference = Pinnacle's de-vigged price at
-                the snapshot time (OddsPapi history); signal = Pinnacle - stale de-vigged Thunderpick
-                price; paper bet the signalled side at the stale price; CLV vs Thunderpick's close.
-                Where Pinnacle is missing or pulled, model (a) is the reference and those rows are
-                reported separately (amendment 2026-11-17, PREREG §9).
+Part 2 (§10):   "stale at open" — when Pinnacle first posts a match (OddsPapi history), compare its
+                de-vigged opening price with the Thunderpick line standing at that moment (odds
+                logger). Paper bet the side Pinnacle favours at the first Thunderpick quote at or
+                after the open; CLV vs Thunderpick's close; how long the stale price stayed up.
+                Tagged post-result stale if Thunderpick had not moved since the teams' last result.
+                Matches Pinnacle never posts fall back to model (a), reported separately.
+                (amendments 2026-11-17, PREREG §9)
 Strata: tier 1 (primary) and tier 2 (separately reported) via events.tier.
 
 Inputs: data/valorant_stats.db (results/lineups, rebuilt with the 2027 pages), data/odds_snapshots.db
@@ -47,7 +48,8 @@ ROSTER_WINDOW = (timedelta(hours=48), timedelta(hours=2))
 MIN_BETS_LOOK1 = 20
 ALPHA = {1: 0.01, 2: 0.04}
 NBOOT = 10_000
-STALE_MIN_SIGNAL = 0.02          # |reference - stale price| needed for a stale-line paper bet
+STALE_MIN_SIGNAL = 0.02          # |reference - standing Thunderpick price| needed for a paper bet
+FALLBACK_LEAD = timedelta(hours=24)  # model (a) reference time when Pinnacle never posts
 PIN_HOST = "oddspapi_prereg"     # ledger label / cap in research/hist_fetch.py
 SURPRISE_BINS = (0.0, 0.3, 0.6, 1.01)
 BOOK = "thunderpick"
@@ -108,6 +110,27 @@ class Odds:
             if len(by_ts[t]) == 2:
                 return t, by_ts[t]
         return None
+
+
+def snapshots(odds: "Odds", mid: int) -> list[tuple[datetime, dict[int, float]]]:
+    """Every two-sided BOOK snapshot of a match, oldest first (any trigger)."""
+    by_ts: dict = defaultdict(dict)
+    for ts, team, o in odds.con.execute(
+            """SELECT ts_utc, team, odds_decimal FROM odds_snapshots WHERE source='vlr' AND match_key=?
+               AND book=? AND status='pre' AND odds_decimal > 1.0""", (f"vlr:{mid}", BOOK)):
+        tid = odds.ids.get((team or "").lower())
+        if tid is not None:
+            by_ts[_dt(ts)][tid] = o
+    return sorted((t, px) for t, px in by_ts.items() if len(px) == 2)
+
+
+def completed_at(odds: "Odds") -> dict[int, datetime]:
+    """vlr match id -> time the logger saw it complete (match_status.completed_ts)."""
+    try:
+        rows = odds.con.execute("SELECT match_key, completed_ts FROM match_status WHERE completed_ts IS NOT NULL")
+    except sqlite3.OperationalError:
+        return {}
+    return {int(k.split(":")[1]): _dt(t) for k, t in rows}
 
 
 def devig(p: dict[int, float], tid: int) -> float:
@@ -216,13 +239,9 @@ def pinnacle_series(season: int, mids: set[int], fetch: bool) -> dict:
     """match_id -> pinnacle.Series for vlr team 1. Network only when ``fetch``; otherwise cache."""
     from research import hist_fetch as H, pinnacle as PN  # noqa: PLC0415
     ms = [m for m in H.vlr_matches(season) if m["match_id"] in mids]
+    fx = H.fixtures(False)  # every cached fixture list (survey + windows), no network
     if fetch:
-        fx = H.fixture_windows([m["start"] for m in ms], PIN_HOST)
-    else:
-        fx = []
-        for fp in H.CACHE.glob("op_fixtures_*.json"):
-            d = json.loads(fp.read_text() or "[]")
-            fx += d if isinstance(d, list) else d.get("data", [])
+        fx += H.fixture_windows([m["start"] for m in ms], PIN_HOST)
     mp = H.map_fixtures(ms, fx)
     out = {}
     for mid, f in mp.items():
@@ -235,50 +254,68 @@ def pinnacle_series(season: int, mids: set[int], fetch: bool) -> dict:
     return out
 
 
-def stale_line(season: int, odds: Odds, matches, frozen: dict, pin: dict | None = None) -> list[dict]:
+def stale_at_open(season: int, odds: Odds, matches, frozen: dict, pin: dict | None = None) -> list[dict]:
     pin = pin or {}
     R, series_p, MapTable, Engine, EngineParams, Team = _pricing()
     D = R.load(str(DB))
     table = MapTable()
-    pa, pb = EngineParams(**frozen["params_a"]), EngineParams(**frozen["params_b"])
+    pa = EngineParams(**frozen["params_a"])
     beta = np.array(frozen["head_a_beta"])
-    info = {m[0]: m for m in matches}
-    trig = _trigger_rows(odds)
+    done_at = completed_at(odds)
+    by_team: dict = defaultdict(list)
+    for m in matches:
+        if m[2] == season:
+            by_team[m[3]].append(m)
+            by_team[m[4]].append(m)
     out = []
-    for key, ref, ts0 in trig:
-        mid, rid = int(key.split(":")[1]), int(ref.split(":")[1])
-        if mid not in info or rid not in info or info[mid][2] != season:
+    for m in matches:
+        mid, date, s_, t1, t2, win, _wk, _ev, tier, intl, bo, _pool = m
+        if s_ != season or win is None:
             continue
-        _, date, _, t1, t2, win, _, _, tier, intl, bo, pool = info[mid]
-        t0 = _dt(ts0)
-        stale = odds.two_sided(mid, t0 - timedelta(minutes=1), t0 + timedelta(minutes=30), trigger="post_result")
-        close = odds.two_sided(mid, None, _vlr(date))
-        if stale is None or close is None or win is None:
+        T = _vlr(date)
+        snaps = [x for x in snapshots(odds, mid) if x[0] < T]
+        if not snaps:
             continue
-        pin_now = pin[mid].at(t0) if mid in pin else None
-        if pin_now is not None and pin_now[1]:
-            p_ref, ref_type = pin_now[0], "pinnacle"
-        else:  # Pinnacle missing or line pulled at t0 -> model (a), reported separately
-            p_ref = _model_prob(R, series_p, table, Engine, Team, pa, D, t1, t2, t0, bo or 3, beta, intl)
+        close = snaps[-1]
+        series = pin.get(mid)
+        t_open = next((t for t, a in zip(series.t, series.active, strict=True) if a), None) if series else None
+        if t_open is not None and t_open < T:
+            p_ref, ref_type = series.at(t_open)[0], "pinnacle"
+        else:  # Pinnacle never posted before the start -> model (a) at T - 24 h, reported separately
+            t_open = T - FALLBACK_LEAD
+            p_ref = _model_prob(R, series_p, table, Engine, Team, pa, D, t1, t2, t_open, bo or 3, beta, intl)
             ref_type = "model_a"
-        ref_m = info[rid]
-        pin_ref = pin[rid].at(_vlr(ref_m[1])) if rid in pin else None
-        if pin_ref is not None and pin_ref[1]:
-            p_pre_ref, surprise_src = pin_ref[0], "pinnacle"
-        else:
-            p_pre_ref = _model_prob(R, series_p, table, Engine, Team, pb, D, ref_m[3], ref_m[4], _vlr(ref_m[1]),
-                                    ref_m[10] or 3, None, ref_m[9], pool_json=ref_m[11])
-            surprise_src = "model_b"
-        y_ref = 1.0 if ref_m[5] == ref_m[3] else 0.0
-        p_stale = devig(stale[1], t1)
-        sig = p_ref - p_stale
-        row = {"match_id": mid, "ref_match": rid, "tier": tier, "ref_type": ref_type, "signal": sig,
-               "p_ref": p_ref, "p_stale": p_stale, "p_close": devig(close[1], t1),
-               "surprise": abs(y_ref - p_pre_ref), "surprise_src": surprise_src, "stale_ts": stale[0].isoformat()}
+        standing = [x for x in snaps if x[0] <= t_open]
+        after = [x for x in snaps if x[0] >= t_open]
+        if not standing or not after:
+            continue  # Thunderpick line not up before the open, or no quote after it
+        st_t, st_px = standing[-1]
+        bet_t, bet_px = after[0]
+        sig = p_ref - devig(st_px, t1)
+        # how long the standing price stayed up after the open (censored at the start)
+        changed = next((t for t, px in after if px != st_px), None)
+        stale_min = ((changed or T) - t_open).total_seconds() / 60
+        # post-result tag: was the standing price unchanged since the teams' last completed result?
+        prev = [x for x in by_team[t1] + by_team[t2] if x[0] != mid and x[0] in done_at and done_at[x[0]] < t_open]
+        tag = "no_result_time"
+        if prev:
+            res_t = max(done_at[x[0]] for x in prev)
+            since = [x for x in snaps if x[0] >= res_t and x[0] <= t_open]
+            if not [x for x in snaps if x[0] < res_t]:
+                tag = "posted_after_result"
+            elif since and all(px == st_px for _, px in since) and since[0][1] == st_px:
+                tag = "post_result_stale"
+            else:
+                tag = "moved_since_result"
+        row = {"match_id": mid, "tier": tier, "ref_type": ref_type, "tag": tag, "signal": sig, "p_ref": p_ref,
+               "p_standing": devig(st_px, t1), "open_ts": t_open.isoformat(), "standing_ts": st_t.isoformat(),
+               "bet_ts": bet_t.isoformat(), "bet_lag_min": (bet_t - t_open).total_seconds() / 60,
+               "stale_minutes": stale_min, "stale_censored": changed is None,
+               "standing_still_available_at_bet": bet_px == st_px}
         if abs(sig) >= STALE_MIN_SIGNAL:
             side = t1 if sig > 0 else t2
-            row.update(side=side, clv=math.log(stale[1][side] / close[1][side]),
-                       pnl=(stale[1][side] - 1) if win == side else -1.0)
+            row.update(side=side, clv=math.log(bet_px[side] / close[1][side]),
+                       pnl=(bet_px[side] - 1) if win == side else -1.0)
         out.append(row)
     return out
 
@@ -346,38 +383,45 @@ def summarize(bets: list[dict], stale: list[dict], excl: dict, look: int) -> dic
             blk["decision"] = "descriptive stratum (no decision)"
         res[f"churn_rule_tier{tier}"] = blk
         for ref_type in ("pinnacle", "model_a"):
-            res[f"stale_line_tier{tier}_{ref_type}"] = _stale_block(
+            res[f"stale_at_open_tier{tier}_{ref_type}"] = _stale_block(
                 [x for x in stale if x["tier"] == tier and x["ref_type"] == ref_type],
                 decide=(tier == 1 and ref_type == "pinnacle"))
     return res
 
 
 def _stale_block(rows: list[dict], decide: bool) -> dict:
-    if True:
-        s = [x for x in rows if "clv" in x]
-        clv = np.array([x["clv"] for x in s])
-        sur = np.array([x["surprise"] for x in s])
-        sblk = {"n_snapshots": len(rows), "n_bets": len(s), "clv": _boot_mean(clv, 0.05),
-                "roi_at_stale_price": _boot_mean(np.array([x["pnl"] for x in s]), 0.05)}
-        if len(s) >= 10 and np.std(sur) > 0:
-            rng = np.random.default_rng(1)
-            slope = float(np.polyfit(sur, clv, 1)[0])
-            bs = []
-            for _ in range(NBOOT // 5):
-                i = rng.integers(0, len(s), len(s))
-                if np.std(sur[i]) > 0:
-                    bs.append(np.polyfit(sur[i], clv[i], 1)[0])
-            sblk["slope_clv_on_surprise"] = {"est": slope, "lower_one_sided": float(np.quantile(bs, 0.05))}
-            sblk["by_surprise"] = {f"{lo}-{hi}": _boot_mean(clv[(sur >= lo) & (sur < hi)], 0.05)
-                                   for lo, hi in zip(SURPRISE_BINS[:-1], SURPRISE_BINS[1:], strict=True)}
-            mv = np.array([x["p_close"] - x["p_stale"] for x in rows])
-            sg = np.array([x["signal"] for x in rows])
-            sblk["move_on_signal_slope"] = float(np.polyfit(sg, mv, 1)[0]) if len(sg) > 2 and np.std(sg) > 0 else None
-            ok = sblk["clv"]["lower_one_sided"] > 0 and sblk["slope_clv_on_surprise"]["est"] > 0
-            sblk["decision"] = (("success" if ok and sblk["slope_clv_on_surprise"]["lower_one_sided"] > 0
-                                 else "partial (CLV > 0, slope not established)" if ok
-                                 else "not supported") if decide else "descriptive (no decision)")
-        return sblk
+    bets = [x for x in rows if "clv" in x]
+    blk = {"n_matches": len(rows), "n_bets": len(bets),
+           "clv": _boot_mean(np.array([x["clv"] for x in bets]), 0.05),
+           "roi_at_bet_price": _boot_mean(np.array([x["pnl"] for x in bets]), 0.05),
+           "by_tag": {t: {"n_bets": sum(1 for x in bets if x["tag"] == t),
+                          "clv": _boot_mean(np.array([x["clv"] for x in bets if x["tag"] == t]), 0.05)}
+                      for t in ("post_result_stale", "moved_since_result", "posted_after_result", "no_result_time")},
+           "stale_minutes_after_open": {
+               "median_km": _km([x["stale_minutes"] for x in rows], [not x["stale_censored"] for x in rows], .5),
+               "p25_km": _km([x["stale_minutes"] for x in rows], [not x["stale_censored"] for x in rows], .25),
+               "p75_km": _km([x["stale_minutes"] for x in rows], [not x["stale_censored"] for x in rows], .75),
+               "share_never_moved_before_start": float(np.mean([x["stale_censored"] for x in rows])) if rows else None},
+           "share_standing_price_still_available_at_bet": float(np.mean([x["standing_still_available_at_bet"]
+                                                                         for x in rows])) if rows else None}
+    if decide:
+        c = blk["clv"]
+        blk["decision"] = ("success" if c.get("n", 0) >= 10 and c["lower_one_sided"] > 0 else
+                           "not supported" if c.get("n", 0) >= 10 else "too few bets (< 10)")
+    else:
+        blk["decision"] = "descriptive (no decision)"
+    return blk
+
+
+def _km(times: list[float], events: list[bool], q: float) -> float | None:
+    order = sorted(zip(times, events, strict=True))
+    n, surv = len(order), 1.0
+    for i, (t, e) in enumerate(order):
+        if e:
+            surv *= 1 - 1 / (n - i)
+            if 1 - surv >= q:
+                return float(t)
+    return None
 
 
 def main() -> None:
@@ -393,7 +437,7 @@ def main() -> None:
     _, name_to_id, matches, five, rosters = load(Path(a.db), a.season)
     odds = Odds(Path(a.snap), name_to_id)
     seasons = (a.season,) if a.look == 1 else (a.season - 1, a.season)
-    trig_ids = {int(x.split(":")[1]) for k, r, _ in _trigger_rows(odds) for x in (k, r)}
+    trig_ids = {m[0] for m in matches if m[2] in seasons}
     if a.fetch_pinnacle:
         for s in seasons:
             pinnacle_series(s, trig_ids, fetch=True)
@@ -405,7 +449,7 @@ def main() -> None:
         bets += b
         for k, v in e.items():
             excl[k] = excl.get(k, 0) + v
-        stale += stale_line(s, odds, matches, frozen, pinnacle_series(s, trig_ids, fetch=False))
+        stale += stale_at_open(s, odds, matches, frozen, pinnacle_series(s, trig_ids, fetch=False))
     res = summarize(bets, stale, excl, a.look)
     Path(a.out).write_text(json.dumps({"summary": res, "bets": bets, "stale": stale}, indent=1, default=str))
     print(json.dumps(res, indent=1, default=str))

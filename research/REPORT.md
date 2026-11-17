@@ -1,6 +1,6 @@
 # Valorant market-structure research report
 
-_Generated 2026-11-17 07:58 UTC by `research/make_report.py` from `research/out/*.json`. Every estimate: point [95% CI], CIs from 2,000 bootstrap resamples of **events** (clusters); n is stated beside each number. Nothing was tuned on test data — the only tuned quantities (half-life, shrinkage k, Benter weights) are fit on earlier seasons only._
+_Generated 2026-11-17 08:22 UTC by `research/make_report.py` from `research/out/*.json`. Every estimate: point [95% CI], CIs from 2,000 bootstrap resamples of **events** (clusters); n is stated beside each number. Nothing was tuned on test data — the only tuned quantities (half-life, shrinkage k, Benter weights) are fit on earlier seasons only._
 
 ## TL;DR
 
@@ -186,6 +186,8 @@ Year-to-year persistence of θ (teams with ≥20 maps in both seasons):
 | before | `data/half_win_rates.json` | 504 | 56.2% | 13.0 |
 | after | `data/half_win_rates_v2.json` | 1498 | 28.4% | 64.0 |
 
+Per map, P(A wins) is the production DP averaged over A starting on attack and on defence. *Correction (2026-11-17):* the first version of this table pinned team A to start on attack: `_within_map_p_a_wins` takes the starting side from `MatchState.map_side_orients`, not from its `starting_side` argument, and the evaluation helper only set the argument. This shifted every map prediction by the map's league attack edge (up to ±2¢). The numbers below are from the fixed run. Production code was not changed, but that argument is a trap worth removing.
+
 Tuning grid (train map log loss only): half-life ∈ {60.0, 120.0, 240.0, inf} days, k_map ∈ {90, 270, 810, 2430, 7290} rounds, k_team = 150.0. The k grid was widened twice after the chosen value sat on its upper edge (≤90, then ≤810); selection always used train seasons only. Chosen point — 2025: interior, top-5 train LL within 0.0004; 2026: interior, top-5 train LL within 0.0004.
 
 **Walk-forward fold: test season 2025** (train = earlier seasons, n = 748 matches; test n = 517). Chosen on train map log loss: half-life 120.0 d, k_map 810.0.
@@ -197,22 +199,22 @@ Tuning grid (train map log loss only): half-life ∈ {60.0, 120.0, 240.0, inf} d
 
 | Map-level model | maps | log loss | Brier |
 |---|---|---|---|
-| legacy_bt | 1319 | 0.7429 | 0.2680 |
-| legacy_log5 | 1319 | 0.7416 | 0.2675 |
-| v2_log5 | 1319 | 0.6751 | 0.2412 |
+| legacy_bt | 1319 | 0.7362 | 0.2656 |
+| legacy_log5 | 1319 | 0.7371 | 0.2659 |
+| v2_log5 | 1319 | 0.6748 | 0.2410 |
 | coin flip | | 0.6931 | 0.2500 |
 
-Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the winner's price is observed, so their *market* score is outcome-biased: it flatters the market more the lower V is) — the two-sided row is the clean comparison and does not depend on V. Benter blend fit on train-season two-sided rows only (n = 141): logit p = 1.27·logit(model) + 0.32·logit(market).
+Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the winner's price is observed, so their *market* score is outcome-biased: it flatters the market more the lower V is) — the two-sided row is the clean comparison and does not depend on V. Benter blend fit on train-season two-sided rows only (n = 141): logit p = 1.19·logit(model) + 0.36·logit(market).
 
 | Subset | V | series (events) | market LL / Brier | v2 model LL / Brier | legacy BT LL | Benter LL | v2 − market ΔLL | Benter − market ΔLL |
 |---|---|---|---|---|---|---|---|---|
-| two_sided | — | 229 (16) | 0.6389 / 0.2232 | 0.6608 / 0.2343 | 0.6931 | 0.6563 | +0.0219 [-0.0173, +0.0568] | +0.0174 [-0.0162, +0.0518] |
-| winner_only | 1.04 | 247 (16) | 0.5792 / 0.2000 | 0.6354 / 0.2226 | 0.6725 | 0.6039 | +0.0562 [+0.0318, +0.0781] | +0.0247 [+0.0123, +0.0357] |
-| all | 1.04 | 476 (16) | 0.6079 / 0.2112 | 0.6476 / 0.2282 | 0.6824 | 0.6291 | +0.0397 [+0.0159, +0.0603] | +0.0212 [+0.0032, +0.0386] |
-| winner_only | 1.06 | 247 (16) | 0.5983 / 0.2080 | 0.6354 / 0.2226 | 0.6725 | 0.6105 | +0.0371 [+0.0127, +0.0591] | +0.0122 [-0.0001, +0.0233] |
-| all | 1.06 | 476 (16) | 0.6178 / 0.2153 | 0.6476 / 0.2282 | 0.6824 | 0.6325 | +0.0298 [+0.0064, +0.0503] | +0.0147 [-0.0033, +0.0325] |
-| winner_only | 1.08 | 247 (16) | 0.6170 / 0.2160 | 0.6354 / 0.2226 | 0.6725 | 0.6168 | +0.0184 [-0.0060, +0.0404] | -0.0002 [-0.0125, +0.0109] |
-| all | 1.08 | 476 (16) | 0.6275 / 0.2195 | 0.6476 / 0.2282 | 0.6824 | 0.6358 | +0.0201 [-0.0027, +0.0406] | +0.0083 [-0.0098, +0.0263] |
+| two_sided | — | 229 (16) | 0.6389 / 0.2232 | 0.6597 / 0.2337 | 0.6897 | 0.6522 | +0.0208 [-0.0195, +0.0566] | +0.0133 [-0.0182, +0.0469] |
+| winner_only | 1.04 | 247 (16) | 0.5792 / 0.2000 | 0.6385 / 0.2241 | 0.6725 | 0.6046 | +0.0592 [+0.0366, +0.0801] | +0.0254 [+0.0139, +0.0353] |
+| all | 1.04 | 476 (16) | 0.6079 / 0.2112 | 0.6487 / 0.2287 | 0.6808 | 0.6275 | +0.0407 [+0.0166, +0.0609] | +0.0196 [+0.0025, +0.0358] |
+| winner_only | 1.06 | 247 (16) | 0.5983 / 0.2080 | 0.6385 / 0.2241 | 0.6725 | 0.6120 | +0.0402 [+0.0176, +0.0611] | +0.0137 [+0.0021, +0.0238] |
+| all | 1.06 | 476 (16) | 0.6178 / 0.2153 | 0.6487 / 0.2287 | 0.6808 | 0.6313 | +0.0309 [+0.0073, +0.0514] | +0.0135 [-0.0038, +0.0301] |
+| winner_only | 1.08 | 247 (16) | 0.6170 / 0.2160 | 0.6385 / 0.2241 | 0.6725 | 0.6191 | +0.0215 [-0.0011, +0.0424] | +0.0021 [-0.0094, +0.0121] |
+| all | 1.08 | 476 (16) | 0.6275 / 0.2195 | 0.6487 / 0.2287 | 0.6808 | 0.6350 | +0.0212 [-0.0023, +0.0414] | +0.0075 [-0.0098, +0.0241] |
 
 **Walk-forward fold: test season 2026** (train = earlier seasons, n = 1265 matches; test n = 650). Chosen on train map log loss: half-life 240.0 d, k_map 810.0.
 
@@ -223,29 +225,29 @@ Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the wi
 
 | Map-level model | maps | log loss | Brier |
 |---|---|---|---|
-| legacy_bt | 1664 | 0.7478 | 0.2708 |
-| legacy_log5 | 1664 | 0.7466 | 0.2703 |
-| v2_log5 | 1664 | 0.6831 | 0.2450 |
+| legacy_bt | 1664 | 0.7445 | 0.2696 |
+| legacy_log5 | 1664 | 0.7449 | 0.2698 |
+| v2_log5 | 1664 | 0.6819 | 0.2444 |
 | coin flip | | 0.6931 | 0.2500 |
 
-Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the winner's price is observed, so their *market* score is outcome-biased: it flatters the market more the lower V is) — the two-sided row is the clean comparison and does not depend on V. Benter blend fit on train-season two-sided rows only (n = 370): logit p = 0.45·logit(model) + 0.59·logit(market).
+Series P(win) vs the de-vigged close. Winner-only rows need an assumed V (the winner's price is observed, so their *market* score is outcome-biased: it flatters the market more the lower V is) — the two-sided row is the clean comparison and does not depend on V. Benter blend fit on train-season two-sided rows only (n = 370): logit p = 0.45·logit(model) + 0.60·logit(market).
 
 | Subset | V | series (events) | market LL / Brier | v2 model LL / Brier | legacy BT LL | Benter LL | v2 − market ΔLL | Benter − market ΔLL |
 |---|---|---|---|---|---|---|---|---|
-| two_sided | — | 110 (16) | 0.6715 / 0.2398 | 0.6888 / 0.2470 | 0.7290 | 0.6738 | +0.0174 [-0.0289, +0.0686] | +0.0024 [-0.0159, +0.0237] |
-| winner_only | 1.04 | 461 (16) | 0.5999 / 0.2063 | 0.6556 / 0.2317 | 0.6791 | 0.6149 | +0.0557 [+0.0332, +0.0777] | +0.0150 [+0.0058, +0.0237] |
-| all | 1.04 | 571 (16) | 0.6137 / 0.2128 | 0.6620 / 0.2346 | 0.6887 | 0.6263 | +0.0483 [+0.0293, +0.0680] | +0.0126 [+0.0044, +0.0207] |
-| winner_only | 1.06 | 461 (16) | 0.6189 / 0.2148 | 0.6556 / 0.2317 | 0.6791 | 0.6269 | +0.0366 [+0.0142, +0.0586] | +0.0079 [-0.0014, +0.0167] |
-| all | 1.06 | 571 (16) | 0.6290 / 0.2196 | 0.6620 / 0.2346 | 0.6887 | 0.6359 | +0.0329 [+0.0139, +0.0529] | +0.0069 [-0.0014, +0.0152] |
-| winner_only | 1.08 | 461 (16) | 0.6376 / 0.2232 | 0.6556 / 0.2317 | 0.6791 | 0.6384 | +0.0180 [-0.0045, +0.0399] | +0.0008 [-0.0085, +0.0097] |
-| all | 1.08 | 571 (16) | 0.6441 / 0.2264 | 0.6620 / 0.2346 | 0.6887 | 0.6452 | +0.0178 [-0.0014, +0.0384] | +0.0011 [-0.0073, +0.0096] |
+| two_sided | — | 110 (16) | 0.6715 / 0.2398 | 0.6880 / 0.2466 | 0.7223 | 0.6739 | +0.0165 [-0.0258, +0.0655] | +0.0024 [-0.0146, +0.0223] |
+| winner_only | 1.04 | 461 (16) | 0.5999 / 0.2063 | 0.6558 / 0.2318 | 0.6778 | 0.6149 | +0.0559 [+0.0336, +0.0782] | +0.0150 [+0.0059, +0.0236] |
+| all | 1.04 | 571 (16) | 0.6137 / 0.2128 | 0.6620 / 0.2347 | 0.6864 | 0.6263 | +0.0483 [+0.0292, +0.0677] | +0.0126 [+0.0042, +0.0205] |
+| winner_only | 1.06 | 461 (16) | 0.6189 / 0.2148 | 0.6558 / 0.2318 | 0.6778 | 0.6269 | +0.0368 [+0.0145, +0.0592] | +0.0080 [-0.0012, +0.0167] |
+| all | 1.06 | 571 (16) | 0.6290 / 0.2196 | 0.6620 / 0.2347 | 0.6864 | 0.6360 | +0.0329 [+0.0142, +0.0524] | +0.0069 [-0.0015, +0.0150] |
+| winner_only | 1.08 | 461 (16) | 0.6376 / 0.2232 | 0.6558 / 0.2318 | 0.6778 | 0.6385 | +0.0181 [-0.0042, +0.0405] | +0.0009 [-0.0084, +0.0098] |
+| all | 1.08 | 571 (16) | 0.6441 / 0.2264 | 0.6620 / 0.2347 | 0.6864 | 0.6453 | +0.0178 [-0.0014, +0.0376] | +0.0012 [-0.0072, +0.0094] |
 
 
-**Findings.** Map level: the legacy half-win-rate model is worse than a coin flip (0.693); the log5 baseline fix plus decayed, shrunk rates make it better than one. test 2025: map LL legacy 0.743 → v2 0.675; two-sided series ΔLL v2 − market +0.0219 [-0.0173, +0.0568], Benter − market +0.0174 [-0.0162, +0.0518] (n = 229); test 2026: map LL legacy 0.748 → v2 0.683; two-sided series ΔLL v2 − market +0.0174 [-0.0289, +0.0686], Benter − market +0.0024 [-0.0159, +0.0237] (n = 110). **Verdict: v2 is a large improvement over legacy but does not beat the Thunderpick close, and the Benter blend is not distinguishable from the market alone — the model is not yet a source of edge against the close.**
+**Findings.** Map level: the legacy half-win-rate model is worse than a coin flip (0.693); the log5 baseline fix plus decayed, shrunk rates make it better than one. test 2025: map LL legacy 0.736 → v2 0.675; two-sided series ΔLL v2 − market +0.0208 [-0.0195, +0.0566], Benter − market +0.0133 [-0.0182, +0.0469] (n = 229); test 2026: map LL legacy 0.744 → v2 0.682; two-sided series ΔLL v2 − market +0.0165 [-0.0258, +0.0655], Benter − market +0.0024 [-0.0146, +0.0223] (n = 110). **Verdict: v2 is a large improvement over legacy but does not beat the Thunderpick close, and the Benter blend is not distinguishable from the market alone — the model is not yet a source of edge against the close.**
 
 ## 5. Odds snapshot logger
 
-Running as Windows scheduled task **ThunderedgeOddsLogger** every 15 min (`research/odds_logger.py`): 26 polls so far (2026-11-17T02:14:44+00:00 → 2026-11-17T07:53:01+00:00). Rows: kalshi: 2426 rows / 48 markets.
+Running as Windows scheduled task **ThunderedgeOddsLogger** every 15 min (`research/odds_logger.py`): 27 polls so far (2026-11-17T02:14:44+00:00 → 2026-11-17T08:08:01+00:00). Rows: kalshi: 2510 rows / 48 markets.
 
 - vlr.gg `/matches` (≤3 pages) every poll; a match page every poll inside 48 h of start, else ≤ every 2 h within 7 days; ≥2.5 s between requests; raw widget HTML stored so parsing can be redone. Default filter = VCT tier-1 (`--all-tiers` for everything).
 - Kalshi public market data (`KXVALORANTGAME`, `KXVALORANTMAP`): yes bid/ask, sizes, last, volume.

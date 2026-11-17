@@ -428,6 +428,13 @@ def main() -> None:
                         and ch["k_map"] not in (gr["k_maps"][0], gr["k_maps"][-1]))
             edge.append(f"{Y}: {'interior' if interior else 'ON A GRID EDGE'}, top-5 train LL within "
                         f"{top[-1] - top[0]:.4f}")
+        w("Per map, P(A wins) is the production DP averaged over A starting on attack and on defence. "
+          "*Correction (2026-11-17):* the first version of this table pinned team A to start on attack: "
+          "`_within_map_p_a_wins` takes the starting side from `MatchState.map_side_orients`, not from "
+          "its `starting_side` argument, and the evaluation helper only set the argument. This shifted "
+          "every map prediction by the map's league attack edge (up to ±2¢). The numbers below are from the fixed run. "
+          "Production code was not changed, but that argument is a trap worth removing.")
+        w("")
         w(f"Tuning grid (train map log loss only): half-life ∈ {{{', '.join(gr['half_lives'])}}} days, "
           f"k_map ∈ {{{', '.join(f'{k:g}' for k in gr['k_maps'])}}} rounds, k_team = {gr.get('k_team')}. "
           "The k grid was widened twice after the chosen value sat on its upper edge (≤90, then ≤810); "

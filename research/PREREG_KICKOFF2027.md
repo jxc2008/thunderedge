@@ -68,9 +68,14 @@ confirm or kill it on data that did not exist when it was chosen.
   volume, which is a separate decision (`LOGGER_HOSTING.md`).
 - **Pinnacle reference (§10):** OddsPapi, run once after the window with
   `prereg_kickoff2027.py --fetch-pinnacle`. It needs ≤ 6 billable fixture-window calls plus one
-  non-billable `/historical-odds` call per match involved in a trigger. That is ≈ 100–250
-  calls, hard-capped at 320 under the ledger label `oddspapi_prereg`. Raw OddsPapi data stays in
-  `research/cache/` (gitignored; the terms forbid redistribution).
+  non-billable `/historical-odds` call per match in the window (≈ 120–300 calls), hard-capped
+  at 320 under `oddspapi_prereg`. Raw OddsPapi data stays in `research/cache/` (gitignored; the
+  terms forbid redistribution).
+- **Optional live Pinnacle-open poll** (`research/pinnacle_open_poll.py`). It snapshots
+  Thunderpick the moment the poll sees Pinnacle open. It is **disabled** unless the user enables it
+  (OddsPapi cost ≈ 10,080 / interval_min + 7 billable calls per in-season week; the free plan is
+  250/month). §10 does not depend on it: when its snapshots exist they are simply the earliest
+  Thunderpick quotes after t_open.
 - **Tier-2 stratum:** needs the 2026 tier-2 lineups and the 2027 Challengers window pages from
   the tier-2 scrape. Its budget is requested separately (`REPORT_v2.md` §B).
 - The 2026 baseline lineups are already in `data/valorant_stats.db`.
@@ -132,7 +137,7 @@ The frozen evaluation is the code at the commits below, committed before any 202
 
 - `research/prereg_kickoff2027.py` (§3–§6 churn rule, §10 stale-line study, both tiers).
 - `research/fetch_rosters.py` (roster snapshots, §3).
-- `research/odds_logger.py` (post-result trigger, §10).
+- `research/odds_logger.py` (post-result trigger) and `research/pinnacle_open_poll.py` (optional live Pinnacle-open snapshots), §10.
 - `research/pinnacle.py`, `research/hist_fetch.py` and `research/timeutil.py` (Pinnacle reference, fixture mapping, vlr ET→UTC, §10).
 - The rating model used for §10's model (a): `valorant-pricing-model/src/rating/` plus the frozen
   parameters and head-(a) coefficients in `research/out/rating_eval.json`.
@@ -143,7 +148,7 @@ Results are produced only by these commits. A bug fix is allowed but logged in �
 `fetch_rosters.py` parses a vlr page layout that has not been checked on a 2027 page; the
 one-page validation in its docstring comes first, and any parser fix is logged in §9.
 
-- thunderedge evaluation commit: `18381241ff996cef7d12d1e1141a0f71191ae46f`
+- thunderedge evaluation commit: `034b62fceb7fb5259c7dde18c4e5a217f798900b`
 - valorant-pricing-model rating-engine commit: `5370dafe19433f787fd1fb0ca37529d9078d4930`
 
 ## 8. What would change the plan
@@ -160,47 +165,48 @@ one-page validation in its docstring comes first, and any parser fix is logged i
 | 2026-11-17 | Added §10 stale-line study and the tier-2 stratum (§2) | User request, before any 2027 match and before any 2027 data exists |
 | 2026-11-17 | §10 redesigned: the reference is Pinnacle's de-vigged price at the snapshot time; model (a) only as a separately reported fallback; surprise from Pinnacle's pre-match price. Code re-frozen (§7) | User request, before any 2027 match and before any 2027 data exists |
 | 2026-11-17 | Bug fix: vlr match times (`research_matches.date_utc`) are US Eastern wall-clock, not UTC. The frozen code now converts them (`research/timeutil.py`) before comparing with logger, roster and OddsPapi times. Without it, the T − 60 min bet, the roster window and the close would all be 4–5 h early. Code re-frozen (§7) | Found in the historical study before any 2027 match; no 2027 data exists |
+| 2026-11-17 | §10 replaced by "stale at open": Pinnacle's first posted price vs the standing Thunderpick line; CLV vs the Thunderpick close; stale duration; post-result-stale tag; success = CLV lower bound > 0 with ≥ 10 bets. Code re-frozen (§7) | User decision on REPORT_v3, before any 2027 match and before any 2027 data exists |
 
-## 10. Stale-line study (reference = Pinnacle; amended 2026-11-17)
+## 10. Stale at open (reference = Pinnacle; amended 2026-11-17, round 4)
 
-**Question:** after a result, are the same teams' *next* Thunderpick lines slow to update? The
-reference for the fair price is **Pinnacle**, not our model: Pinnacle is sharp and reprices quickly,
-so it defines fair value at the moment of the snapshot.
+**Question:** when Pinnacle first posts a match, is the Thunderpick line already standing stale?
+In particular, has it been left unchanged since the teams' last result? Background: in 2026,
+Pinnacle's next-match line did not exist yet when 95% of results landed (REPORT_v3 §5). A rough
+2026 look at Wayback snapshots found a closing-line value of +6.2% [+1.0, +13.4] on 38 bets
+(REPORT_v4, exploratory).
 
-1. **Trigger.** The odds logger marks a match completed when it leaves vlr's live list. In the
-   same poll it fetches every upcoming match involving either team, and stores those rows with
-   `trigger = 'post_result'` and `ref_match` set to the finished match. Detection latency is at
-   most one poll (15 min); if Thunderpick moves faster than that, this study cannot see it.
-2. **Stale price.** The first two-sided Thunderpick quote stored by that trigger, at time t.
-3. **Reference.** Pinnacle's de-vigged match-winner price standing at t. It comes from OddsPapi
-   `/historical-odds`, fetched after the matches are played (see §4), using the latest Pinnacle
-   record at or before t.
-   - If Pinnacle has no record before t, or its line is suspended at t, the frozen model (a)
-     is the reference instead (rating engine updated through t, head (a), 7-map pool).
-   - **Those fallback rows are reported separately and carry no decision.**
-4. **Signal.** Signal = reference − de-vigged stale Thunderpick price, for the upcoming match's
-   team 1.
-5. **Paper bet.** If |signal| ≥ 2 percentage points, back the side the signal favours at the
-   stale Thunderpick price, 1 unit flat.
-6. **Close.** The last two-sided Thunderpick quote before the match starts.
-   CLV = log(stale price / closing price) for the backed side.
-7. **Surprise size.** |result − pre-match probability| of the finished match. The pre-match
-   probability is Pinnacle's price standing at that match's start, or model (b)'s if Pinnacle
-   is missing.
-8. **Metrics, per tier and per reference type.** All use a match-level bootstrap (10,000
-   resamples):
-   - mean CLV;
-   - CLV by surprise bucket (0–0.3, 0.3–0.6, 0.6–1);
-   - the OLS slope of CLV on surprise size;
-   - the slope of (Thunderpick close − stale price) on the signal;
-   - ROI at the stale price (descriptive).
-9. **Success (tier 1, Pinnacle-referenced rows only)**, at look 1 only, with no interim looks:
-   - **success:** the one-sided 95% lower bound on mean CLV is > 0, and the slope of CLV on
-     surprise size is > 0 with its one-sided 95% lower bound > 0;
-   - **partial:** CLV > 0 by that bound, and the slope is positive but not established;
-   - **not supported:** otherwise.
+1. **Pinnacle open.** t_open is the first active Pinnacle match-winner record for the match,
+   taken from OddsPapi `/historical-odds` after the matches are played (§4).
+   p_open = de-vigged price of team 1 at t_open.
+2. **Standing Thunderpick line.** The latest two-sided Thunderpick quote stored by the odds
+   logger at or before t_open, at any trigger. The logger fetches a match page every 15 min
+   within 48 h of the start, so the quote is at most 15 min old where the line exists.
+   - If no Thunderpick line was up before t_open, the match has no row.
+3. **Signal.** Signal = p_open − de-vigged standing Thunderpick price.
+4. **Paper bet.** If |signal| ≥ 2 percentage points, back the side Pinnacle favours, 1 unit, at
+   the first Thunderpick quote at or after t_open. That is the price a 15-minute poller would
+   get. Also reported: whether that quote still equals the standing price.
+5. **Outcome.** CLV = log(bet price / Thunderpick closing price) for the backed side. The close is
+   the last two-sided quote before the start.
+6. **Stale duration.** Minutes from t_open until Thunderpick's price first changes, on either side.
+   Kaplan–Meier, censored at the start.
+7. **Tags.**
+   - **post-result stale:** the standing price equals the first Thunderpick quote after the most
+     recent result of either team, and did not change in between. "Result" = the logger's
+     `match_status.completed_ts`.
+   - **moved since result:** the price changed after that result.
+   - **posted after result:** Thunderpick had no line before the result.
+   - **no result time:** no earlier completed match of either team was seen.
+8. **Fallback.** If Pinnacle never posts before the start, the reference is the frozen model (a)
+   at T − 24 h. Those rows are reported separately and carry no decision.
+9. **Metrics, per tier and per reference type.** All use a match-level bootstrap (10,000
+   resamples): mean CLV overall and by tag, ROI at the bet price, the stale-duration
+   distribution, and the share of bets where the standing price was still available.
+10. **Success (tier 1, Pinnacle-referenced, look 1 only, no interim looks).**
+    - **success:** at least 10 bets and the one-sided 95% lower bound on mean CLV > 0;
+    - **not supported:** at least 10 bets and the bound ≤ 0;
+    - fewer than 10 bets → "too few bets", reported as such.
 
-   Tier 2 and model-(a)-referenced rows are descriptive.
-10. **Kalshi** is studied historically (exploratory, `REPORT_v3.md`), not in this pre-registration.
-11. **What "success" licenses:** a follow-up live paper-trading test of a stale-line rule in the
-   pricing repo. Nothing more.
+    Tags and tier 2 are descriptive.
+11. **What "success" licenses:** a live paper-trading test of a stale-at-open rule (Pinnacle open →
+    Thunderpick). Nothing more.

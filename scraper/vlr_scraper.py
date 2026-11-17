@@ -1289,43 +1289,64 @@ class VLRScraper:
             logger.warning(f"Error getting match result from {match_url}: {e}")
             return None
     
-    def get_match_betting_odds(self, match_url: str) -> Optional[Dict]:
+    def get_match_betting_odds(self, match_url: str, book: str = 'thunderpick') -> Optional[Dict]:
         """
-        Scrape Thunderpick pre-match odds from a VLR match page.
-        VLR displays betting links like "$100 on NRG returned $155 at pre-match odds 1.55".
-        Returns decimal odds (e.g. 1.55) per team, or None if no odds found.
-        
+        Scrape pre-match odds for ONE bookmaker from a VLR match page.
+
+        VLR shows two widget formats:
+          - before the match: both teams' prices ("match-bet-item-half mod-1/mod-2")
+          - after the match ("mod-post-odds"): ONLY the winner's price
+            ("$100 on X returned $Y at pre-match odds Z")
+        Lines are tagged by bookmaker via <img class="mod-thunderpick|mod-rainbet|...">.
+        Earlier versions mixed books (kept the minimum across Thunderpick and Rainbet)
+        and used an ASCII-only team regex that dropped names like "Gen.G" / "KRU".
+
         Returns:
-            {'teams': [{'name': 'NRG', 'decimal_odds': 1.55}, ...], 'source': 'Thunderpick'}
-            or None if no odds found.
+            {'teams': [{'name': 'NRG', 'decimal_odds': 1.55}, ...], 'source': book,
+             'observed': 'pre' | 'post'}   or None if this book has no price.
         """
         full_url = f"{self.base_url}{match_url}"
-        odds_by_team: Dict[str, float] = {}
         try:
             content = self._make_request(full_url)
             soup = BeautifulSoup(content, 'html.parser')
-            # Betting links: href contains /rr/bet/, text contains "pre-match odds X.XX"
-            bet_links = soup.find_all('a', href=re.compile(r'/rr/bet/\d+'))
-            odds_re = re.compile(r'pre-match odds (\d+\.\d+)')
-            team_re = re.compile(r'on\s+([A-Za-z0-9\s]+?)\s+returned', re.IGNORECASE)
-            for link in bet_links:
-                text = link.get_text(" ", strip=True)
-                m_odds = odds_re.search(text)
-                m_team = team_re.search(text)
-                if m_odds and m_team:
-                    team_name = m_team.group(1).strip()
-                    decimal_odds = float(m_odds.group(1))
-                    if decimal_odds > 1.0 and team_name and abs(decimal_odds - 1.0) >= 0.01:
-                        if team_name not in odds_by_team or decimal_odds < odds_by_team[team_name]:
-                            odds_by_team[team_name] = decimal_odds
-            if not odds_by_team:
+            teams: List[Dict] = []
+            observed = None
+            for item in soup.select('a.match-bet-item'):
+                img = item.find('img')
+                classes = img.get('class', []) if img else []
+                if f'mod-{book}' not in classes:
+                    continue
+                if 'mod-noodds' in item.get('class', []):
+                    continue
+                if 'mod-post-odds' in item.get('class', []):
+                    name_el = item.select_one('.match-bet-item-return-msg .match-bet-item-teamzzz')
+                    odds_el = item.select_one('.match-bet-item-return-short .match-bet-item-odds')
+                    if name_el and odds_el:
+                        try:
+                            teams.append({'name': name_el.get_text(' ', strip=True),
+                                          'decimal_odds': float(odds_el.get_text(strip=True))})
+                            observed = 'post'
+                        except ValueError:
+                            pass
+                    continue
+                for half in item.select('.match-bet-item-half'):
+                    name_el = half.select_one('.match-bet-item-team-name')
+                    odds_el = half.select_one('.match-bet-item-odds')
+                    if name_el and odds_el:
+                        try:
+                            teams.append({'name': name_el.get_text(' ', strip=True),
+                                          'decimal_odds': float(odds_el.get_text(strip=True))})
+                            observed = 'pre'
+                        except ValueError:
+                            pass
+            teams = [t for t in teams if t['decimal_odds'] > 1.01]
+            if not teams:
                 return None
-            teams = [{'name': t, 'decimal_odds': odds_by_team[t]} for t in odds_by_team]
-            return {'teams': teams, 'source': 'Thunderpick'}
+            return {'teams': teams, 'source': book, 'observed': observed}
         except Exception as e:
             logger.warning(f"Error fetching betting odds from {match_url}: {e}")
             return None
-    
+
     def _get_cached_event_match_data(self, player_name: str, team: str, tier: Optional[int] = None) -> List[Dict]:
         """Get match-level data from cached completed events. tier: 1=VCT, 2=Challengers, None=all."""
         cached_events = []

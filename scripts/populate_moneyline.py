@@ -136,13 +136,19 @@ def _normalize_team(name: str) -> str:
 
 
 def _team_matches(a: str, b: str) -> bool:
-    """Check if two team names refer to the same team"""
-    na, nb = _normalize_team(a), _normalize_team(b)
-    if na == nb:
-        return True
-    if na in nb or nb in na:
-        return True
-    return False
+    """Exact (alias-normalized) team-name match.
+
+    The old substring rule matched "furia" inside the contaminated
+    "furia champions tour 2024 amer" and "g2" inside unrelated names.
+    """
+    return bool(a and b) and _normalize_team(a) == _normalize_team(b)
+
+
+# Overround assumed when only one side's price is observed (VLR post-match pages show only
+# the winner's price). Rows imputed this way are FLAGGED (team{1,2}_odds_imputed) and must be
+# excluded from, or sensitivity-tested in, any calibration analysis. Wayback pre-match
+# snapshots show the real Thunderpick overround differs (see research/REPORT.md).
+IMPUTE_OVERROUND = 1.05
 
 
 def _is_international(event_name: str) -> bool:
@@ -220,20 +226,22 @@ def main():
                         stats['with_result'] += 1
                     
                     team1_odds, team2_odds = None, None
+                    team1_imputed = team2_imputed = 0
                     if odds_data and odds_data.get('teams'):
-                        odds_by_team = {t['name']: t['decimal_odds'] for t in odds_data['teams']}
-                        for tname, o in odds_by_team.items():
-                            if _team_matches(tname, team1):
-                                team1_odds = o
-                            elif _team_matches(tname, team2):
-                                team2_odds = o
+                        for t in odds_data['teams']:
+                            if _team_matches(t['name'], team1):
+                                team1_odds = t['decimal_odds']
+                            elif _team_matches(t['name'], team2):
+                                team2_odds = t['decimal_odds']
                         if team1_odds or team2_odds:
                             stats['with_odds'] += 1
                         if team1_odds and not team2_odds:
-                            team2_odds = round(1.0 / (1.05 - 1.0 / team1_odds), 2)
+                            team2_odds = round(1.0 / (IMPUTE_OVERROUND - 1.0 / team1_odds), 2)
+                            team2_imputed = 1
                         elif team2_odds and not team1_odds:
-                            team1_odds = round(1.0 / (1.05 - 1.0 / team2_odds), 2)
-                    
+                            team1_odds = round(1.0 / (IMPUTE_OVERROUND - 1.0 / team2_odds), 2)
+                            team1_imputed = 1
+
                     # VLR bug: 1.00 odds are invalid (implied 100% - never real pre-match). Skip.
                     if (team1_odds is not None and abs(team1_odds - 1.0) < 0.01) or \
                        (team2_odds is not None and abs(team2_odds - 1.0) < 0.01):
@@ -251,6 +259,9 @@ def main():
                         winner=winner,
                         team1_maps=t1_maps,
                         team2_maps=t2_maps,
+                        team1_odds_imputed=team1_imputed,
+                        team2_odds_imputed=team2_imputed,
+                        imputed_overround=IMPUTE_OVERROUND if (team1_imputed or team2_imputed) else None,
                     )
                     stats['saved'] += 1
                     if odds_data or result:

@@ -174,6 +174,15 @@ class Database:
             )
         ''')
         
+        # Additive migration: flag rows where one side's odds were imputed (VLR post-match
+        # pages show only the winner's price).
+        existing = {r[1] for r in cursor.execute("PRAGMA table_info(moneyline_matches)")}
+        for col, typ in (("team1_odds_imputed", "INTEGER DEFAULT 0"),
+                         ("team2_odds_imputed", "INTEGER DEFAULT 0"),
+                         ("imputed_overround", "REAL")):
+            if col not in existing:
+                cursor.execute(f"ALTER TABLE moneyline_matches ADD COLUMN {col} {typ}")
+
         # Analysis results table (for caching)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS analysis_results (
@@ -460,7 +469,9 @@ class Database:
     def save_moneyline_match(self, match_url: str, event_name: str, event_url: str,
                              team1: str, team2: str, team1_odds: float = None, team2_odds: float = None,
                              winner: str = None, team1_maps: int = 0, team2_maps: int = 0,
-                             match_date: str = None) -> Optional[int]:
+                             match_date: str = None, team1_odds_imputed: int = 0,
+                             team2_odds_imputed: int = 0,
+                             imputed_overround: float = None) -> Optional[int]:
         """Save or update a moneyline match record"""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         cursor = conn.cursor()
@@ -468,16 +479,21 @@ class Database:
             cursor.execute('''
                 INSERT INTO moneyline_matches 
                 (match_url, event_name, event_url, team1, team2, team1_odds, team2_odds, 
-                 winner, team1_maps, team2_maps, match_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 winner, team1_maps, team2_maps, match_date,
+                 team1_odds_imputed, team2_odds_imputed, imputed_overround)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(match_url) DO UPDATE SET
                     event_name=excluded.event_name, event_url=excluded.event_url,
                     team1=excluded.team1, team2=excluded.team2,
                     team1_odds=excluded.team1_odds, team2_odds=excluded.team2_odds,
                     winner=excluded.winner, team1_maps=excluded.team1_maps,
-                    team2_maps=excluded.team2_maps, match_date=excluded.match_date
+                    team2_maps=excluded.team2_maps, match_date=excluded.match_date,
+                    team1_odds_imputed=excluded.team1_odds_imputed,
+                    team2_odds_imputed=excluded.team2_odds_imputed,
+                    imputed_overround=excluded.imputed_overround
             ''', (match_url, event_name, event_url, team1, team2, team1_odds, team2_odds,
-                  winner, team1_maps, team2_maps, match_date))
+                  winner, team1_maps, team2_maps, match_date,
+                  team1_odds_imputed, team2_odds_imputed, imputed_overround))
             conn.commit()
             cursor.execute('SELECT id FROM moneyline_matches WHERE match_url = ?', (match_url,))
             row = cursor.fetchone()

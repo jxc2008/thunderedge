@@ -198,31 +198,22 @@ class DatabasePopulator:
             content = self._make_request(full_url)
             soup = BeautifulSoup(content, 'html.parser')
             
-            # Find all match links
-            match_pattern = re.compile(r'/\d+/[\w-]+-vs-[\w-]+')
-            match_links = soup.find_all('a', href=match_pattern)
-            
+            # Team names come from the match-item DOM. The URL slug cannot be split
+            # reliably: "/123/furia-vs-sentinels-champions-tour-2024-americas-kickoff"
+            # put the event name into team2 ("Sentinels Champions Tour 2024 Amer...").
             matches = []
             seen = set()
-            
-            for link in match_links:
+            for link in soup.select('a.match-item'):
                 href = link.get('href', '')
-                if href in seen:
+                if not re.match(r'^/\d+/', href) or href in seen:
                     continue
                 seen.add(href)
-                
-                # Extract team names from URL
-                # Format: /123456/team1-vs-team2-event-name
-                match = re.match(r'/\d+/([\w-]+)-vs-([\w-]+)', href)
-                if match:
-                    team1 = match.group(1).replace('-', ' ').title()
-                    team2 = match.group(2).replace('-', ' ').title()
-                    matches.append({
-                        'url': href,
-                        'team1': team1,
-                        'team2': team2
-                    })
-            
+                names = [el.get_text(' ', strip=True)
+                         for el in link.select('.match-item-vs-team-name .text-of')]
+                if len(names) < 2 or not all(names):
+                    continue
+                matches.append({'url': href, 'team1': names[0], 'team2': names[1]})
+
             return matches
             
         except Exception as e:

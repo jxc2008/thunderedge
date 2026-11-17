@@ -8,6 +8,12 @@ Writes to data/odds_snapshots.db (gitignored):
                  volume, status, raw)
   poll_log(ts_utc, vlr_requests, kalshi_requests, n_matches, n_rows, errors)
   stream_events(id, show, start_utc, end_utc, url, notes)     -- Plat Chat etc., manual entry
+  match_status(match_key, url, event, team1, team2, status, first_seen, last_seen, completed_ts)
+
+Post-result trigger (stale-line study, PREREG_KICKOFF2027.md §10): a match seen as "live" that
+has left the /matches list is marked completed; in the same poll every upcoming match of either
+team is fetched regardless of cadence and its rows carry trigger='post_result' and
+ref_match=<completed match_key>. Detection latency is at most one poll (15 min).
 
 Load control (vlr): the /matches list is fetched every poll; an individual match page
 is fetched every poll only when the match starts within NEAR_HOURS, otherwise at most
@@ -55,6 +61,8 @@ CREATE TABLE IF NOT EXISTS odds_snapshots(
   yes_bid REAL, yes_ask REAL, yes_bid_size REAL, yes_ask_size REAL, last_price REAL,
   volume REAL, status TEXT, raw TEXT);
 CREATE INDEX IF NOT EXISTS ix_snap_key ON odds_snapshots(match_key, ts_utc);
+CREATE TABLE IF NOT EXISTS match_status(match_key TEXT PRIMARY KEY, url TEXT, event TEXT,
+  team1 TEXT, team2 TEXT, status TEXT, first_seen TEXT, last_seen TEXT, completed_ts TEXT);
 CREATE TABLE IF NOT EXISTS poll_log(ts_utc TEXT, vlr_requests INTEGER, kalshi_requests INTEGER,
   n_matches INTEGER, n_rows INTEGER, errors TEXT);
 CREATE TABLE IF NOT EXISTS stream_events(id INTEGER PRIMARY KEY AUTOINCREMENT, show TEXT NOT NULL,
@@ -99,7 +107,9 @@ def parse_upcoming(html: str, all_tiers: bool) -> list[dict]:
             continue
         if not all_tiers and not TIER1.search(ev_txt):
             continue
-        out.append({"url": a["href"], "event": ev_txt[:200], "status": st})
+        names = [x.get_text(" ", strip=True) for x in a.select(".match-item-vs-team-name .text-of")]
+        out.append({"url": a["href"], "event": ev_txt[:200], "status": st,
+                    "teams": [n for n in names if n][:2]})
     return out
 
 
@@ -186,12 +196,37 @@ def poll(all_tiers: bool = False) -> dict:
         ups += parse_upcoming(html, all_tiers)
         if f"page={page + 1}" not in html:
             break
+    # --- results detection: previously live, now gone from the list -> completed
+    for c in ("trigger", "ref_match"):
+        if c not in [r[1] for r in con.execute("PRAGMA table_info(odds_snapshots)")]:
+            con.execute(f"ALTER TABLE odds_snapshots ADD COLUMN {c} TEXT")
+    cur = {"vlr:" + m["url"].strip("/").split("/")[0]: m for m in ups}
+    completed: dict[str, set[str]] = {}
+    if not errors:  # only list-page errors exist at this point; a failed list must not "complete" matches
+        for key, st, t1, t2 in con.execute(
+                "SELECT match_key, status, team1, team2 FROM match_status WHERE completed_ts IS NULL").fetchall():
+            if st == "live" and key not in cur:
+                con.execute("UPDATE match_status SET completed_ts=? WHERE match_key=?", (ts, key))
+                completed[key] = {x.lower() for x in (t1, t2) if x}
+    for key, m in cur.items():
+        t = m["teams"] + [None, None]
+        con.execute("""INSERT INTO match_status(match_key,url,event,team1,team2,status,first_seen,last_seen)
+                       VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(match_key) DO UPDATE SET
+                       status=excluded.status, last_seen=excluded.last_seen""",
+                    (key, m["url"], m["event"], t[0], t[1], m["status"], ts, ts))
+    trigger_for: dict[str, str] = {}
+    for done_key, teams in completed.items():
+        for key, m in cur.items():
+            if m["status"] == "upcoming" and teams & {x.lower() for x in m["teams"]}:
+                trigger_for.setdefault(key, done_key)
+
     for m in ups:
         key = "vlr:" + m["url"].strip("/").split("/")[0]
+        forced = key in trigger_for
         prev = con.execute("SELECT max(ts_utc), max(start_utc) FROM odds_snapshots WHERE match_key=?",
                            (key,)).fetchone()
         start_known = prev[1]
-        if start_known and prev[0]:
+        if start_known and prev[0] and not forced:
             try:
                 st = datetime.fromisoformat(start_known.replace(" ", "T")).replace(tzinfo=timezone.utc)
                 last = datetime.fromisoformat(prev[0])
@@ -211,7 +246,8 @@ def poll(all_tiers: bool = False) -> dict:
             odds = [{"team": None, "book": None, "odds": None, "status": "no_widget", "raw": None}]
         for o in odds:
             rows.append((ts, "vlr", key, m["url"], m["event"], start, o["team"], o["book"], o["odds"],
-                         None, None, None, None, None, None, o["status"], o["raw"]))
+                         None, None, None, None, None, None, o["status"], o["raw"],
+                         "post_result" if forced else None, trigger_for.get(key)))
 
     # --- Kalshi (public market data, no auth)
     k_req = 0
@@ -239,12 +275,12 @@ def poll(all_tiers: bool = False) -> dict:
                              _num(mk.get("yes_bid_size_fp")), _num(mk.get("yes_ask_size_fp")),
                              _num(mk.get("last_price_dollars")), _num(mk.get("volume_fp")),
                              mk.get("status"), json.dumps({k: mk.get(k) for k in (
-                                 "title", "no_sub_title", "open_interest_fp", "close_time")})))
+                                 "title", "no_sub_title", "open_interest_fp", "close_time")}), None, None))
             cursor = d.get("cursor")
             if not cursor:
                 break
 
-    con.executemany(f"INSERT INTO odds_snapshots VALUES ({','.join('?' * 17)})", rows)
+    con.executemany(f"INSERT INTO odds_snapshots VALUES ({','.join('?' * 19)})", rows)
     con.execute("INSERT INTO poll_log VALUES (?,?,?,?,?,?)",
                 (ts, f.n, k_req, n_matches, len(rows), json.dumps(errors) if errors else None))
     con.commit()

@@ -72,10 +72,12 @@ confirm or kill it on data that did not exist when it was chosen.
   at 320 under `oddspapi_prereg`. Raw OddsPapi data stays in `research/cache/` (gitignored; the
   terms forbid redistribution).
 - **Optional live Pinnacle-open poll** (`research/pinnacle_open_poll.py`). It snapshots
-  Thunderpick the moment the poll sees Pinnacle open. It is **disabled** unless the user enables it
-  (OddsPapi cost ≈ 10,080 / interval_min + 7 billable calls per in-season week; the free plan is
-  250/month). §10 does not depend on it: when its snapshots exist they are simply the earliest
-  Thunderpick quotes after t_open.
+  Thunderpick and the Kalshi books the moment the poll sees Pinnacle open. **Enabled 2026-11-18**
+  (user decision on REPORT_v4) in windowed form: tier-1 matches only, from T − 96 h until the start,
+  one poll every 6 h while a match is pending. The 2026 replay peaks at 155 billable calls a month.
+  It has a rolling 30-day cap of 180 (`hist_fetch.CAP_30D`), so it plus the ≤ 6 billable calls above
+  stay inside the free 250/month. §10 does not depend on it: when its snapshots exist they are simply
+  the earliest Thunderpick quotes after t_open.
 - **Tier-2 stratum:** needs the 2026 tier-2 lineups and the 2027 Challengers window pages from
   the tier-2 scrape. Its budget is requested separately (`REPORT_v2.md` §B).
 - The 2026 baseline lineups are already in `data/valorant_stats.db`.
@@ -167,6 +169,7 @@ one-page validation in its docstring comes first, and any parser fix is logged i
 | 2026-11-17 | Bug fix: vlr match times (`research_matches.date_utc`) are US Eastern wall-clock, not UTC. The frozen code now converts them (`research/timeutil.py`) before comparing with logger, roster and OddsPapi times. Without it, the T − 60 min bet, the roster window and the close would all be 4–5 h early. Code re-frozen (§7) | Found in the historical study before any 2027 match; no 2027 data exists |
 | 2026-11-17 | §10 replaced by "stale at open": Pinnacle's first posted price vs the standing Thunderpick line; CLV vs the Thunderpick close; stale duration; post-result-stale tag; success = CLV lower bound > 0 with ≥ 10 bets. Code re-frozen (§7) | User decision on REPORT_v3, before any 2027 match and before any 2027 data exists |
 | 2026-11-18 | `research/build_db.py` gains `--lists/--db/--tier` options (commit `1082b84`) to build a separate tier-2 DB. With the defaults (tier 1), the output is unchanged: the new code paths are gated on `--tier 2`. The frozen evaluation code (§7) is not modified and the hash stands | Tier-2 ablation (REPORT_v4); no 2027 data exists |
+| 2026-11-18 | Live Pinnacle-open poll enabled in windowed form (§4). `hist_fetch.py` gains a rolling 30-day cap for the new ledger host `oddspapi_live`; the existing hosts and their caps are unchanged. The odds logger adds Kalshi order-book snapshots (new table `kalshi_books`; `odds_snapshots` is unchanged). None of this changes the frozen evaluation (§7) | User decisions on REPORT_v4; no 2027 data exists |
 
 ## 10. Stale at open (reference = Pinnacle; amended 2026-11-17, round 4)
 

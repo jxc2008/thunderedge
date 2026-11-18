@@ -41,7 +41,10 @@ ENV = ROOT.parent.parent / "valorant-pricing-model" / ".env"
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 ODDSPAPI = "https://api.oddspapi.io/v4"
 CAP = {"kalshi": 700, "oddspapi": 720, "oddspapi_prereg": 320}  # prereg: see PREREG §4
-SPACING = {"kalshi": 1.2, "oddspapi_hist": 5.5, "oddspapi": 2.2, "oddspapi_prereg": 5.5}
+# Live Pinnacle-open poll (research/pinnacle_open_poll.py): a rolling 30-day cap, not a lifetime one,
+# set from REPORT_v5 §4 so the poll plus the prereg post-hoc calls stay inside the free 250 / month.
+CAP_30D = {"oddspapi_live": 180}
+SPACING = {"kalshi": 1.2, "oddspapi_hist": 5.5, "oddspapi": 2.2, "oddspapi_prereg": 5.5, "oddspapi_live": 2.2}
 KALSHI_CUTOFF = datetime(2026, 9, 18, tzinfo=timezone.utc)
 KICKOFF_TOURNAMENTS = ["902379", "902380", "902381", "904619"]
 EXTRA_WINDOWS = [("2026-02-27", "2026-03-08"), ("2026-03-08", "2026-03-16"),   # Masters Santiago
@@ -65,8 +68,19 @@ def used(host: str) -> int:
         return sum(1 for r in csv.reader(f) if r and r[1] == host)
 
 
+def used_30d(host: str) -> int:
+    if not LEDGER.exists():
+        return 0
+    since = datetime.now(timezone.utc) - timedelta(days=30)
+    with LEDGER.open() as f:
+        return sum(1 for r in csv.reader(f) if r and r[1] == host and datetime.fromisoformat(r[0]) >= since)
+
+
 def get(host: str, url: str, params: dict, kind: str | None = None) -> requests.Response:
-    if used(host) >= CAP[host]:
+    if host in CAP_30D:
+        if used_30d(host) >= CAP_30D[host]:
+            raise RuntimeError(f"{host} 30-day budget of {CAP_30D[host]} reached")
+    elif used(host) >= CAP[host]:
         raise RuntimeError(f"{host} budget of {CAP[host]} reached")
     k = kind or host
     wait = SPACING[k] - (time.monotonic() - _last.get(k, 0))

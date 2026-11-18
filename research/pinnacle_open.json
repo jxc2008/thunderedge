@@ -1,6 +1,7 @@
 {
- "enabled": false,
- "interval_min": 60,
- "weekly_cap": 180,
- "note": "Disabled pending user decision on OddsPapi plan (REPORT_v4). Weekly billable cost ~ 10080/interval_min + 7."
+ "enabled": true,
+ "window_early_h": 96,
+ "window_late_h": 0,
+ "cadence_h": 6,
+ "note": "REPORT_v5 §4: window [T-96h, start], one poll per 6 h while a tier-1 match is pending; 2026 replay peak 155 billable/month (free plan 250). Rolling 30-day cap 180 in hist_fetch.CAP_30D['oddspapi_live']."
 }

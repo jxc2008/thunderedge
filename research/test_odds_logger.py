@@ -51,3 +51,38 @@ def test_post_result_trigger(tmp_path, monkeypatch):
     trig = con.execute("""SELECT DISTINCT match_key, ref_match FROM odds_snapshots
                           WHERE trigger='post_result'""").fetchall()
     assert trig == [("vlr:1002", "vlr:1001")]  # Beta Club's next match, not Delta's
+
+
+class _J:
+    def __init__(self, d):
+        self.d = d
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.d
+
+
+def test_kalshi_books_top5_dedupe_and_trigger(tmp_path, monkeypatch):
+    import sqlite3
+    import json
+    book = {"yes_dollars": [[f"0.{i:02d}00", "10.00"] for i in range(1, 9)], "no_dollars": [["0.5000", "3.00"]]}
+    calls = []
+
+    def fake(url, params=None, **kw):
+        calls.append(params)
+        return _J({"orderbooks": [{"ticker": t, "orderbook_fp": book} for _, t in params]})
+
+    monkeypatch.setattr(L.requests, "get", fake)
+    monkeypatch.setattr(L, "KALSHI_GAP", 0.0)
+    monkeypatch.setattr(L, "BOOK_BATCH", 2)
+    con = sqlite3.connect(tmp_path / "b.db")
+    mk = [("A", "E1", "KXVALORANTGAME"), ("B", "E1", "KXVALORANTGAME"), ("C", "E2", "KXVALORANTGAME")]
+    assert L.snapshot_books(con, mk, "t1")[:2] == (2, 3)          # 3 tickers in batches of 2
+    yes = json.loads(con.execute("SELECT yes_bids FROM kalshi_books WHERE ticker='A'").fetchone()[0])
+    assert yes[0] == [0.08, 10.0] and len(yes) == 5                # best first, depth 5
+    assert L.snapshot_books(con, mk, "t2")[1] == 0                 # unchanged -> not stored
+    assert L.snapshot_books(con, mk, "t3", trigger="pinnacle_open")[1] == 3  # event-driven always stored
+    book["no_dollars"] = [["0.5100", "1.00"]]
+    assert L.snapshot_books(con, mk, "t4")[1] == 3                 # changed -> stored

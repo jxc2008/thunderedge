@@ -9,6 +9,15 @@ Writes to data/odds_snapshots.db (gitignored):
   poll_log(ts_utc, vlr_requests, kalshi_requests, n_matches, n_rows, errors)
   stream_events(id, show, start_utc, end_utc, url, notes)     -- Plat Chat etc., manual entry
   match_status(match_key, url, event, team1, team2, status, first_seen, last_seen, completed_ts)
+  kalshi_books(ts_utc, ticker, event_ticker, series, trigger, yes_bids, no_bids)
+     top BOOK_DEPTH levels per side, JSON [[price, size], ...] best first. A row is written only
+     when a market's top-5 book differs from its last stored row (forward-fill between rows using
+     poll_log times), except on event-driven snapshots (trigger set), which are always written.
+
+Kalshi order books (REPORT_v5 §5): every poll, all open KXVALORANT* markets, fetched in batches of
+BOOK_BATCH tickers via the public GET /markets/orderbooks (no auth). Event-driven snapshots: a poll
+with a post-result trigger tags its books trigger='post_result'; research/pinnacle_open_poll.py
+calls snapshot_books(..., trigger='pinnacle_open') when it catches a Pinnacle opening price.
 
 Post-result trigger (stale-line study, PREREG_KICKOFF2027.md §10): a match seen as "live" that
 has left the /matches list is marked completed; in the same poll every upcoming match of either
@@ -52,6 +61,9 @@ FAR_EVERY_MIN = 120
 HORIZON_DAYS = 7
 MAX_LIST_PAGES = 3
 MIN_INTERVAL = 2.5
+BOOK_DEPTH = 5
+BOOK_BATCH = 50
+KALSHI_GAP = 0.25  # s between Kalshi requests (public limit is far higher)
 UA = "Mozilla/5.0 (compatible; odds-snapshot-logger; 15-min cadence)"
 TIER1 = re.compile(r"\bVCT\b|Champions Tour|Masters|VALORANT Champions|Esports World Cup", re.I)
 OLD_POST = re.compile(r"\$100 on (.+?) returned \$[\d.,]+ at ([\d.]+) pre-match odds")
@@ -67,6 +79,9 @@ CREATE TABLE IF NOT EXISTS match_status(match_key TEXT PRIMARY KEY, url TEXT, ev
   team1 TEXT, team2 TEXT, status TEXT, first_seen TEXT, last_seen TEXT, completed_ts TEXT);
 CREATE TABLE IF NOT EXISTS poll_log(ts_utc TEXT, vlr_requests INTEGER, kalshi_requests INTEGER,
   n_matches INTEGER, n_rows INTEGER, errors TEXT);
+CREATE TABLE IF NOT EXISTS kalshi_books(ts_utc TEXT NOT NULL, ticker TEXT NOT NULL, event_ticker TEXT,
+  series TEXT, trigger TEXT, yes_bids TEXT, no_bids TEXT);
+CREATE INDEX IF NOT EXISTS ix_books ON kalshi_books(ticker, ts_utc);
 CREATE TABLE IF NOT EXISTS stream_events(id INTEGER PRIMARY KEY AUTOINCREMENT, show TEXT NOT NULL,
   start_utc TEXT NOT NULL, end_utc TEXT, url TEXT, notes TEXT);
 """
@@ -176,6 +191,48 @@ def parse_match_odds(html: str) -> tuple[str | None, list[dict]]:
     return start, rows
 
 
+def _top(levels, depth: int = BOOK_DEPTH) -> list[list[float]]:
+    """Kalshi returns each side ascending by price; best = highest bid. -> best first, `depth` levels."""
+    out = [[float(px), float(sz)] for px, sz in (levels or [])]
+    return sorted(out, key=lambda x: -x[0])[:depth]
+
+
+def snapshot_books(con: sqlite3.Connection, markets: list[tuple[str, str, str]], ts: str,
+                   trigger: str | None = None) -> tuple[int, int, list[str]]:
+    """markets: (ticker, event_ticker, series). Returns (requests, rows written, errors)."""
+    con.executescript(SCHEMA)
+    meta = {t: (e, s_) for t, e, s_ in markets}
+    tickers = list(meta)
+    n_req, n_rows, errs = 0, 0, []
+    for i in range(0, len(tickers), BOOK_BATCH):
+        chunk = tickers[i:i + BOOK_BATCH]
+        try:
+            if n_req:
+                time.sleep(KALSHI_GAP)
+            r = requests.get(KALSHI + "/markets/orderbooks", params=[("tickers", t) for t in chunk], timeout=30,
+                             headers={"User-Agent": UA})
+            n_req += 1
+            r.raise_for_status()
+            books = r.json().get("orderbooks", [])
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"kalshi books: {e}")
+            continue
+        for b in books:
+            ob = b.get("orderbook_fp") or {}
+            yes, no = json.dumps(_top(ob.get("yes_dollars"))), json.dumps(_top(ob.get("no_dollars")))
+            t = b.get("ticker")
+            if t not in meta:
+                continue
+            if trigger is None:
+                last = con.execute("SELECT yes_bids, no_bids FROM kalshi_books WHERE ticker=? ORDER BY ts_utc DESC LIMIT 1",
+                                   (t,)).fetchone()
+                if last == (yes, no):
+                    continue
+            con.execute("INSERT INTO kalshi_books VALUES (?,?,?,?,?,?,?)", (ts, t, *meta[t], trigger, yes, no))
+            n_rows += 1
+    return n_req, n_rows, errs
+
+
 def poll(all_tiers: bool = False) -> dict:
     DB.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB, timeout=30)
@@ -253,6 +310,7 @@ def poll(all_tiers: bool = False) -> dict:
 
     # --- Kalshi (public market data, no auth)
     k_req = 0
+    open_markets: list[tuple[str, str, str]] = []
     for series in KALSHI_SERIES:
         cursor = None
         while True:
@@ -270,6 +328,7 @@ def poll(all_tiers: bool = False) -> dict:
                 break
             for mk in d.get("markets", []):
                 n_matches += 1
+                open_markets.append((mk["ticker"], mk["event_ticker"], series))
                 rows.append((ts, "kalshi", "kalshi:" + mk["event_ticker"], mk["ticker"], series,
                              mk.get("occurrence_datetime") or mk.get("expected_expiration_time"),
                              mk.get("yes_sub_title"), "kalshi", None,
@@ -282,13 +341,17 @@ def poll(all_tiers: bool = False) -> dict:
             if not cursor:
                 break
 
+    b_req, b_rows, b_err = snapshot_books(con, open_markets, ts, "post_result" if trigger_for else None)
+    k_req += b_req
+    errors += b_err
+
     con.executemany(f"INSERT INTO odds_snapshots VALUES ({','.join('?' * 19)})", rows)
     con.execute("INSERT INTO poll_log VALUES (?,?,?,?,?,?)",
                 (ts, f.n, k_req, n_matches, len(rows), json.dumps(errors) if errors else None))
     con.commit()
     con.close()
     return {"ts": ts, "vlr_requests": f.n, "kalshi_requests": k_req, "rows": len(rows),
-            "errors": errors}
+            "book_rows": b_rows, "errors": errors}
 
 
 def main() -> None:

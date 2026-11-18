@@ -40,11 +40,13 @@ SURVEY_RAW = CACHE / "survey"  # index files saved by the 2026-11-17 source surv
 ENV = ROOT.parent.parent / "valorant-pricing-model" / ".env"
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 ODDSPAPI = "https://api.oddspapi.io/v4"
-CAP = {"kalshi": 700, "oddspapi": 720, "oddspapi_prereg": 320}  # prereg: see PREREG §4
+CAP = {"kalshi": 700, "oddspapi": 720, "oddspapi_prereg": 320,  # prereg: see PREREG §4
+       "kalshi_prereg": 20,  # §11 settlement lookups (public /markets?tickers=)
+       "oddspapi_s11": 600}  # §11 Pinnacle history (non-billable) + <= 40 billable fixture windows; needs approval (REPORT_v6)
 # Live Pinnacle-open poll (research/pinnacle_open_poll.py): a rolling 30-day cap, not a lifetime one,
 # set from REPORT_v5 §4 so the poll plus the prereg post-hoc calls stay inside the free 250 / month.
 CAP_30D = {"oddspapi_live": 180}
-SPACING = {"kalshi": 1.2, "oddspapi_hist": 5.5, "oddspapi": 2.2, "oddspapi_prereg": 5.5, "oddspapi_live": 2.2}
+SPACING = {"kalshi": 1.2, "oddspapi_hist": 5.5, "oddspapi": 2.2, "oddspapi_prereg": 5.5, "oddspapi_live": 2.2, "kalshi_prereg": 1.2, "oddspapi_s11": 5.5}
 KALSHI_CUTOFF = datetime(2026, 9, 18, tzinfo=timezone.utc)
 KICKOFF_TOURNAMENTS = ["902379", "902380", "902381", "904619"]
 EXTRA_WINDOWS = [("2026-02-27", "2026-03-08"), ("2026-03-08", "2026-03-16"),   # Masters Santiago

@@ -52,6 +52,7 @@ STALE_MIN_SIGNAL = 0.02          # |reference - standing Thunderpick price| need
 FALLBACK_LEAD = timedelta(hours=24)  # model (a) reference time when Pinnacle never posts
 PIN_HOST = "oddspapi_prereg"     # ledger label / cap in research/hist_fetch.py
 SURPRISE_BINS = (0.0, 0.3, 0.6, 1.01)
+GAP_SLICES = ((0.02, 0.03, "2-3 pts"), (0.03, 0.05, "3-5 pts"), (0.05, 1.01, ">5 pts"))  # §10 descriptive slice only
 BOOK = "thunderpick"
 
 
@@ -235,8 +236,9 @@ def _trigger_rows(odds: Odds) -> list[tuple]:
                             (BOOK,)).fetchall()
 
 
-def pinnacle_series(season: int, mids: set[int], fetch: bool) -> dict:
-    """match_id -> pinnacle.Series for vlr team 1. Network only when ``fetch``; otherwise cache."""
+def pinnacle_series(season: int, mids: set[int], fetch: bool, method: str = "mult") -> dict:
+    """match_id -> pinnacle.Series for vlr team 1. Network only when ``fetch``; otherwise cache.
+    ``method``: de-vig (research/devig.py); §10 uses the default "mult", §11 its frozen primary."""
     from research import hist_fetch as H, pinnacle as PN  # noqa: PLC0415
     ms = [m for m in H.vlr_matches(season) if m["match_id"] in mids]
     fx = H.fixtures(False)  # every cached fixture list (survey + windows), no network
@@ -248,7 +250,7 @@ def pinnacle_series(season: int, mids: set[int], fetch: bool) -> dict:
         if fetch:
             H.fetch_history(f["fixtureId"], PIN_HOST)
         h = PN.load(f["fixtureId"])
-        sr = PN.series(h, f["p1_is_team1"]) if h else None
+        sr = PN.series(h, f["p1_is_team1"], method=method) if h else None
         if sr is not None:
             out[int(mid)] = sr
     return out
@@ -397,6 +399,9 @@ def _stale_block(rows: list[dict], decide: bool) -> dict:
            "by_tag": {t: {"n_bets": sum(1 for x in bets if x["tag"] == t),
                           "clv": _boot_mean(np.array([x["clv"] for x in bets if x["tag"] == t]), 0.05)}
                       for t in ("post_result_stale", "moved_since_result", "posted_after_result", "no_result_time")},
+           "by_gap_descriptive": {lab: {"n_bets": sum(1 for x in bets if lo <= abs(x["signal"]) < hi),
+                                        "clv": _boot_mean(np.array([x["clv"] for x in bets if lo <= abs(x["signal"]) < hi]), 0.05)}
+                                  for lo, hi, lab in GAP_SLICES},
            "stale_minutes_after_open": {
                "median_km": _km([x["stale_minutes"] for x in rows], [not x["stale_censored"] for x in rows], .5),
                "p25_km": _km([x["stale_minutes"] for x in rows], [not x["stale_censored"] for x in rows], .25),

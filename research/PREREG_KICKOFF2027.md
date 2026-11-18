@@ -141,10 +141,11 @@ The frozen evaluation is the code at the commits below, committed before any 202
 - `research/fetch_rosters.py` (roster snapshots, §3).
 - `research/odds_logger.py` (post-result trigger) and `research/pinnacle_open_poll.py` (optional live Pinnacle-open snapshots), §10.
 - `research/pinnacle.py`, `research/hist_fetch.py` and `research/timeutil.py` (Pinnacle reference, fixture mapping, vlr ET→UTC, §10).
+- `research/prereg_s11.py` and `research/devig.py` (§11 Kalshi taking vs Pinnacle; Shin primary).
 - The rating model used for §10's model (a): `valorant-pricing-model/src/rating/` plus the frozen
   parameters and head-(a) coefficients in `research/out/rating_eval.json`.
 - **Inputs:** `valorant_stats.db` (with the 2027 pages), `odds_snapshots.db`, `roster_snapshots`.
-- **Outputs:** bet lists and the §5, §6 and §10 numbers (`research/out/prereg_2027.json`).
+- **Outputs:** bet lists and the §5, §6 and §10 numbers (`research/out/prereg_2027.json`); §11 trades and decision (`research/out/prereg_s11_2027_look{1,2}.json`).
 
 Results are produced only by these commits. A bug fix is allowed but logged in §9 with a diff.
 `fetch_rosters.py` parses a vlr page layout that has not been checked on a 2027 page; the
@@ -170,6 +171,7 @@ one-page validation in its docstring comes first, and any parser fix is logged i
 | 2026-11-17 | §10 replaced by "stale at open": Pinnacle's first posted price vs the standing Thunderpick line; CLV vs the Thunderpick close; stale duration; post-result-stale tag; success = CLV lower bound > 0 with ≥ 10 bets. Code re-frozen (§7) | User decision on REPORT_v3, before any 2027 match and before any 2027 data exists |
 | 2026-11-18 | `research/build_db.py` gains `--lists/--db/--tier` options (commit `1082b84`) to build a separate tier-2 DB. With the defaults (tier 1), the output is unchanged: the new code paths are gated on `--tier 2`. The frozen evaluation code (§7) is not modified and the hash stands | Tier-2 ablation (REPORT_v4); no 2027 data exists |
 | 2026-11-18 | Live Pinnacle-open poll enabled in windowed form (§4). `hist_fetch.py` gains a rolling 30-day cap for the new ledger host `oddspapi_live`; the existing hosts and their caps are unchanged. The odds logger adds Kalshi order-book snapshots (new table `kalshi_books`; `odds_snapshots` is unchanged). None of this changes the frozen evaluation (§7) | User decisions on REPORT_v4; no 2027 data exists |
+| 2026-11-18 | §11 added (Kalshi taking vs Pinnacle, k = 5, Shin primary by the stated rule; 0/579 2026 markets fail Shin). §10 unchanged except a descriptive `by_gap_descriptive` slice (2–3 / 3–5 / > 5 pts; no new threshold, no decision). `pinnacle.series` and `prereg_kickoff2027.pinnacle_series` gain a de-vig `method` argument whose default reproduces the frozen multiplicative output exactly. New ledger hosts `oddspapi_s11` (cap 600, approval pending) and `kalshi_prereg` (20). Code re-frozen (§7) | User decisions on REPORT_v5; no 2027 data exists |
 
 ## 10. Stale at open (reference = Pinnacle; amended 2026-11-17, round 4)
 
@@ -214,3 +216,71 @@ Pinnacle's next-match line did not exist yet when 95% of results landed (REPORT_
     Tags and tier 2 are descriptive.
 11. **What "success" licenses:** a live paper-trading test of a stale-at-open rule (Pinnacle open →
     Thunderpick). Nothing more.
+
+## 11. Kalshi taking against Pinnacle, k = 5 (added 2026-11-18, round 6; frozen before Kickoff 2027)
+
+**Question:** when Kalshi's ask is more than 5 points below Pinnacle's de-vigged fair, does buying it
+beat Pinnacle's close after Kalshi's fee? Background (exploratory, 2026, REPORT_v4–v6): the same rule
+on 1-min candles gave net CLV vs Pinnacle close of +1.88 pts (multiplicative de-vig) / +1.19 pts
+[+0.08, +2.74] (Shin), n = 105. With this section's exact rule (15-min observation times, Pinnacle
+≤ 15 min old, Shin) it gave **+2.53 pts [+0.31, +5.15]** (event bootstrap), n = 38 trades, 12 events.
+k = 5 was chosen from {2, 3, 5} on that data, so these estimates are selected and optimistic.
+
+1. **Population.** VCT 2027 tier-1 matches as seen by the odds logger: `match_status` events matching
+   the logger's tier-1 pattern and not a qualifier / open / Ascension / Challengers / Game Changers stage
+   (`pinnacle_open_poll.NOT_TIER1`), with a KXVALORANTGAME market for vlr team 1. Look 1: matches
+   starting up to 2027-06-30. Look 2: matches starting up to 2027-10-31, pooled with look 1.
+2. **Observation times.** Every odds-logger poll at which the market was listed open and the book request
+   succeeded (`poll_log.errors` without "kalshi books"), plus event-driven book snapshots
+   (`kalshi_books.trigger`). Book at t = the latest `kalshi_books` row at or before t (rows are stored
+   only when the top-5 book changes).
+3. **Fair.** Pinnacle match-winner price from OddsPapi `/historical-odds`, de-vigged by **Shin**
+   (`research/devig.py`). The record used is the latest at or before t. It must be active, Shin-valid,
+   and **at most 15 min old** (t − record time ≤ 15 min).
+   - **Primary de-vig rule** (stated before any 2027 data): Shin, unless Shin fails on more than 5% of
+     markets, in which case multiplicative. A market fails if Shin has no valid solution at any active
+     pre-start record. Applied to 2026 (579 markets, 25,185 records): **0 failures → Shin.** Fixed in
+     code as `PRIMARY_DEVIG = "shin"`.
+4. **Entry.** YES side: ask = 1 − best NO bid; NO side: ask = 1 − best YES bid. Enter when fair − ask
+   > 0.05, 0.01 ≤ ask ≤ 0.99, and the displayed size at that ask ≥ 1 contract. At most one entry per
+   match × side (the first). Contracts C = min(1 unit, displayed size at the best ask); **1 unit = 100
+   contracts**. No walking the book.
+5. **Fee.** Kalshi quadratic taker fee, multiplier 1, rounded up per order:
+   ceil(100 × 0.07 × C × ask × (1 − ask)) / 100 dollars.
+6. **Primary metric.** Net CLV per trade (pts) = 100 × (Pinnacle Shin close for the side − ask) −
+   100 × fee / C. Pinnacle close = the last active Shin-valid record before the start. The mean is over
+   trades, with a match-level bootstrap (10,000 resamples). Event clustering is not used, because a
+   look has few events.
+7. **Looks and decisions** (overall one-sided α ≤ 0.05):
+
+   | Look | Data | Confirm if | Abandon if | Otherwise |
+   |---|---|---|---|---|
+   | 1 | matches to 2027-06-30 | ≥ 20 trades and one-sided 99% lower bound > 0 (α₁ = 0.01) | ≥ 20 trades and mean ≤ 0 | continue to look 2 (also when < 20 trades) |
+   | 2 | matches to 2027-10-31, pooled | ≥ 30 trades and one-sided 96% lower bound > 0 (α₂ = 0.04) | otherwise | — (< 30 trades: "inconclusive", reported) |
+
+   No other looks. Interim checks are limited to data health: logger uptime, book-request errors and
+   mapping counts. "Confirm" licenses a discussion of small live stakes. It does not license automatic
+   deployment.
+8. **Secondary (no decisions).** Settlement P&L per contract and per trade (C contracts, net of fee);
+   the ask < 0.30 slice; net CLV under multiplicative and power de-vig; gross CLV; CLV vs the Kalshi
+   close mid; mean contracts filled; counts of observation times blocked by Pinnacle age, invalid or
+   inactive Pinnacle, and missing displayed size.
+9. **Power** (normal approximation, per-trade sd 7.0 pts from the 2026 backtest, look-specific α):
+
+   | True mean net CLV | n = 26 (2026 trades to 30 Jun) | n = 38 (2026 season) | n = 60 | n = 100 | n for 80% (α = 0.04) |
+   |---|---|---|---|---|---|
+   | +2.53 pts (backtest, this rule) | 31% (α₁) / 53% (α₂) | 46% / 68% | 68% / 85% | 90% / 97% | 52 |
+   | +1.19 pts (Shin, 1-min, no age rule) | 7% / 19% | 10% / 24% | 16% / 33% | 26% / 48% | 234 |
+
+   At 2026's trade rate, look 1 (≈ 26 trades) is unlikely to confirm. Look 2 (≈ 38) has about a 2-in-3
+   chance if the backtest effect is real, and about 1-in-4 if the smaller estimate is. The 2026
+   Kickoff window had only 3 trades, which is why the looks are not tied to Kickoff.
+10. **Data and budget.** Kalshi books come from the odds logger (no extra requests). Pinnacle fixture ids
+    come from the live poll's mapping where it caught the match, otherwise from fixture windows (billable,
+    ≤ 40). History comes from `/historical-odds` (non-billable, but impossible once the month's quota is
+    used). All of this is under ledger host `oddspapi_s11`, cap 600, **to be approved before the first
+    `--fetch`**. Histories already cached for §10 are reused. Kalshi settlement: public `/markets?tickers=`,
+    cap 20 (`kalshi_prereg`).
+11. **Code.** `research/prereg_s11.py` (`--season 2027 --look 1|2 [--fetch]`), with `research/devig.py`,
+    `research/pinnacle.py`, `research/hist_fetch.py` and the logger's `kalshi_books`. Tests:
+    `research/test_prereg_s11.py`. Commit hash in §7.

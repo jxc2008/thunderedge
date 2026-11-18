@@ -6,13 +6,15 @@ research/cache/hist/op_hist_<fixtureId>.json (gitignored; the terms forbid redis
 
 A history is turned into a step series of records (t, p1, active): at every recorded change, the
 latest price of each side is combined into the de-vigged probability of fixture participant 1
-(p1 = (1/o1) / (1/o1 + 1/o2)); ``active`` is False while either side is suspended (line pulled).
+(p1 = (1/o1) / (1/o1 + 1/o2) by default; ``method`` = "power" / "shin" use research/devig.py, and
+``ok`` records whether that method had a valid solution at each record); ``active`` is False while either
+side is suspended (line pulled).
 """
 from __future__ import annotations
 
 import bisect
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +31,7 @@ class Series:
     t: list[datetime]
     p1: list[float]
     active: list[bool]
+    ok: list[bool] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.t)
@@ -70,8 +73,9 @@ def load(fixture_id: str) -> dict | None:
     return None if "error" in d else d
 
 
-def series(hist: dict, p1_is_team1: bool = True, book: str = "pinnacle") -> Series | None:
+def series(hist: dict, p1_is_team1: bool = True, book: str = "pinnacle", method: str = "mult") -> Series | None:
     """Step series of the de-vigged probability of vlr team 1."""
+    from research.devig import devig  # noqa: PLC0415
     try:
         oc = hist["bookmakers"][book]["markets"][MARKET]["outcomes"]
         a, b = oc[OUT1]["players"]["0"], oc[OUT2]["players"]["0"]
@@ -80,7 +84,7 @@ def series(hist: dict, p1_is_team1: bool = True, book: str = "pinnacle") -> Seri
     ev = sorted([(_t(r["createdAt"]), 0, r) for r in a] + [(_t(r["createdAt"]), 1, r) for r in b],
                 key=lambda x: (x[0], x[1]))
     last: list[dict | None] = [None, None]
-    T, P, A = [], [], []
+    T, P, A, OK = [], [], [], []
     for when, side, r in ev:
         last[side] = r
         if last[0] is None or last[1] is None:
@@ -88,12 +92,13 @@ def series(hist: dict, p1_is_team1: bool = True, book: str = "pinnacle") -> Seri
         o1, o2 = float(last[0]["price"]), float(last[1]["price"])
         if o1 <= 1.0 or o2 <= 1.0:
             continue
-        p = (1 / o1) / (1 / o1 + 1 / o2)
+        p, good = devig(o1, o2, method)
         act = bool(last[0]["active"]) and bool(last[1]["active"])
         if T and T[-1] == when:
-            P[-1], A[-1] = (p if p1_is_team1 else 1 - p), act
+            P[-1], A[-1], OK[-1] = (p if p1_is_team1 else 1 - p), act, good
             continue
         T.append(when)
         P.append(p if p1_is_team1 else 1 - p)
         A.append(act)
-    return Series(T, P, A) if T else None
+        OK.append(good)
+    return Series(T, P, A, OK) if T else None

@@ -16,7 +16,10 @@ Tables written (all rebuilt idempotently):
   player_map_stats_v2(game_id, player_id, player_name, team_id, agent, rating2, acs, kills,
                       deaths, assists, kast, adr, fb, fd)
 
-Usage: python -m research.build_db [--workers 8]
+Usage:
+  python -m research.build_db [--workers 8]                                   # tier 1 -> data/valorant_stats.db
+  python -m research.build_db --lists tier2_lists.json --db data/valorant_tier2.db --tier 2
+Tier 2 is built into its own DB so tier-1 analyses (season starts, feature sets) are unchanged.
 """
 from __future__ import annotations
 
@@ -38,6 +41,18 @@ DB = REPO / "data" / "valorant_stats.db"
 PARSED = ROOT / "cache" / "parsed"
 MATCH_LISTS = ["tier1_matches.json", "extra_matches.json"]
 ASSUMED_OVERROUND = 1.05  # what populate_moneyline.py assumed when imputing
+TIER = 1
+# VCL / Challengers league -> VCT region (slug keywords); first match wins
+T2_REGION = [
+    ("china", ("china",)),
+    ("americas", ("north-america", "-na-", "brazil", "latam", "latin-america", "americas", "ace-stage",
+                  "south-america", "-las-", "-lan-")),
+    ("pacific", ("japan", "korea", "southeast-asia", "-sea-", "sea-split", "philippines", "indonesia", "malaysia",
+                 "singapore", "thailand", "vietnam", "south-asia", "oceania", "hong-kong", "taiwan", "pacific")),
+    ("emea", ("france", "dach", "spain", "italy", "turkey", "turkiye", "north-east", "northeast", "polaris",
+              "mena", "portugal", "east", "t-rkiye", "birlik", "pokal", "cis", "emea", "uk", "nordic", "baltic", "benelux", "iberia", "arabia",
+              "gcc", "levant")),
+]
 
 
 def _parse_one(url: str) -> dict | None:
@@ -55,8 +70,12 @@ def _parse_one(url: str) -> dict | None:
 
 def event_meta(slug: str, name: str | None = None) -> dict:
     s = slug.lower()
-    yr = re.search(r"20(2\d)", s)
+    yr = re.search(r"20(2\d)", s) or re.search(r"\bvcl-(2\d)\b", s)
     season = int("20" + yr[1]) if yr else None
+    if TIER == 2:
+        region = next((r for r, keys in T2_REGION if any(k in f"-{s}-" for k in keys)), None)
+        return {"slug": slug, "name": name or slug, "season": season, "region": region, "tier": 2,
+                "is_international": 0}
     intl = any(k in s for k in ("masters", "valorant-champions", "lock-in", "lockin",
                                 "esports-world-cup", "last-chance"))
     region = None
@@ -136,14 +155,19 @@ def ensure_app_schema(con: sqlite3.Connection) -> None:
 
 
 def main() -> None:
+    global DB, TIER
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--lists", nargs="*", default=MATCH_LISTS)
+    ap.add_argument("--db", default=str(DB))
+    ap.add_argument("--tier", type=int, default=1)
     args = ap.parse_args()
+    DB, TIER = Path(args.db), args.tier
     PARSED.mkdir(parents=True, exist_ok=True)
     DB.parent.mkdir(parents=True, exist_ok=True)
 
     lists: dict[str, list[str]] = {}
-    for f in MATCH_LISTS:
+    for f in args.lists:
         fp = ROOT / "cache" / f
         if fp.exists():
             lists.update(json.loads(fp.read_text()))
@@ -171,6 +195,8 @@ def main() -> None:
         eid = int(ev_path.split("/")[2])
         if eid not in events:
             events[eid] = {"event_id": eid, **event_meta(ev_path.split("/")[3])}
+            if TIER == 2 and events[eid]["season"] is None and d.get("date_utc"):
+                events[eid]["season"] = int(d["date_utc"][:4])  # slug without a year
         rows.append((eid, d))
         for k in ("team1", "team2"):
             t = d[k]

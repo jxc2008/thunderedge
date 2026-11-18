@@ -1,6 +1,6 @@
 # VALORANT research — status
 
-Last updated: 2026-11-18 (round 5). Covers `thunderedge` (branch `research/market-structure`) and
+Last updated: 2026-11-18 (round 6). Covers `thunderedge` (branch `research/market-structure`) and
 `valorant-pricing-model` (branch `fix/side-baseline-blend`), both pushed (through round 5). Paper only; `src/quoting/`
 and `src/main.py` in the pricing repo have not been touched.
 
@@ -13,7 +13,8 @@ and `src/main.py` in the pricing repo have not been touched.
 | 3. Round-3 decisions | `research/REPORT_v3.md` | Push audit, logger stopgap, roster parser, tier-2 sample, §10 redesign, exploratory Pinnacle/Kalshi study. |
 | 4. Round-4 decisions | `research/REPORT_v4.md` | §10 stale at open, exploratory full-window Pinnacle/Kalshi study, tier-2 scrape (partial) + ablation, lid, Kalshi pre-check. |
 | 5. Round-5 decisions | `research/REPORT_v5.md` | Push + placeholder `.env.example`, tier-2 priors, taking sim rescored vs Pinnacle close, stale-at-open follow-ups, windowed Pinnacle-open poll (enabled), Kalshi order books. |
-| Pre-registration | `research/PREREG_KICKOFF2027.md` | Churn rule + §10 stale at open (Pinnacle reference) + tier-2 stratum. Frozen at thunderedge `034b62f`, pricing `5370daf`. |
+| 6. Round-6 decisions | `research/REPORT_v6.md` | De-vig robustness (k=5 survives Shin, k=3 doesn't), PREREG §11 frozen, §10 gap slice, parser test (no fixtures listed). |
+| Pre-registration | `research/PREREG_KICKOFF2027.md` | Churn rule + §10 stale at open + §11 Kalshi taking vs Pinnacle (k=5, Shin) + tier-2 stratum. Frozen at thunderedge `574c26b`, pricing `5370daf`. |
 | Logger hosting proposal | `research/LOGGER_HOSTING.md` | ~€5–7/month VPS with SQLite. Not deployed. |
 
 **Important data fact (round 3):** vlr's `date_utc` / `data-utc-ts` is **US Eastern wall-clock, not UTC**.
@@ -23,7 +24,7 @@ Use `research/timeutil.py` (`vlr_to_utc`) whenever vlr times meet UTC timestamps
 
 | Task | What | Every | Notes |
 |---|---|---|---|
-| `ThunderedgeOddsLogger` | `research/odds_logger.py` + `research/gap_detector.py` | 15 min | Post-result trigger; wake-to-run on; AC never sleeps; lid on AC does nothing. Logs Kalshi top-5 order books (`kalshi_books`, change-only). Also runs `pinnacle_open_poll.py`: **enabled**, tier-1 only, T−96h..start, every 6 h; 30-day cap 180 (`hist_fetch.CAP_30D`); costs 0 until Kickoff 2027 fixtures are within 96 h. The gap table below is auto-updated. |
+| `ThunderedgeOddsLogger` | `research/odds_logger.py` + `research/gap_detector.py` | 15 min | Post-result trigger; wake-to-run on; AC never sleeps; lid on AC does nothing. Logs Kalshi top-5 order books (`kalshi_books`, change-only). Also runs `pinnacle_open_poll.py`: **enabled**, tier-1 only, T−96h..start, every 6 h; 30-day cap 180 (`hist_fetch.CAP_30D`); costs 0 until Kickoff 2027 fixtures are within 96 h. Response parser still unverified (no VALORANT fixtures listed on 2026-11-18); self-disables on a priced response it can't parse. The gap table below is auto-updated. |
 | `PricingShadowQuotes` | pricing `scripts/shadow_quotes.py` (legacy vs v2) | 15 min | Wake-to-run on. After ≥ 2026-11-20: `python scripts/shadow_quotes.py report --since 2026-11-17T08:12`, then `python scripts/shadow_compare.py` (v2 vs (b) vs Kalshi mid). Unchanged per decision 6. |
 
 ## Approved (not yet used)
@@ -35,7 +36,7 @@ Use `research/timeutil.py` (`vlr_to_utc`) whenever vlr times meet UTC timestamps
 
 ## Waiting on you
 
-See the "Decisions needed" section of `research/REPORT_v5.md` (supersedes v4).
+See the "Decisions needed" section of `research/REPORT_v6.md` (supersedes v5).
 
 ## Budgets and ledgers
 

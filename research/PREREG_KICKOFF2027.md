@@ -151,7 +151,7 @@ Results are produced only by these commits. A bug fix is allowed but logged in �
 `fetch_rosters.py` parses a vlr page layout that has not been checked on a 2027 page; the
 one-page validation in its docstring comes first, and any parser fix is logged in §9.
 
-- thunderedge evaluation commit: `034b62fceb7fb5259c7dde18c4e5a217f798900b`
+- thunderedge evaluation commit: `574c26b84f21f284e79ae4ee6b9c0c3a17f52911` (re-frozen 2026-11-18 for §11; previous `034b62f`)
 - valorant-pricing-model rating-engine commit: `5370dafe19433f787fd1fb0ca37529d9078d4930`
 
 ## 8. What would change the plan

@@ -63,12 +63,12 @@ See the "Decisions needed" section of `research/REPORT_v5.md` (supersedes v4).
 
 <!-- gaps:start -->
 
-_Auto-updated 2026-11-18 07:53 UTC by `research/gap_detector.py` (last 14 days; a gap = > 20 min between runs)._
+_Auto-updated 2026-11-18 08:38 UTC by `research/gap_detector.py` (last 14 days; a gap = > 20 min between runs)._
 
 | Job | runs | gaps | missed polls | longest gap |
 |---|---|---|---|---|
-| odds logger | 74 | 7 | 50 | 9:30:02 (11-17 08:38Z) |
-| shadow quotes | 41 | 4 | 53 | 9:30:03 (11-17 08:50Z) |
+| odds logger | 77 | 7 | 50 | 9:30:02 (11-17 08:38Z) |
+| shadow quotes | 44 | 4 | 53 | 9:30:03 (11-17 08:50Z) |
 
 | Job | from (UTC) | to (UTC) | missed |
 |---|---|---|---|

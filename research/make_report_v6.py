@@ -55,7 +55,6 @@ def main() -> None:  # noqa: PLR0915
     w("| # | Item | Verdict |")
     w("|---|---|---|")
     s5 = {m: tk[m]["k=5"]["all"]["clv_pin_net_pts"] for m in M}
-    s3 = {m: tk[m]["k=3"]["all"]["clv_pin_net_pts"] for m in M}
     w(f"| 1 | De-vig robustness | **k = 5 survives, k = 3 doesn't.** k = 5 net CLV vs Pinnacle close: multiplicative {s5['mult']['est']:+.2f}, "
       f"power {s5['power']['est']:+.2f}, Shin {s5['shin']['est']:+.2f} pts. k = 3 is ≈ 0 under all three. Part of round 5's edge was the "
       f"multiplicative de-vig shifting probability toward longshots. Stale-at-open CLV barely changes (+6.0% to +6.2%). |")
@@ -174,7 +173,7 @@ def main() -> None:  # noqa: PLR0915
     w("")
     w("| Step | Result |")
     w("|---|---|")
-    w(f"| 1. `/v4/fixtures?sportId=61&from=today&to=+4 d` (billable, ledger `oddspapi_live`) | 404 `FIXTURE_NOT_FOUND`: no VALORANT fixtures listed. "
+    w("| 1. `/v4/fixtures?sportId=61&from=today&to=+4 d` (billable, ledger `oddspapi_live`) | 404 `FIXTURE_NOT_FOUND`: no VALORANT fixtures listed. "
       "Kalshi's current markets are Chinese third-party and Kickoff-qualifier events that OddsPapi doesn't carry. |")
     w("| 2. `/v4/odds-by-tournaments` | **not made**: nothing priced to compare against |")
     w("| Calls used | 1 of the 2 approved |")

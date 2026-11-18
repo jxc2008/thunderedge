@@ -70,7 +70,7 @@ def _parse_one(url: str) -> dict | None:
 
 def event_meta(slug: str, name: str | None = None) -> dict:
     s = slug.lower()
-    yr = re.search(r"20(2\d)", s) or re.search(r"\bvcl-(2\d)\b", s)
+    yr = re.search(r"20(2\d)", s) or (TIER == 2 and re.search(r"\bvcl-(2\d)\b", s))
     season = int("20" + yr[1]) if yr else None
     if TIER == 2:
         region = next((r for r, keys in T2_REGION if any(k in f"-{s}-" for k in keys)), None)
